@@ -84,7 +84,7 @@ function goalLines(lh, la) {
 function countLines(key, market, prefix, mu, phi, span) {
   const e = pmfEntries(dist(mu, phi, Math.ceil(mu * 3 + 25)));
   const c = Math.round(mu), L = [];
-  for (let d = -span; d < span; d++) {
+  for (let d = -span; d < span; d += 0.5) {   // meias-linhas e linhas inteiras (asiáticas)
     const ln = c + d + 0.5;
     if (ln < 0.5) continue;
     L.push({ id: `${key}O${ln}`, market, label: `${prefix}Mais de ${num(ln)}`, ...settle(e, -ln) });

@@ -1,6 +1,7 @@
 import * as api from './api.js';
 import { METRICS, analyzeMatch, ev, fairOdd, politicaE } from './model.js';
 import { buildInsights, recentGames } from './insights.js';
+import { collect } from './odds.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -10,7 +11,7 @@ const date = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', mont
 const hour = t => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const SEASONS_BACK = 2;   // temporada atual + 2 anteriores (o decaimento cuida do peso)
 
-const state = { fixtures: [], fixture: null, result: null, odds: new Map(), market: 'Todos' };
+const state = { fixtures: [], fixture: null, result: null, odds: new Map(), books: new Map(), pinn: new Map(), market: 'Todos' };
 
 function msg(text, err = false) {
   const el = $('#msg');
@@ -95,12 +96,31 @@ $('#btnRun').onclick = async () => {
     msg('Ajustando forças da liga…');
     state.fixture = { ...fx, base: lg, seasons, n: matches.length };
     state.result = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t);
-    state.odds.clear();
+    state.odds.clear(); state.books.clear(); state.pinn.clear();
     state.market = 'Todos';
     msg('');
     render();
   } catch (e) { msg(e.message, true); }
   $('#btnRun').disabled = false;
+};
+
+// Melhor odd por linha entre as casas permitidas + Pinnacle sem margem como referência.
+$('#btnOdds').onclick = async () => {
+  if (!state.result) return;
+  $('#btnOdds').disabled = true;
+  msg('Buscando odds…');
+  try {
+    const { best, pinn } = collect(await api.fixtureOdds(state.fixture.id));
+    showQuota();
+    const ids = new Set(state.result.lines.map(l => l.id));
+    let n = 0;
+    for (const [id, b] of best) if (ids.has(id)) { state.odds.set(id, b.odd); state.books.set(id, b.book); n++; }
+    state.pinn = pinn;
+    msg(n ? '' : 'A API não tem odds para as linhas deste jogo (ainda).', !n);
+    renderLines();
+    renderRank();
+  } catch (e) { msg(e.message, true); }
+  $('#btnOdds').disabled = false;
 };
 
 function render() {
@@ -150,22 +170,33 @@ function evCells(line) {
 
 function renderLines() {
   const rows = state.result.lines.filter(l => state.market === 'Todos' || l.market === state.market);
-  $('#lines').innerHTML = `<tr><th>Mercado</th><th>Linha</th><th>Prob.</th><th>Faixa</th><th>Odd justa</th>
-    <th>Odd da casa</th><th>EV</th><th>EV pior caso</th><th></th></tr>` + rows.map(l => {
+  $('#lines').innerHTML = `<tr><th>Mercado</th><th>Linha</th><th>Modelo</th><th>Faixa</th><th>Odd justa</th>
+    <th>Pinnacle</th><th>Odd da casa</th><th>Casa</th><th>EV</th><th>EV pior caso</th><th></th></tr>` + rows.map(l => {
     const ps = l.sc.map(s => s.pWin);
     return `<tr data-id="${l.id}"><td>${l.market}</td><td>${l.label}</td><td>${pct(l.pWin)}</td>
       <td class="muted">${pct(Math.min(...ps))}–${pct(Math.max(...ps))}</td><td>${num(fairOdd(l))}</td>
+      <td>${pinnCell(l)}</td>
       <td><input type="number" step="0.01" min="1.01" inputmode="decimal" value="${state.odds.get(l.id) || ''}"></td>
-      ${evCells(l)}</tr>`;
+      <td class="book">${esc(state.books.get(l.id) || '')}</td>${evCells(l)}</tr>`;
   }).join('');
   for (const inp of $('#lines').querySelectorAll('input')) inp.oninput = () => {
     const tr = inp.closest('tr'), id = tr.dataset.id, v = parseFloat(inp.value);
-    if (v > 1) state.odds.set(id, v); else state.odds.delete(id);
+    if (v > 1) { state.odds.set(id, v); state.books.set(id, 'manual'); } else { state.odds.delete(id); state.books.delete(id); }
     const line = state.result.lines.find(l => l.id === id);
-    [...tr.children].slice(6).forEach(td => td.remove());
+    tr.children[7].textContent = state.books.get(id) || '';
+    [...tr.children].slice(8).forEach(td => td.remove());
     tr.insertAdjacentHTML('beforeend', evCells(line));
     renderRank();
   };
+}
+
+// Probabilidade da Pinnacle sem margem para a linha. Linha inteira/quarto: a Pinnacle devolve o push,
+// então comparamos pela probabilidade efetiva de ganho do modelo.
+function pinnCell(l) {
+  const p = state.pinn.get(l.id);
+  if (p == null) return '<span class="muted">—</span>';
+  const model = l.pWin / (l.pWin + l.pLose), d = model - p;
+  return `${pct(p)} <span class="${Math.abs(d) >= 0.05 ? (d > 0 ? 'pos' : 'neg') : 'muted'}">(${d >= 0 ? '+' : ''}${(d * 100).toFixed(1)})</span>`;
 }
 
 function renderRank() {
@@ -174,7 +205,9 @@ function renderRank() {
     .sort((a, b) => b.e.mid - a.e.mid);
   if (!rows.length) { $('#rank').innerHTML = '<span class="muted">Nenhuma odd informada ainda.</span>'; return; }
   $('#rank').innerHTML = '<div class="scroll"><table>' + rows.map(({ l, odd, e }) => `<tr><td>${l.market}</td><td>${l.label}</td>
-    <td>@ ${num(odd)}</td><td class="muted">justa ${num(fairOdd(l))}</td>
+    <td>@ ${num(odd)}</td><td class="book">${esc(state.books.get(l.id) || '')}</td>
+    <td class="muted">justa ${num(fairOdd(l))}</td>
+    <td class="muted">${state.pinn.has(l.id) ? `Pinnacle ${pct(state.pinn.get(l.id))}` : ''}</td>
     <td class="${e.mid > 0 ? 'pos' : 'neg'}">EV ${pct(e.mid)}</td>
     <td class="${e.low > 0 ? 'pos' : 'neg'}">pior caso ${pct(e.low)}</td>
     <td>${politicaE(odd).label}</td></tr>`).join('') + '</table></div>';
