@@ -1,11 +1,15 @@
 // Cliente da API-Football (v3). A chave fica só no localStorage deste navegador.
 
+import * as demo from './demo.js';
+
 const BASE = 'https://v3.football.api-sports.io';
 const KEY_STORE = 'af:key';
 const HOUR = 3600e3;
+const FINISHED = new Set(['FT', 'AET', 'PEN']);
 
 export const getKey = () => localStorage.getItem(KEY_STORE) || '';
 export const setKey = k => localStorage.setItem(KEY_STORE, k.trim());
+const isDemo = () => getKey() === 'demo';
 export let remaining = null;   // requisições restantes no dia, conforme o último cabeçalho
 
 async function call(path, params) {
@@ -20,65 +24,94 @@ async function call(path, params) {
   return json.response;
 }
 
+function load(key) {
+  try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
+}
+function save(key, d) {
+  try { localStorage.setItem(key, JSON.stringify(d)); } catch { /* cota cheia: segue sem cache */ }
+}
 async function cached(key, ttl, fn) {
-  try {
-    const hit = JSON.parse(localStorage.getItem(key));
-    if (hit && Date.now() - hit.t < ttl) return hit.d;
-  } catch {}
+  const hit = load(key);
+  if (hit && Date.now() - hit.t < ttl) return hit.d;
   const d = await fn();
-  try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), d })); } catch {}
+  save(key, { t: Date.now(), d });
   return d;
 }
 
-function normalize(fx, teamId) {
-  const home = fx.teams.home.id === teamId;
-  const opp = home ? fx.teams.away : fx.teams.home;
-  const ft = fx.score?.fulltime || {};
-  const gh = ft.home ?? fx.goals.home, ga = ft.away ?? fx.goals.away;
-  const st = {};
-  for (const s of fx.statistics || []) st[s.team.id] = Object.fromEntries(s.statistics.map(x => [x.type, x.value]));
-  const mine = st[teamId], theirs = st[opp.id];
-  const pair = type => (mine && theirs && Object.keys(mine).length
-    ? { f: Number(mine[type]) || 0, a: Number(theirs[type]) || 0 } : null);
-  return {
-    id: fx.fixture.id, date: fx.fixture.date.slice(0, 10), league: fx.league.name, home, opp: opp.name,
-    goals: { f: home ? gh : ga, a: home ? ga : gh },
-    corners: pair('Corner Kicks'), shots: pair('Total Shots'), sot: pair('Shots on Goal'),
-  };
-}
-
 export function searchTeams(q) {
-  if (getKey() === 'demo') return Promise.resolve(demoTeams(q));
+  if (isDemo()) return Promise.resolve(demo.searchTeams(q));
   return cached(`af:teams:${q.toLowerCase()}`, 30 * 24 * HOUR, async () =>
     (await call('/teams', { search: q })).map(r => ({ id: r.team.id, name: r.team.name, country: r.team.country })));
 }
 
-// Últimos n jogos encerrados do time, já com estatísticas (2 requisições).
-export function lastGames(teamId, n) {
-  if (getKey() === 'demo') return Promise.resolve(demoGames(teamId, n));
-  return cached(`af:games:${teamId}:${n}`, 3 * HOUR, async () => {
-    const list = await call('/fixtures', { team: teamId, last: n, status: 'FT-AET-PEN' });
-    if (!list.length) return [];
-    const full = await call('/fixtures', { ids: list.map(f => f.fixture.id).join('-') });
-    return full.map(f => normalize(f, teamId)).sort((a, b) => b.date.localeCompare(a.date));
-  });
+// Próximos jogos do time, com liga e temporada.
+export async function upcoming(teamId) {
+  if (isDemo()) return demo.upcoming(teamId);
+  return (await call('/fixtures', { team: teamId, next: 10 })).map(f => ({
+    id: f.fixture.id, t: f.fixture.timestamp * 1000,
+    league: { id: f.league.id, name: f.league.name, season: f.league.season, country: f.league.country },
+    home: { id: f.teams.home.id, name: f.teams.home.name },
+    away: { id: f.teams.away.id, name: f.teams.away.name },
+  }));
 }
 
-// ---- modo demonstração (chave "demo"): dados sintéticos para ver o app sem gastar requisições ----
-const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-function rng(seed) { let x = seed || 1; return () => ((x = (x * 1664525 + 1013904223) >>> 0) / 2 ** 32); }
-function pois(r, mu) { let l = Math.exp(-mu), k = 0, p = r(); while (p > l) { k++; p *= r(); } return k; }
+// Ligas (pontos corridos) que o time disputa na temporada.
+export function leaguesOf(teamId, season) {
+  if (isDemo()) return Promise.resolve(demo.leaguesOf());
+  return cached(`af:lgs:${teamId}:${season}`, 7 * 24 * HOUR, async () =>
+    (await call('/leagues', { team: teamId, season, type: 'league' }))
+      .map(r => ({ id: r.league.id, name: r.league.name, country: r.country?.name })));
+}
 
-function demoTeams(q) { return [{ id: hash(q.toLowerCase()), name: q, country: 'Demo' }]; }
-function demoGames(teamId, n) {
-  const r = rng(teamId), atk = 0.8 + r() * 0.8, def = 0.8 + r() * 0.8;
-  return Array.from({ length: n }, (_, i) => {
-    const home = r() < 0.5, adv = home ? 1.15 : 0.87;
-    const mk = (f, a) => ({ f: pois(r, f * atk * adv), a: pois(r, a * def / adv) });
-    return {
-      id: teamId + i, date: new Date(Date.now() - (i + 1) * 5 * 864e5).toISOString().slice(0, 10),
-      league: 'Demo', home, opp: `Adversário ${i + 1}`,
-      goals: mk(1.35, 1.2), corners: mk(5.1, 4.8), shots: mk(12.5, 11.5), sot: mk(4.4, 4),
-    };
-  });
+function compact(f) {
+  const ft = f.score?.fulltime || {};
+  return {
+    id: f.fixture.id, t: f.fixture.timestamp * 1000,
+    h: f.teams.home.id, a: f.teams.away.id, hn: f.teams.home.name, an: f.teams.away.name,
+    hg: ft.home ?? f.goals.home, ag: ft.away ?? f.goals.away,
+  };
+}
+
+// [dentro, fora, noGol, total, escanteios] do mandante e depois do visitante; null se não houver.
+function statsOf(f) {
+  const by = {};
+  for (const s of f.statistics || []) by[s.team.id] = Object.fromEntries(s.statistics.map(x => [x.type, x.value]));
+  const H = by[f.teams.home.id], A = by[f.teams.away.id];
+  if (!H || !A || (H['Total Shots'] == null && A['Total Shots'] == null)) return null;
+  const v = (o, k) => Number(o[k]) || 0;
+  return [H, A].flatMap(o => [v(o, 'Shots insidebox'), v(o, 'Shots outsidebox'), v(o, 'Shots on Goal'), v(o, 'Total Shots'), v(o, 'Corner Kicks')]);
+}
+
+const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+
+// Todos os jogos encerrados de uma liga/temporada, com estatísticas.
+// Jogo encerrado não muda: fica em cache e só os novos são baixados.
+export async function leagueMatches(leagueId, season, onProgress) {
+  if (isDemo()) return demo.leagueMatches(season);
+  const key = `af:lg:${leagueId}:${season}`;
+  const store = load(key) || { t: 0, m: {} };
+  if (Date.now() - store.t > 3 * HOUR) {
+    for (const f of await call('/fixtures', { league: leagueId, season }))
+      if (FINISHED.has(f.fixture.status.short) && !store.m[f.fixture.id]) store.m[f.fixture.id] = compact(f);
+    store.t = Date.now();
+  }
+  const pending = Object.values(store.m).filter(m => m.s === undefined).map(m => m.id);
+  const batches = chunk(chunk(pending, 20), 4);   // 20 jogos por requisição, 4 requisições em paralelo
+  let done = 0;
+  for (const group of batches) {
+    await Promise.all(group.map(async ids => {
+      const full = await call('/fixtures', { ids: ids.join('-') });
+      for (const f of full) if (store.m[f.fixture.id]) store.m[f.fixture.id].s = statsOf(f);
+      for (const id of ids) {
+        const m = store.m[id];
+        // sem estatística: marca como ausente, exceto jogo recente (a API pode publicar depois)
+        if (m.s === undefined && Date.now() - m.t > 2 * 24 * HOUR) m.s = null;
+      }
+      done += ids.length;
+      onProgress?.(done, pending.length);
+    }));
+    save(key, store);
+  }
+  save(key, store);
+  return Object.values(store.m).map(m => ({ ...m, s: m.s ?? null }));
 }

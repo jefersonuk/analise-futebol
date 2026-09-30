@@ -1,12 +1,16 @@
 import * as api from './api.js';
-import { MARKETS, analyze, ev, fairOdd, politicaE } from './model.js';
+import { METRICS, analyzeMatch, ev, fairOdd, politicaE } from './model.js';
+import { buildInsights, recentGames } from './insights.js';
 
 const $ = s => document.querySelector(s);
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pct = x => (x * 100).toFixed(1) + '%';
-const num = (x, d = 2) => x.toFixed(d);
+const num = (x, d = 2) => x.toFixed(d).replace('.', ',');
+const date = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+const hour = t => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const SEASONS_BACK = 2;   // temporada atual + 2 anteriores (o decaimento cuida do peso)
 
-const state = { teams: {}, games: { home: [], away: [] }, off: new Set(), odds: new Map(), result: null, market: 'Todos' };
+const state = { fixtures: [], fixture: null, result: null, odds: new Map(), market: 'Todos' };
 
 function msg(text, err = false) {
   const el = $('#msg');
@@ -28,69 +32,103 @@ $('#btnSaveKey').onclick = () => {
 };
 if (!api.getKey()) $('#keyBox').hidden = false;
 
-// ---- escolha dos times ----
-for (const box of document.querySelectorAll('.picker')) {
-  const side = box.dataset.side, input = box.querySelector('input'), sel = box.querySelector('select');
-  const search = async () => {
-    const q = input.value.trim();
-    if (q.length < 3) return msg('Digite ao menos 3 letras do nome do time.', true);
-    if (!api.getKey()) return msg('Informe a chave da API em ⚙️ Chave.', true);
-    msg('Buscando…');
-    try {
-      const list = await api.searchTeams(q);
-      showQuota();
-      if (!list.length) return msg(`Nenhum time encontrado para "${q}".`, true);
-      sel.innerHTML = list.map(t => `<option value="${t.id}">${esc(t.name)} — ${esc(t.country || '')}</option>`).join('');
-      sel.hidden = false;
-      sel.onchange = () => { state.teams[side] = list.find(t => t.id === Number(sel.value)); };
-      sel.onchange();
-      msg('');
-    } catch (e) { msg(e.message, true); }
-  };
-  box.querySelector('.search').onclick = search;
-  input.onkeydown = e => { if (e.key === 'Enter') search(); };
-  input.oninput = () => { delete state.teams[side]; sel.hidden = true; };
+// ---- time -> próximos jogos ----
+async function search() {
+  const q = $('#teamInput').value.trim();
+  if (q.length < 3) return msg('Digite ao menos 3 letras do nome do time.', true);
+  if (!api.getKey()) return msg('Informe a chave da API em ⚙️ Chave.', true);
+  msg('Buscando…');
+  try {
+    const list = await api.searchTeams(q);
+    showQuota();
+    if (!list.length) return msg(`Nenhum time encontrado para "${q}".`, true);
+    const sel = $('#teamSel');
+    sel.innerHTML = list.map(t => `<option value="${t.id}">${esc(t.name)} — ${esc(t.country)}</option>`).join('');
+    sel.hidden = false;
+    await loadFixtures();
+  } catch (e) { msg(e.message, true); }
 }
+async function loadFixtures() {
+  msg('Buscando próximos jogos…');
+  $('#btnRun').disabled = true;
+  try {
+    state.fixtures = await api.upcoming(Number($('#teamSel').value));
+    showQuota();
+    const sel = $('#fixSel');
+    sel.hidden = !state.fixtures.length;
+    if (!state.fixtures.length) return msg('Esse time não tem jogos agendados.', true);
+    sel.innerHTML = state.fixtures.map((f, i) =>
+      `<option value="${i}">${hour(f.t)} · ${esc(f.home.name)} x ${esc(f.away.name)} · ${esc(f.league.name)}</option>`).join('');
+    $('#btnRun').disabled = false;
+    msg('');
+  } catch (e) { msg(e.message, true); }
+}
+$('#btnSearch').onclick = search;
+$('#teamInput').onkeydown = e => { if (e.key === 'Enter') search(); };
+$('#teamSel').onchange = loadFixtures;
 
 // ---- análise ----
+async function baseLeague(fx) {
+  const s = fx.league.season;
+  const [lh, la] = await Promise.all([api.leaguesOf(fx.home.id, s), api.leaguesOf(fx.away.id, s)]);
+  const common = lh.filter(l => la.some(x => x.id === l.id));
+  return common.find(l => l.id === fx.league.id) || common[0] || null;
+}
+
 $('#btnRun').onclick = async () => {
-  const { home, away } = state.teams;
-  if (!home || !away) return msg('Busque e selecione os dois times.', true);
-  const n = Number($('#nGames').value);
+  const fx = state.fixtures[Number($('#fixSel').value)];
+  if (!fx) return;
   $('#btnRun').disabled = true;
-  msg('Baixando os últimos jogos…');
   try {
-    [state.games.home, state.games.away] = await Promise.all([api.lastGames(home.id, n), api.lastGames(away.id, n)]);
-    showQuota();
-    state.off.clear();
+    msg('Identificando a liga…');
+    const lg = await baseLeague(fx);
+    if (!lg) throw new Error('Os dois times não disputam a mesma liga nesta temporada: confronto entre ligas ainda não é suportado.');
+    const S = fx.league.season, seasons = [];
+    for (let s = S; s >= S - SEASONS_BACK; s--) if (s !== 2020) seasons.push(s);   // 2020/21 sem público distorce o mando
+    let matches = [];
+    for (const s of seasons) {
+      try {
+        matches = matches.concat(await api.leagueMatches(lg.id, s, (d, n) => msg(`Baixando ${lg.name} ${s}: ${d}/${n} jogos…`)));
+      } catch (e) { if (s === S) throw e; }
+      showQuota();
+    }
+    msg('Ajustando forças da liga…');
+    state.fixture = { ...fx, base: lg, seasons, n: matches.length };
+    state.result = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t);
     state.odds.clear();
+    state.market = 'Todos';
     msg('');
-    compute();
+    render();
   } catch (e) { msg(e.message, true); }
   $('#btnRun').disabled = false;
 };
 
-function compute() {
-  const on = side => state.games[side].filter(g => !state.off.has(`${side}:${g.id}`));
-  state.result = analyze(on('home'), on('away'));
+function render() {
+  const fx = state.fixture, r = state.result;
   $('#out').hidden = false;
+  $('#title').textContent = `${fx.home.name} x ${fx.away.name} — ${hour(fx.t)}`;
+  const cup = fx.base.id !== fx.league.id ? `Jogo de ${fx.league.name}; forças medidas em ${fx.base.name}. ` : '';
+  $('#basis').textContent = `${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
+    + `peso decrescente com o tempo (meia-vida ≈ 1 ano), ${(r.prep.coverage * 100).toFixed(0)}% com estatística de chutes.`;
+  if (!r.lines.length) return msg('Jogos insuficientes na liga para ajustar o modelo.', true);
   renderExpect();
+  $('#insights').innerHTML = buildInsights(r, fx.home.id, fx.away.id, { home: fx.home.name, away: fx.away.name })
+    .map(i => `<li class="${i.tone}">${esc(i.text)}</li>`).join('');
   renderChips();
   renderLines();
   renderRank();
   renderGames();
-  if (!state.result.exp.goals) msg('Menos de 3 jogos válidos para um dos times: amostra insuficiente.', true);
 }
 
 function renderExpect() {
-  const { exp, phi } = state.result;
-  $('#expect').innerHTML = Object.entries(MARKETS).map(([k, name]) => {
-    const e = exp[k];
-    if (!e) return `<div class="stat"><small>${name}</small><b>—</b><small>sem estatística</small></div>`;
-    const se = Math.hypot(e.seH, e.seA);
-    return `<div class="stat"><small>${name} esperados</small><b>${num(e.h + e.a)}</b>
+  const { pred, fits, phi } = state.result;
+  $('#expect').innerHTML = Object.entries(METRICS).map(([k, m]) => {
+    const e = pred[k];
+    if (!e) return `<div class="stat"><small>${m.name}</small><b>—</b><small>sem estatística na liga</small></div>`;
+    const lg = fits[k].avgH + fits[k].avgA;
+    return `<div class="stat"><small>${m.name} esperados</small><b>${num(e.h + e.a)}</b>
       <small>casa ${num(e.h)} · fora ${num(e.a)}</small>
-      <small>± ${num(se)} · ${e.n} jogos${k !== 'goals' ? ` · dispersão ${num(phi[k], 1)}` : ''}</small></div>`;
+      <small>média da liga ${num(lg)}${k !== 'goals' ? ` · dispersão ${num(phi[k])}` : ''}</small></div>`;
   }).join('');
 }
 
@@ -135,23 +173,20 @@ function renderRank() {
     .map(l => ({ l, odd: state.odds.get(l.id), e: ev(l, state.odds.get(l.id)) }))
     .sort((a, b) => b.e.mid - a.e.mid);
   if (!rows.length) { $('#rank').innerHTML = '<span class="muted">Nenhuma odd informada ainda.</span>'; return; }
-  $('#rank').innerHTML = '<table>' + rows.map(({ l, odd, e }) => `<tr><td>${l.market}</td><td>${l.label}</td>
+  $('#rank').innerHTML = '<div class="scroll"><table>' + rows.map(({ l, odd, e }) => `<tr><td>${l.market}</td><td>${l.label}</td>
     <td>@ ${num(odd)}</td><td class="muted">justa ${num(fairOdd(l))}</td>
     <td class="${e.mid > 0 ? 'pos' : 'neg'}">EV ${pct(e.mid)}</td>
     <td class="${e.low > 0 ? 'pos' : 'neg'}">pior caso ${pct(e.low)}</td>
-    <td>${politicaE(odd).label}</td></tr>`).join('') + '</table>';
+    <td>${politicaE(odd).label}</td></tr>`).join('') + '</table></div>';
 }
 
 function renderGames() {
-  const col = side => `<div class="games"><b>${esc(state.teams[side].name)}</b>` + state.games[side].map(g => {
-    const key = `${side}:${g.id}`, c = g.corners, s = g.shots;
-    return `<label><input type="checkbox" data-key="${key}" ${state.off.has(key) ? '' : 'checked'}>
-      <span>${g.date.slice(5)} ${g.home ? 'C' : 'F'} ${g.goals.f}–${g.goals.a} ${esc(g.opp)}</span>
-      <span>${c ? `esc ${c.f}–${c.a} · chu ${s.f}–${s.a}` : 'sem estat.'} · ${esc(g.league)}</span></label>`;
-  }).join('') + '</div>';
-  $('#games').innerHTML = col('home') + col('away');
-  for (const cb of $('#games').querySelectorAll('input')) cb.onchange = () => {
-    if (cb.checked) state.off.delete(cb.dataset.key); else state.off.add(cb.dataset.key);
-    compute();
-  };
+  const { prep } = state.result, fx = state.fixture;
+  const pair = p => (p ? `${p[0]}–${p[1]}` : '—');
+  const col = team => `<div class="games scroll"><b>${esc(team.name)}</b><table>
+    <tr><th>Data</th><th>Adversário</th><th>Placar</th><th>xG</th><th>Chutes</th><th>Esc.</th></tr>`
+    + recentGames(prep, team.id).map(g => `<tr><td>${date(g.t)} ${g.home ? 'C' : 'F'}</td><td>${esc(g.opp)}</td>
+      <td>${g.gf}–${g.ga}</td><td>${g.xf != null ? `${num(g.xf, 1)}–${num(g.xa, 1)}` : '—'}</td>
+      <td>${pair(g.shots)}</td><td>${pair(g.corners)}</td></tr>`).join('') + '</table></div>';
+  $('#games').innerHTML = col(fx.home) + col(fx.away);
 }

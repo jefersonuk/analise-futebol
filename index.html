@@ -22,29 +22,29 @@
 </section>
 
 <section class="card">
-  <div class="teams">
-    <div class="picker" data-side="home">
-      <label>Mandante</label>
-      <div class="row"><input type="text" placeholder="Nome do time"><button class="search">Buscar</button></div>
-      <select hidden></select>
-    </div>
-    <div class="picker" data-side="away">
-      <label>Visitante</label>
-      <div class="row"><input type="text" placeholder="Nome do time"><button class="search">Buscar</button></div>
-      <select hidden></select>
-    </div>
-  </div>
+  <label for="teamInput">Time</label>
   <div class="row">
-    <label for="nGames">Últimos</label>
-    <select id="nGames"><option>5</option><option selected>10</option><option>15</option><option>20</option></select>
-    <span>jogos de cada time</span>
-    <button id="btnRun" class="primary">Analisar</button>
+    <input id="teamInput" type="text" placeholder="Nome de um dos times do jogo">
+    <button id="btnSearch">Buscar</button>
+  </div>
+  <select id="teamSel" hidden></select>
+  <select id="fixSel" hidden></select>
+  <div class="row">
+    <button id="btnRun" class="primary" disabled>Analisar jogo</button>
   </div>
   <p id="msg" class="msg" hidden></p>
 </section>
 
 <main id="out" hidden>
+  <section class="card">
+    <h2 id="title"></h2>
+    <p id="basis" class="muted"></p>
+  </section>
   <section id="expect" class="cards"></section>
+  <section class="card">
+    <h2>Leitura do confronto</h2>
+    <ul id="insights" class="insights"></ul>
+  </section>
   <section class="card">
     <h2>Melhores linhas <span class="muted">(preencha a odd da casa na tabela abaixo)</span></h2>
     <div id="rank"></div>
@@ -54,7 +54,7 @@
     <div class="scroll"><table id="lines"></table></div>
   </section>
   <section class="card">
-    <h2>Jogos usados <span class="muted">(desmarque amistosos ou jogos atípicos)</span></h2>
+    <h2>Últimos jogos na liga <span class="muted">(xG-proxy = chutes dentro/fora da área, calibrado na liga)</span></h2>
     <div id="games" class="teams"></div>
   </section>
 </main>

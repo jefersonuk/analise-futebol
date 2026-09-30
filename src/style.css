@@ -41,6 +41,15 @@ td input { width: 72px; padding: 5px 7px; text-align: right; }
 .tag { font-size: 12px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); }
 .tag.ok { border-color: var(--accent); color: var(--accent); }
 .tag.no { border-color: var(--bad); color: var(--bad); }
-.games label { display: flex; gap: 8px; padding: 4px 0; color: var(--text); font-size: 13px; border-bottom: 1px solid var(--line); }
-.games label span:last-child { margin-left: auto; color: var(--muted); }
+#teamInput { flex: 1; min-width: 0; }
+#teamSel, #fixSel { width: 100%; margin-top: 8px; }
+.insights { margin: 0; padding: 0; list-style: none; }
+.insights li { padding: 7px 0 7px 26px; border-bottom: 1px solid var(--line); position: relative; }
+.insights li::before { position: absolute; left: 0; }
+.insights .info::before { content: 'ℹ️'; }
+.insights .up::before { content: '📈'; }
+.insights .down::before { content: '📉'; }
+.insights .warn::before { content: '⚠️'; }
+.games table { font-size: 13px; }
+.games td, .games th { padding: 4px 6px; }
 @media (max-width: 640px) { .teams { grid-template-columns: 1fr; } .cards { grid-template-columns: 1fr 1fr; } }

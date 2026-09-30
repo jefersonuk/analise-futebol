@@ -1,53 +1,11 @@
-// Modelo estatístico: médias ponderadas por mando -> expectativa do confronto -> probabilidade de cada linha.
+// Probabilidades de cada linha a partir das forças da liga (ratings.js).
 
-export const MARKETS = { goals: 'Gols', corners: 'Escanteios', shots: 'Chutes', sot: 'Chutes no gol' };
-const KEYS = Object.keys(MARKETS);
-const VENUE_WEIGHT = 2;   // jogo no mesmo mando do confronto pesa o dobro
-const MIN_GAMES = 3;
+import { METRICS, fit, predict, prepare } from './ratings.js';
 
-function wstats(vals) {
-  const sw = vals.reduce((s, x) => s + x.w, 0);
-  if (vals.length < MIN_GAMES) return null;
-  const mean = vals.reduce((s, x) => s + x.v * x.w, 0) / sw;
-  const varr = vals.reduce((s, x) => s + x.w * (x.v - mean) ** 2, 0) / sw;
-  const nEff = sw * sw / vals.reduce((s, x) => s + x.w * x.w, 0);
-  return { mean, se: Math.sqrt(varr / Math.max(nEff - 1, 1)), n: vals.length };
-}
-
-// Médias a favor (f) e contra (a) de um time, por métrica.
-export function teamRates(games, atHome) {
-  const out = {};
-  for (const k of KEYS) {
-    const rows = games.filter(g => g[k]);
-    const w = g => (g.home === atHome ? VENUE_WEIGHT : 1);
-    out[k] = {
-      f: wstats(rows.map(g => ({ v: g[k].f, w: w(g) }))),
-      a: wstats(rows.map(g => ({ v: g[k].a, w: w(g) }))),
-    };
-  }
-  return out;
-}
-
-// Expectativa do confronto: média entre o que um produz e o que o outro cede.
-function expectation(H, A, k) {
-  if (!H[k].f || !H[k].a || !A[k].f || !A[k].a) return null;
-  return {
-    h: (H[k].f.mean + A[k].a.mean) / 2,
-    a: (A[k].f.mean + H[k].a.mean) / 2,
-    seH: Math.hypot(H[k].f.se, A[k].a.se) / 2,
-    seA: Math.hypot(A[k].f.se, H[k].a.se) / 2,
-    n: Math.min(H[k].f.n, A[k].f.n),
-  };
-}
-
-// Razão variância/média do total por jogo (1 = Poisson), limitada a [1, 2.5].
-export function dispersion(games, k) {
-  const t = games.filter(g => g[k]).map(g => g[k].f + g[k].a);
-  if (t.length < MIN_GAMES) return 1;
-  const m = t.reduce((s, v) => s + v, 0) / t.length;
-  const v = t.reduce((s, x) => s + (x - m) ** 2, 0) / (t.length - 1);
-  return m > 0 ? Math.min(2.5, Math.max(1, v / m)) : 1;
-}
+export { METRICS };
+export const RHO = -0.13;          // correção Dixon-Coles para placares baixos
+const MAXG = 10;
+const VMR_CAP = { corners: 1.35, shots: 1.6, sot: 1.6 };
 
 // PMF de contagem com média mu e variância phi*mu (Poisson se phi ~ 1, senão binomial negativa).
 export function dist(mu, phi, max) {
@@ -63,86 +21,123 @@ export function dist(mu, phi, max) {
   return p;
 }
 
-const sum = (arr, test) => arr.reduce((s, p, k) => (test(k) ? s + p : s), 0);
-const sign = h => (h > 0 ? '+' : '') + h;
-
-function goalLines(lh, la) {
-  const ph = dist(lh, 1, 12), pa = dist(la, 1, 12);
-  const diff = new Map(), tot = new Array(25).fill(0);
-  let btts = 0;
-  for (let i = 0; i <= 12; i++) for (let j = 0; j <= 12; j++) {
-    const p = ph[i] * pa[j];
+// Matriz de placares Dixon-Coles -> distribuições de diferença e de total.
+export function scoreMatrix(lh, la, rho = RHO) {
+  const ph = dist(lh, 1, MAXG), pa = dist(la, 1, MAXG);
+  const tau = (i, j) => (i === 0 && j === 0 ? 1 - lh * la * rho : i === 0 && j === 1 ? 1 + lh * rho
+    : i === 1 && j === 0 ? 1 + la * rho : i === 1 && j === 1 ? 1 - rho : 1);
+  const diff = new Map(), tot = new Map();
+  let z = 0, btts = 0;
+  for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
+    const p = Math.max(0, tau(i, j) * ph[i] * pa[j]);
+    z += p;
     diff.set(i - j, (diff.get(i - j) || 0) + p);
-    tot[i + j] += p;
+    tot.set(i + j, (tot.get(i + j) || 0) + p);
     if (i && j) btts += p;
   }
-  const pd = test => [...diff].reduce((s, [d, p]) => (test(d) ? s + p : s), 0);
+  const norm = m => [...m].map(([v, p]) => [v, p / z]);
+  return { diff: norm(diff), tot: norm(tot), btts: btts / z };
+}
+
+// Liquidação asiática da aposta "X + line > 0". Linhas de quarto = meia aposta em cada meia-linha.
+// Devolve probabilidades efetivas: EV = pWin·(odd−1) − pLose.
+export function settle(entries, line) {
+  if (Math.round(line * 4) % 2 !== 0) {
+    const a = settle(entries, line - 0.25), b = settle(entries, line + 0.25);
+    return { pWin: (a.pWin + b.pWin) / 2, pLose: (a.pLose + b.pLose) / 2 };
+  }
+  let pWin = 0, pLose = 0;
+  for (const [v, p] of entries) {
+    const r = v + line;
+    if (r > 1e-9) pWin += p; else if (r < -1e-9) pLose += p;
+  }
+  return { pWin, pLose };
+}
+
+const fmt = x => (x > 0 ? '+' : x < 0 ? '−' : '') + String(Math.abs(x)).replace('.', ',');
+const num = x => String(x).replace('.', ',');
+const neg = entries => entries.map(([v, p]) => [-v, p]);
+const pmfEntries = pmf => pmf.map((p, k) => [k, p]);
+
+function goalLines(lh, la) {
+  const { diff, tot, btts } = scoreMatrix(lh, la);
   const L = [];
-  const add = (id, market, label, pWin, pLose) => L.push({ id, market, label, pWin, pLose });
-  const home = pd(d => d > 0), draw = pd(d => d === 0), away = pd(d => d < 0);
-  add('1', '1X2', 'Casa vence', home, 1 - home);
-  add('X', '1X2', 'Empate', draw, 1 - draw);
-  add('2', '1X2', 'Fora vence', away, 1 - away);
-  for (let h = -2.5; h <= 2.5; h += 0.5) {
-    const w = pd(d => d + h > 0), l = pd(d => d + h < 0);
-    add(`ahH${h}`, 'Handicap', `Casa ${sign(h)}`, w, l);
-    add(`ahA${h}`, 'Handicap', `Fora ${sign(-h)}`, l, w);
+  const add = (id, market, label, s) => L.push({ id, market, label, ...s });
+  const p = test => diff.reduce((s, [d, q]) => (test(d) ? s + q : s), 0);
+  const home = p(d => d > 0), draw = p(d => d === 0), away = p(d => d < 0);
+  add('1', '1X2', 'Casa vence', { pWin: home, pLose: 1 - home });
+  add('X', '1X2', 'Empate', { pWin: draw, pLose: 1 - draw });
+  add('2', '1X2', 'Fora vence', { pWin: away, pLose: 1 - away });
+  for (let h = -3; h <= 3; h += 0.25) {
+    add(`ahH${h}`, 'Handicap asiático', `Casa ${fmt(h)}`, settle(diff, h));
+    add(`ahA${-h}`, 'Handicap asiático', `Fora ${fmt(-h)}`, settle(neg(diff), -h));
   }
-  for (let ln = 0.5; ln <= 5.5; ln++) {
-    const o = sum(tot, k => k > ln);
-    add(`gO${ln}`, 'Gols', `Mais de ${ln}`, o, 1 - o);
-    add(`gU${ln}`, 'Gols', `Menos de ${ln}`, 1 - o, o);
+  for (let ln = 0.5; ln <= 5.5; ln += 0.25) {
+    add(`gO${ln}`, 'Total de gols', `Mais de ${num(ln)}`, settle(tot, -ln));
+    add(`gU${ln}`, 'Total de gols', `Menos de ${num(ln)}`, settle(neg(tot), ln));
   }
-  add('bttsY', 'Ambas marcam', 'Sim', btts, 1 - btts);
-  add('bttsN', 'Ambas marcam', 'Não', 1 - btts, btts);
+  add('bttsY', 'Ambas marcam', 'Sim', { pWin: btts, pLose: 1 - btts });
+  add('bttsN', 'Ambas marcam', 'Não', { pWin: 1 - btts, pLose: btts });
   return L;
 }
 
-function totalLines(k, mu, phi, center, span) {
-  const pmf = dist(mu, phi, Math.ceil(mu * 3 + 20));
-  const L = [];
+function countLines(key, market, prefix, mu, phi, span) {
+  const e = pmfEntries(dist(mu, phi, Math.ceil(mu * 3 + 25)));
+  const c = Math.round(mu), L = [];
   for (let d = -span; d < span; d++) {
-    const ln = center + d + 0.5;
+    const ln = c + d + 0.5;
     if (ln < 0.5) continue;
-    const u = sum(pmf, x => x < ln);
-    L.push({ id: `${k}O${ln}`, market: MARKETS[k], label: `Mais de ${ln}`, pWin: 1 - u, pLose: u });
-    L.push({ id: `${k}U${ln}`, market: MARKETS[k], label: `Menos de ${ln}`, pWin: u, pLose: 1 - u });
+    L.push({ id: `${key}O${ln}`, market, label: `${prefix}Mais de ${num(ln)}`, ...settle(e, -ln) });
+    L.push({ id: `${key}U${ln}`, market, label: `${prefix}Menos de ${num(ln)}`, ...settle(neg(e), ln) });
   }
   return L;
 }
 
-function buildLines(exp, phi, centers, shift = [0, 0]) {
-  const v = k => ({
-    h: Math.max(0.05, exp[k].h + shift[0] * exp[k].seH),
-    a: Math.max(0.05, exp[k].a + shift[1] * exp[k].seA),
-  });
+function buildLines(pred, phi, shift = [0, 0]) {
+  const v = k => ({ h: pred[k].h * Math.exp(shift[0] * pred[k].seH), a: pred[k].a * Math.exp(shift[1] * pred[k].seA) });
   let L = [];
-  if (exp.goals) { const g = v('goals'); L = goalLines(g.h, g.a); }
+  if (pred.goals) { const g = v('goals'); L = goalLines(g.h, g.a); }
   for (const k of ['corners', 'shots', 'sot']) {
-    if (!exp[k]) continue;
-    const x = v(k);
-    L = L.concat(totalLines(k, x.h + x.a, phi[k], centers[k], k === 'shots' ? 5 : 4));
+    if (!pred[k]) continue;
+    const x = v(k), name = METRICS[k].name;
+    L = L.concat(countLines(k, `Total de ${name.toLowerCase()}`, '', x.h + x.a, phi[k], k === 'shots' ? 5 : 4));
+    if (k === 'corners') {
+      L = L.concat(countLines('cH', 'Escanteios por time', 'Casa: ', x.h, phi[k], 3));
+      L = L.concat(countLines('cA', 'Escanteios por time', 'Fora: ', x.a, phi[k], 3));
+    }
   }
   return L;
+}
+
+// Dispersão residual (variância/média) do total na liga, dado o que o modelo prevê para cada jogo.
+function residualVMR(f, prep, key) {
+  const i = METRICS[key].idx;
+  let num = 0, den = 0;
+  for (const m of prep.rows) {
+    if (!m.s) continue;
+    const p = predict(f, m.h, m.a), mu = p.h + p.a, x = m.s[i] + m.s[5 + i];
+    num += m.w * (x - mu) ** 2; den += m.w * mu;
+  }
+  return den ? Math.min(VMR_CAP[key], Math.max(1, num / den)) : 1.15;
 }
 
 const SCENARIOS = [[1, -1], [-1, 1], [1, 1], [-1, -1]];   // ±1 erro-padrão em cada lado
 
-export function analyze(homeGames, awayGames) {
-  const H = teamRates(homeGames, true), A = teamRates(awayGames, false);
-  const all = homeGames.concat(awayGames);
-  const exp = {}, phi = {}, centers = {};
-  for (const k of KEYS) {
-    exp[k] = expectation(H, A, k);
-    phi[k] = k === 'goals' ? 1 : dispersion(all, k);
-    if (exp[k]) centers[k] = Math.round(exp[k].h + exp[k].a);
+export function analyzeMatch(matches, home, away, refTime) {
+  const prep = prepare(matches, refTime);
+  const fits = {}, pred = {}, phi = { goals: 1 };
+  for (const k of Object.keys(METRICS)) {
+    fits[k] = fit(k, prep);
+    pred[k] = fits[k] ? predict(fits[k], home, away) : null;
+    if (fits[k] && k !== 'goals') phi[k] = residualVMR(fits[k], prep, k);
   }
-  const base = buildLines(exp, phi, centers);
-  const alt = SCENARIOS.map(s => new Map(buildLines(exp, phi, centers, s).map(l => [l.id, l])));
+  if (!pred.goals) return { prep, fits, pred, phi, lines: [] };
+  const base = buildLines(pred, phi);
+  const alt = SCENARIOS.map(s => new Map(buildLines(pred, phi, s).map(l => [l.id, l])));
   const lines = base
     .map(l => ({ ...l, sc: alt.map(m => m.get(l.id)) }))
-    .filter(l => l.pWin >= 0.2 && l.pWin <= 0.8);
-  return { exp, phi, lines };
+    .filter(l => l.pWin >= 0.2 && l.pWin <= 0.8 && l.pWin + l.pLose > 0.3);
+  return { prep, fits, pred, phi, lines };
 }
 
 export const fairOdd = l => 1 + l.pLose / l.pWin;
