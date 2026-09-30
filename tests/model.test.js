@@ -82,6 +82,16 @@ test('análise completa na liga demo: 1X2 soma 1, totais complementares, dispers
   assert.ok(res.prep.coverage === 1);
 });
 
+test('toda linha tem os 4 cenários de incerteza, mesmo com média perto de x,5', () => {
+  const matches = leagueMatches(2025).concat(leagueMatches(2024));
+  for (let a = 9002; a <= 9020; a++) {
+    const res = analyzeMatch(matches, 9001, a, Date.UTC(2026, 0, 10));
+    for (const l of res.lines) assert.ok(l.sc.length === 4 && l.sc.every(Boolean), l.id);
+    assert.ok(res.lines.some(l => l.id.startsWith('cornersO')));
+    assert.deepEqual(res.lines.filter(l => l.market === '1X2').map(l => l.id), ['1', 'X', '2']);
+  }
+});
+
 test('política E por faixa de odd', () => {
   assert.equal(politicaE(2.09).factor, 1);
   assert.equal(politicaE(2.1).factor, 0.5);

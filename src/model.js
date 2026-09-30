@@ -81,9 +81,10 @@ function goalLines(lh, la) {
   return L;
 }
 
-function countLines(key, market, prefix, mu, phi, span) {
+// c = centro das linhas, fixo entre cenários para que todas as linhas existam em todos eles.
+function countLines(key, market, prefix, mu, phi, span, c) {
   const e = pmfEntries(dist(mu, phi, Math.ceil(mu * 3 + 25)));
-  const c = Math.round(mu), L = [];
+  const L = [];
   for (let d = -span; d < span; d += 0.5) {   // meias-linhas e linhas inteiras (asiáticas)
     const ln = c + d + 0.5;
     if (ln < 0.5) continue;
@@ -99,11 +100,11 @@ function buildLines(pred, phi, shift = [0, 0]) {
   if (pred.goals) { const g = v('goals'); L = goalLines(g.h, g.a); }
   for (const k of ['corners', 'shots', 'sot']) {
     if (!pred[k]) continue;
-    const x = v(k), name = METRICS[k].name;
-    L = L.concat(countLines(k, `Total de ${name.toLowerCase()}`, '', x.h + x.a, phi[k], k === 'shots' ? 5 : 4));
+    const x = v(k), name = METRICS[k].name, c = { t: Math.round(pred[k].h + pred[k].a), h: Math.round(pred[k].h), a: Math.round(pred[k].a) };
+    L = L.concat(countLines(k, `Total de ${name.toLowerCase()}`, '', x.h + x.a, phi[k], k === 'shots' ? 5 : 4, c.t));
     if (k === 'corners') {
-      L = L.concat(countLines('cH', 'Escanteios por time', 'Casa: ', x.h, phi[k], 3));
-      L = L.concat(countLines('cA', 'Escanteios por time', 'Fora: ', x.a, phi[k], 3));
+      L = L.concat(countLines('cH', 'Escanteios por time', 'Casa: ', x.h, phi[k], 3, c.h));
+      L = L.concat(countLines('cA', 'Escanteios por time', 'Fora: ', x.a, phi[k], 3, c.a));
     }
   }
   return L;
@@ -122,6 +123,7 @@ function residualVMR(f, prep, key) {
 }
 
 const SCENARIOS = [[1, -1], [-1, 1], [1, 1], [-1, -1]];   // ±1 erro-padrão em cada lado
+const ALWAYS = new Set(['1X2', 'Ambas marcam']);          // mercados exibidos inteiros, qualquer probabilidade
 
 export function analyzeMatch(matches, home, away, refTime) {
   const prep = prepare(matches, refTime);
@@ -136,7 +138,8 @@ export function analyzeMatch(matches, home, away, refTime) {
   const alt = SCENARIOS.map(s => new Map(buildLines(pred, phi, s).map(l => [l.id, l])));
   const lines = base
     .map(l => ({ ...l, sc: alt.map(m => m.get(l.id)) }))
-    .filter(l => l.pWin >= 0.2 && l.pWin <= 0.8 && l.pWin + l.pLose > 0.3);
+    .filter(l => l.sc.every(Boolean) && (ALWAYS.has(l.market)
+      || (l.pWin >= 0.15 && l.pWin <= 0.85 && l.pWin + l.pLose > 0.3)));
   return { prep, fits, pred, phi, lines };
 }
 
