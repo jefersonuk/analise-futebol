@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Análise de Jogos</title>
+<link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+<header>
+  <h1>📊 Análise de Jogos</h1>
+  <span id="quota" class="muted"></span>
+  <button id="btnKey" class="ghost">⚙️ Chave</button>
+</header>
+
+<section id="keyBox" class="card" hidden>
+  <label for="keyInput">Chave da API-Football (fica só neste navegador; digite <code>demo</code> para dados fictícios)</label>
+  <div class="row">
+    <input id="keyInput" type="password" autocomplete="off" placeholder="x-apisports-key">
+    <button id="btnSaveKey">Salvar</button>
+  </div>
+</section>
+
+<section class="card">
+  <div class="teams">
+    <div class="picker" data-side="home">
+      <label>Mandante</label>
+      <div class="row"><input type="text" placeholder="Nome do time"><button class="search">Buscar</button></div>
+      <select hidden></select>
+    </div>
+    <div class="picker" data-side="away">
+      <label>Visitante</label>
+      <div class="row"><input type="text" placeholder="Nome do time"><button class="search">Buscar</button></div>
+      <select hidden></select>
+    </div>
+  </div>
+  <div class="row">
+    <label for="nGames">Últimos</label>
+    <select id="nGames"><option>5</option><option selected>10</option><option>15</option><option>20</option></select>
+    <span>jogos de cada time</span>
+    <button id="btnRun" class="primary">Analisar</button>
+  </div>
+  <p id="msg" class="msg" hidden></p>
+</section>
+
+<main id="out" hidden>
+  <section id="expect" class="cards"></section>
+  <section class="card">
+    <h2>Melhores linhas <span class="muted">(preencha a odd da casa na tabela abaixo)</span></h2>
+    <div id="rank"></div>
+  </section>
+  <section class="card">
+    <div id="chips" class="chips"></div>
+    <div class="scroll"><table id="lines"></table></div>
+  </section>
+  <section class="card">
+    <h2>Jogos usados <span class="muted">(desmarque amistosos ou jogos atípicos)</span></h2>
+    <div id="games" class="teams"></div>
+  </section>
+</main>
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>
