@@ -63,10 +63,11 @@ export function leaguesOf(teamId, season) {
       .map(r => ({ id: r.league.id, name: r.league.name, country: r.country?.name })));
 }
 
-// Odds pré-jogo de todas as casas para um jogo (cache de 10 minutos).
+// Odds pré-jogo da Pinnacle (bookmaker 4) para um jogo (cache de 10 minutos).
 export function fixtureOdds(fixtureId) {
   if (isDemo()) return Promise.resolve([]);
-  return cached(`af:odds:${fixtureId}`, 600e3, async () => (await call('/odds', { fixture: fixtureId }))[0]?.bookmakers || []);
+  return cached(`af:odds:${fixtureId}`, 600e3, async () =>
+    (await call('/odds', { fixture: fixtureId, bookmaker: 4 }))[0]?.bookmakers || []);
 }
 
 function compact(f) {

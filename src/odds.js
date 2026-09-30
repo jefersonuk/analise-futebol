@@ -1,8 +1,7 @@
-// Odds pré-jogo da API-Football -> linhas do modelo.
-// Melhor odd entre as casas permitidas e probabilidade da Pinnacle sem margem (método power).
+// Odds pré-jogo da Pinnacle (a casa que regula o mercado) -> linhas do modelo,
+// com a probabilidade sem margem (método power).
 
 export const PINNACLE = 4;
-const BLOCKED = new Set([PINNACLE, 2]);   // Pinnacle: só referência (casa vetada). Marathonbet: lista "não usar".
 
 const n = s => String(parseFloat(s));   // "2.50" -> "2.5", "-0" -> "0"
 
@@ -38,23 +37,21 @@ export function devig(odds) {
   return q.map(x => x ** ((lo + hi) / 2));
 }
 
+// odds: id da linha -> odd da Pinnacle; fair: id -> probabilidade sem margem.
 export function collect(bookmakers) {
-  const best = new Map(), pinn = new Map(), groups = new Map();
-  for (const b of bookmakers) for (const bet of b.bets) for (const val of bet.values) {
+  const odds = new Map(), fair = new Map(), groups = new Map();
+  const pin = bookmakers.find(b => b.id === PINNACLE);
+  for (const bet of pin?.bets || []) for (const val of bet.values) {
     const map = mapValue(bet.id, val.value), odd = parseFloat(val.odd);
     if (!map || !(odd > 1)) continue;
-    if (b.id === PINNACLE) {
-      const key = `${bet.id}|${map.group}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push({ id: map.id, odd });
-    }
-    if (BLOCKED.has(b.id)) continue;
-    const cur = best.get(map.id);
-    if (!cur || odd > cur.odd) best.set(map.id, { odd, book: b.name });
+    odds.set(map.id, odd);
+    const key = `${bet.id}|${map.group}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ id: map.id, odd });
   }
   for (const legs of groups.values()) {
     if (legs.length < 2) continue;
-    devig(legs.map(l => l.odd)).forEach((p, i) => pinn.set(legs[i].id, p));
+    devig(legs.map(l => l.odd)).forEach((p, i) => fair.set(legs[i].id, p));
   }
-  return { best, pinn };
+  return { odds, fair };
 }

@@ -26,13 +26,13 @@ test('devig power soma 1 e puxa mais margem do azarão', () => {
   assert.ok(p[2] < prop[2] / z && p[0] > prop[0] / z);
 });
 
-test('mapeia mercados e ignora Pinnacle/Marathonbet na melhor odd', () => {
-  const { best, pinn } = collect(books);
-  assert.deepEqual(best.get('2'), { odd: 5.75, book: 'Bet365' });
-  assert.equal(best.get('ahH-1.25').odd, 2.0);
-  assert.equal(best.get('ahA1.25').odd, 1.8);   // "Away -1.25" = visitante +1,25
-  assert.equal(best.get('gO3').odd, 1.76);
-  assert.ok(!best.has('cornersO9.5'));           // só a Pinnacle ofereceu
-  near(pinn.get('cornersO9.5') + pinn.get('cornersU9.5'), 1);
-  near(pinn.get('1') + pinn.get('X') + pinn.get('2'), 1);
+test('usa só a Pinnacle e mapeia os mercados', () => {
+  const { odds, fair } = collect(books);
+  assert.equal(odds.get('2'), 5.48);
+  assert.equal(odds.get('ahH-1.25'), 2.03);
+  assert.equal(odds.get('ahA1.25'), 1.81);   // "Away -1.25" = visitante +1,25
+  assert.equal(odds.get('cornersO9.5'), 1.69);
+  assert.ok(!odds.has('gO3'));               // só a Bet365 ofereceu
+  near(fair.get('cornersO9.5') + fair.get('cornersU9.5'), 1);
+  near(fair.get('1') + fair.get('X') + fair.get('2'), 1);
 });

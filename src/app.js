@@ -104,19 +104,19 @@ $('#btnRun').onclick = async () => {
   $('#btnRun').disabled = false;
 };
 
-// Melhor odd por linha entre as casas permitidas + Pinnacle sem margem como referência.
+// Odds da Pinnacle em cada linha + probabilidade dela sem margem.
 $('#btnOdds').onclick = async () => {
   if (!state.result) return;
   $('#btnOdds').disabled = true;
   msg('Buscando odds…');
   try {
-    const { best, pinn } = collect(await api.fixtureOdds(state.fixture.id));
+    const { odds, fair } = collect(await api.fixtureOdds(state.fixture.id));
     showQuota();
     const ids = new Set(state.result.lines.map(l => l.id));
     let n = 0;
-    for (const [id, b] of best) if (ids.has(id)) { state.odds.set(id, b.odd); state.books.set(id, b.book); n++; }
-    state.pinn = pinn;
-    msg(n ? '' : 'A API não tem odds para as linhas deste jogo (ainda).', !n);
+    for (const [id, odd] of odds) if (ids.has(id)) { state.odds.set(id, odd); state.books.set(id, 'Pinnacle'); n++; }
+    state.pinn = fair;
+    msg(n ? '' : 'A API não tem odds da Pinnacle para as linhas deste jogo (ainda).', !n);
     renderLines();
     renderRank();
   } catch (e) { msg(e.message, true); }
