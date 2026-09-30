@@ -53,6 +53,19 @@ function profile(fits, team, name) {
   return parts.length ? { tone: 'info', text: `${name}: ${parts.join(' · ')}. Forças já ajustadas pelo nível dos adversários.` } : null;
 }
 
+// Mando próprio do time além do mando da liga (altitude, viagem, estádio).
+function venue(fits, team, name, atHome) {
+  const g = fits.goals.gap?.get(team);
+  if (!g || Math.abs(g - 1) < 0.06) return null;
+  const strong = g > 1, eff = atHome ? g : 1 / g;
+  return {
+    tone: (atHome ? strong : !strong) ? 'up' : 'down',
+    text: `${name} tem mando próprio ${strong ? 'forte' : 'fraco'}: em casa produz ${pct(g - 1)} e cede ${pct(1 / g - 1)} além do mando da liga; `
+      + `fora, o inverso. Neste jogo ${atHome ? 'em casa' : 'fora'}: gols a favor ${pct(eff - 1)}.`
+      + (strong ? ' Padrão típico de altitude ou viagem longa.' : ''),
+  };
+}
+
 export function buildInsights(res, home, away, names) {
   const { fits, pred, prep } = res;
   const out = [];
@@ -68,9 +81,10 @@ export function buildInsights(res, home, away, names) {
   out.push({ tone: 'info', text: `Mando na liga: o mandante produz ${pct(fits.goals.home - 1)} em gols (xG-proxy + gols)`
     + (fits.corners ? ` e ${pct(fits.corners.home - 1)} em escanteios.` : '.') });
 
-  for (const [t, name] of [[home, names.home], [away, names.away]]) {
-    const p = profile(fits, t, name);
+  for (const [t, name, atHome] of [[home, names.home, true], [away, names.away, false]]) {
+    const p = profile(fits, t, name), v = venue(fits, t, name, atHome);
     if (p) out.push(p);
+    if (v) out.push(v);
     out.push(...finishing(recentGames(prep, t), name));
   }
 

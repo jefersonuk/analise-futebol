@@ -59,55 +59,83 @@ export function fit(key, prep, iters = 40) {
   let bH = sh / sw, bA = sa / sw;
   const avgH = bH, avgA = bA;
 
+  // gap[t]: mando próprio do time além do mando da liga (altitude, viagem, estádio).
+  // Em casa ele produz ×gap e cede ÷gap; fora, o inverso. att/def ficam neutros de mando.
+  const gap = new Map([...teams].map(t => [t, 1]));
+  const g = t => gap.get(t);
+  const eH = o => bH * att.get(o.h) * def.get(o.a) * g(o.h) * g(o.a);
+  const eA = o => bA * att.get(o.a) * def.get(o.h) / (g(o.h) * g(o.a));
   const acc = () => new Map([...teams].map(t => [t, [0, 0]]));
-  let fA, fD;
+
+  let fA, fD, fG;
   for (let it = 0; it < iters; it++) {
     const b = (bH + bA) / 2;
     fA = acc();
     for (const o of obs) {
-      const eh = fA.get(o.h), ea = fA.get(o.a);
-      eh[0] += o.w * o.oh; eh[1] += o.w * bH * def.get(o.a);
-      ea[0] += o.w * o.oa; ea[1] += o.w * bA * def.get(o.h);
+      const x = fA.get(o.h), y = fA.get(o.a);
+      x[0] += o.w * o.oh; x[1] += o.w * eH(o) / att.get(o.h);
+      y[0] += o.w * o.oa; y[1] += o.w * eA(o) / att.get(o.a);
     }
     for (const [t, [n, d]] of fA) att.set(t, (n + K * b) / (d + K * b));
 
     fD = acc();
     for (const o of obs) {
-      const dh = fD.get(o.h), da = fD.get(o.a);
-      dh[0] += o.w * o.oa; dh[1] += o.w * bA * att.get(o.a);
-      da[0] += o.w * o.oh; da[1] += o.w * bH * att.get(o.h);
+      const x = fD.get(o.h), y = fD.get(o.a);
+      x[0] += o.w * o.oa; x[1] += o.w * eA(o) / def.get(o.h);
+      y[0] += o.w * o.oh; y[1] += o.w * eH(o) / def.get(o.a);
     }
     for (const [t, [n, d]] of fD) def.set(t, (n + K * b) / (d + K * b));
 
+    // termos em que gap[t] multiplica (+) ou divide (−) a expectativa: [N+, E+, N−, E−]
+    fG = new Map([...teams].map(t => [t, [0, 0, 0, 0]]));
+    for (const o of obs) {
+      const h = eH(o), a = eA(o);
+      for (const t of [o.h, o.a]) {
+        const s = fG.get(t);
+        s[0] += o.w * o.oh; s[1] += o.w * h;   // gols do mandante: ×gap de ambos
+        s[2] += o.w * o.oa; s[3] += o.w * a;   // gols do visitante: ÷gap de ambos
+      }
+    }
+    const kg = K_GAP * b;
+    for (const [t, [np, ep, nm, em]] of fG) {
+      const cur = g(t);
+      gap.set(t, Math.sqrt(((np + kg) / (ep / cur + kg)) * ((em * cur + kg) / (nm + kg))));
+    }
+
     let nh = 0, dh = 0, na = 0, da = 0;
     for (const o of obs) {
-      nh += o.w * o.oh; dh += o.w * att.get(o.h) * def.get(o.a);
-      na += o.w * o.oa; da += o.w * att.get(o.a) * def.get(o.h);
+      nh += o.w * o.oh; dh += o.w * eH(o) / bH;
+      na += o.w * o.oa; da += o.w * eA(o) / bA;
     }
     bH = nh / dh; bA = na / da;
 
-    // normaliza médias em 1 e devolve a escala às bases
+    // normaliza (att, def: média 1; gap: média geométrica 1) e devolve a escala às bases
     const ma = mean(att), md = mean(def);
-    for (const t of teams) { att.set(t, att.get(t) / ma); def.set(t, def.get(t) / md); }
-    bH *= ma * md; bA *= ma * md;
+    const mg = Math.exp([...gap.values()].reduce((s, v) => s + Math.log(v), 0) / gap.size);
+    for (const t of teams) { att.set(t, att.get(t) / ma); def.set(t, def.get(t) / md); gap.set(t, gap.get(t) / mg); }
+    bH *= ma * md * mg * mg; bA *= ma * md / (mg * mg);   // cada expectativa leva o gap dos dois times
   }
   const b = (bH + bA) / 2;
   // erro-padrão aproximado do log da força: 1/√(volume observado + pseudo-jogos)
   const seAtt = new Map([...fA].map(([t, [n]]) => [t, 1 / Math.sqrt(n + K * b)]));
   const seDef = new Map([...fD].map(([t, [n]]) => [t, 1 / Math.sqrt(n + K * b)]));
-  return { key, att, def, bH, bA, home: bH / bA, avgH, avgA, games, seAtt, seDef, teams };
+  const seGap = new Map([...fG].map(([t, [np, , nm]]) => [t, 1 / Math.sqrt((np + nm) / 2 + K_GAP * b)]));
+  return { key, att, def, gap, bH, bA, home: bH / bA, avgH, avgA, games, seAtt, seDef, seGap, teams };
 }
 
+const K_GAP = 20;   // encolhimento forte: mando próprio só aparece com muitos jogos consistentes
 const mean = m => [...m.values()].reduce((s, v) => s + v, 0) / m.size;
 
 // Expectativa do confronto. Time sem jogos na liga entra como médio, com incerteza alta.
 export function predict(f, home, away) {
   const a = (map, t, dflt) => (map.has(t) ? map.get(t) : dflt);
+  const gg = a(f.gap, home, 1) * a(f.gap, away, 1);
+  const seG = Math.hypot(a(f.seGap, home, 0.3), a(f.seGap, away, 0.3));
   return {
-    h: f.bH * a(f.att, home, 1) * a(f.def, away, 1),
-    a: f.bA * a(f.att, away, 1) * a(f.def, home, 1),
-    seH: Math.hypot(a(f.seAtt, home, 0.5), a(f.seDef, away, 0.5)),
-    seA: Math.hypot(a(f.seAtt, away, 0.5), a(f.seDef, home, 0.5)),
+    h: f.bH * a(f.att, home, 1) * a(f.def, away, 1) * gg,
+    a: f.bA * a(f.att, away, 1) * a(f.def, home, 1) / gg,
+    seH: Math.hypot(a(f.seAtt, home, 0.5), a(f.seDef, away, 0.5), seG),
+    seA: Math.hypot(a(f.seAtt, away, 0.5), a(f.seDef, home, 0.5), seG),
     known: f.teams.has(home) && f.teams.has(away),
   };
 }

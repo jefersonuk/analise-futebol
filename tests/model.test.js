@@ -61,6 +61,22 @@ test('ajuste da liga recupera as forças verdadeiras', () => {
   near(f.home, 1.5 / 1.1, 0.15);
 });
 
+test('mando próprio: time da altitude aparece com gap alto, os demais perto de 1', () => {
+  const r = rng(7), n = 16, m = [];
+  let t = 0;
+  for (let rep = 0; rep < 3; rep++) for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) {
+    // time 0: forte em casa (×1,6 a favor, ÷1,6 contra) e fraco fora (o inverso, ×1,25)
+    m.push({ id: m.length, t: (t += 3600e3), h: i, a: j, s: null,
+      hg: pois(r, 1.4 * (i === 0 ? 1.6 : 1) * (j === 0 ? 1.25 : 1)), ag: pois(r, 1.1 / (i === 0 ? 1.6 : 1) / (j === 0 ? 1.25 : 1)) });
+  }
+  const f = fit('goals', prepare(m, t + 1));
+  assert.ok(f.gap.get(0) > 1.2, `gap=${f.gap.get(0)}`);
+  const others = [...f.gap].filter(([k]) => k !== 0).map(([, v]) => v);
+  assert.ok(others.every(v => v > 0.8 && v < 1.2), others.join(','));
+  const p = predict(f, 0, 5), q = predict(f, 5, 0);
+  assert.ok(p.h / p.a > 2 * (q.a / q.h), 'forte em casa, fraco fora');
+});
+
 test('shrinkage: time com um só jogo fica perto da média', () => {
   const L = synthLeague();
   L.m.push({ id: -1, t: L.end - 1, h: 99, a: 0, hg: 6, ag: 0, s: null });
