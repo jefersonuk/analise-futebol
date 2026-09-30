@@ -44,6 +44,26 @@ td input { width: 72px; padding: 5px 7px; text-align: right; }
 #teamInput { flex: 1; min-width: 0; }
 .row.head { margin: 0 0 10px; justify-content: space-between; }
 .row.head h2 { margin: 0; }
+:root { --good: #0ca30c; --critical: #d03b3b; --push: #6b7785; --grid: #3a4652; }
+.dash { border-top: 1px solid var(--line); padding: 14px 0 6px; }
+.dash:first-of-type { border-top: 0; }
+.dash header { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.dash h3 { margin: 0; font-size: 17px; }
+.kpis { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+.histbox { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-width: 0; }
+.histhead { display: flex; justify-content: space-between; font-size: 14px; }
+svg.hist { width: 100%; height: auto; display: block; margin-top: 6px; }
+svg.hist .good { fill: var(--good); } svg.hist .critical { fill: var(--critical); } svg.hist .push { fill: var(--push); }
+svg.hist .half { opacity: .55; }
+svg.hist .bar:hover path { opacity: .8; }
+svg.hist .base { stroke: var(--grid); stroke-width: 1; }
+svg.hist .ref { stroke: var(--text); stroke-width: 1.5; }
+svg.hist text { font-size: 10px; text-anchor: middle; fill: var(--muted); }
+svg.hist text.val { fill: var(--text); font-weight: 600; }
+svg.hist text.reflabel { text-anchor: start; fill: var(--text); font-weight: 600; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; margin-bottom: 4px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.legend i.good { background: var(--good); } .legend i.critical { background: var(--critical); } .legend i.push { background: var(--push); }
 td.book { color: var(--muted); font-size: 12px; text-align: left; }
 #teamSel, #fixSel { width: 100%; margin-top: 8px; }
 .insights { margin: 0; padding: 0; list-style: none; }

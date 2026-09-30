@@ -2,6 +2,7 @@ import * as api from './api.js';
 import { METRICS, analyzeMatch, ev, fairOdd, politicaE } from './model.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
+import { renderDashboard } from './dashboard.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -199,10 +200,20 @@ function pinnCell(l) {
   return `${pct(p)} <span class="${Math.abs(d) >= 0.05 ? (d > 0 ? 'pos' : 'neg') : 'muted'}">(${d >= 0 ? '+' : ''}${(d * 100).toFixed(1)})</span>`;
 }
 
+function renderDash(rows) {
+  const { prep } = state.result, fx = state.fixture;
+  const top = rows.filter(r => r.e.mid > 0).slice(0, 5)
+    .map(r => ({ line: r.l, odd: r.odd, e: r.e, pinn: state.pinn.get(r.l.id), pol: politicaE(r.odd) }));
+  const teams = [['home', fx.home], ['away', fx.away]]
+    .map(([role, t]) => ({ role, name: t.name, games: recentGames(prep, t.id) }));
+  $('#dash').innerHTML = renderDashboard(top, teams);
+}
+
 function renderRank() {
   const rows = state.result.lines.filter(l => state.odds.has(l.id))
     .map(l => ({ l, odd: state.odds.get(l.id), e: ev(l, state.odds.get(l.id)) }))
     .sort((a, b) => b.e.mid - a.e.mid);
+  renderDash(rows);
   if (!rows.length) { $('#rank').innerHTML = '<span class="muted">Nenhuma odd informada ainda.</span>'; return; }
   $('#rank').innerHTML = '<div class="scroll"><table>' + rows.map(({ l, odd, e }) => `<tr><td>${l.market}</td><td>${l.label}</td>
     <td>@ ${num(odd)}</td><td class="book">${esc(state.books.get(l.id) || '')}</td>
