@@ -289,14 +289,16 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
         fair_odd_blend: r(1 / pb, 2), fragile, odd_min: r(oddMin, 2),
         odd_min_vs_pinnacle_pct: r((oddMin / odd - 1) * 100, 1), ...stake(pb, oddMin),
         ev_model_at_pinnacle: r(e.mid), ev_model_worst: r(e.low), history: hi });
-    } else if (l.market === 'Handicap escanteios 1T' && res.anchors.corners1h) {
-      // Sem preço na API: modelo com o total ancorado na Pinnacle (total de escanteios 1T); sempre frágil.
-      const oddMin = (1 / pm) * 1.05, c = cons(pm);
-      anchored.push({ ...base, priced_by: 'modelo ancorado no total 1T da Pinnacle', pinnacle_odd: null, p_pinnacle: null, diff_pp: null,
+    } else if ((l.market === 'Handicap escanteios 1T' && res.anchors.corners1h) || !odds.size) {
+      // Sem preço na API para esta linha: handicap 1T com o total ancorado na Pinnacle (margem 5%), ou,
+      // quando a Pinnacle ainda não publicou nada para o jogo, o modelo puro (margem 8%). Sempre frágil.
+      const pure = !odds.size, oddMin = (1 / pm) * (pure ? 1.08 : 1.05), c = cons(pm);
+      anchored.push({ ...base, priced_by: pure ? 'só o modelo (Pinnacle ainda sem odds)' : 'modelo ancorado no total 1T da Pinnacle',
+        pinnacle_odd: null, p_pinnacle: null, diff_pp: null,
         p_blend: r(pm), tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
         fair_odd_blend: r(1 / pm, 2), fragile: true, odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null,
         ...stake(pm, oddMin), history: hi });
-    } else if (pm >= 0.35 && soft) {
+    } else if (pm >= 0.35 && soft && odds.size) {
       const c = cons(pm);
       if (c.tier !== 'especulativa' || pm <= 0.65)
         modelOnly.push({ ...base, tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),

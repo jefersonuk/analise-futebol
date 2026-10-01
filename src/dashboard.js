@@ -190,7 +190,7 @@ export function pickDashboard(dossier, n = 5, { focus = true, side = id => id } 
 
 // lines: linhas do dossiê (pickDashboard); teams: [{ name, role, games }]
 export function renderDashboard(lines, teams) {
-  if (!lines.length) return '<p class="muted">Sem odds da Pinnacle para este jogo: o painel precisa da régua de preço.</p>';
+  if (!lines.length) return '<p class="muted">Nenhuma linha passou nos filtros para este jogo.</p>';
   const legend = `<div class="legend"><span><i class="good"></i>venceria</span><span><i class="push"></i>devolveria</span>
     <span><i class="critical"></i>perderia</span><span><i class="mean"></i>média dos 10 jogos</span>
     <span class="muted">C/F = casa/fora · passe o mouse (ou toque) numa barra para ver o jogo</span></div>`;
@@ -208,7 +208,7 @@ export function renderDashboard(lines, teams) {
         <div class="kpis">
           <span class="tag ${tierCls}">${l.tier} · acerta ${pct(l.p_blend)}${l.hit_rate_last10 != null ? ` · últimos 10: ${pct(l.hit_rate_last10)}` : ''}</span>
           <span>justa ${odd2(l.fair_odd_blend)}</span>
-          <span><b>mínima ${odd2(l.odd_min)}</b> <span class="muted">${l.pinnacle_odd ? `(Pinnacle ${odd2(l.pinnacle_odd)})` : '(sem odd na API: modelo ancorado)'}</span></span>
+          <span><b>mínima ${odd2(l.odd_min)}</b> <span class="muted">${l.pinnacle_odd ? `(Pinnacle ${odd2(l.pinnacle_odd)})` : `(${esc(l.priced_by || 'só o modelo')})`}</span></span>
           <span>${l.entry_brl ? `entrada R$ ${l.entry_brl} · ${l.politica_e}` : `sem entrada · ${l.politica_e}`}</span>
           ${l.fragile ? '<span class="tag">frágil</span>' : ''}
           ${l.outside ? `<span class="tag no">${esc(l.outside)}</span>` : ''}
