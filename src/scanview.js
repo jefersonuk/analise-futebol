@@ -15,7 +15,7 @@ const hour = t => new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', min
 const dayStr = off => new Date(Date.now() + off * 864e5).toLocaleDateString('sv-SE');   // AAAA-MM-DD no fuso local
 const BUDGET_KEY = 'afScanBudget';
 
-export function initScan({ api, openEntry, openFull, banca }) {
+export function initScan({ api, openEntry, analyzeFixture, banca }) {
   let scan = null, market = null, ranked = [];
   $('#scanDate').innerHTML = [['Hoje', 0], ['Amanhã', 1]].map(([t, o]) => `<option value="${dayStr(o)}">${t} (${dayStr(o).split('-').reverse().slice(0, 2).join('/')})</option>`).join('');
   $('#scanBudget').value = localStorage.getItem(BUDGET_KEY) || 1500;
@@ -97,13 +97,27 @@ export function initScan({ api, openEntry, openFull, banca }) {
     const go = e.target.closest('[data-go]');
     if (go) { $(`#scan-${go.dataset.go}`).scrollIntoView({ behavior: 'smooth' }); return; }
     const full = e.target.closest('[data-full]');
-    if (full) { openFull(ranked[full.dataset.full].g.fx); return; }
+    if (full) { openFull(ranked[full.dataset.full].g.fx, full); return; }
     const en = e.target.closest('[data-enter]');
     if (en) {
       const { g, line } = ranked[en.closest('[data-g]').dataset.g];
       openEntry(line.id, null, { line, fx: g.fx, btn: en });
     }
   });
+
+  // Análise completa: some a análise anterior, mostra o progresso na busca e, pronta, rola até o jogo
+  // (a análise fica abaixo da lista da varredura). Seleção é reconhecida pela ficha do time.
+  async function openFull(fx, btn) {
+    btn.disabled = true;
+    $('#out').hidden = true;
+    $('#teamInput').scrollIntoView({ block: 'start' });
+    const m = $('#msg');
+    m.hidden = false; m.classList.remove('err'); m.textContent = `Abrindo a análise completa de ${fx.home.name} x ${fx.away.name}…`;
+    let national = false;
+    try { national = !!(await api.teamInfo(fx.home.id))?.national; } catch { /* segue como clube */ }
+    if (await analyzeFixture(fx, national)) $('#out').scrollIntoView({ block: 'start' });
+    btn.disabled = false;
+  }
 
   bindSpecialist($('#scanSpec'), () => scan && briefScan(scan, ranked));
   showSaved();

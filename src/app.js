@@ -121,10 +121,12 @@ $('#teamSel').onchange = loadFixtures;
 // ---- análise ----
 const selectedTeam = () => state.teams.find(t => t.id === Number($('#teamSel').value)) || { id: Number($('#teamSel').value) };
 
-$('#btnRun').onclick = async () => {
+// Analisa o jogo selecionado; devolve true quando a análise ficou pronta na tela.
+async function runAnalysis() {
   startAction();
   const fx = state.fixtures[Number($('#fixSel').value)];
-  if (!fx) return;
+  if (!fx || state.running) return false;
+  state.running = true;
   $('#btnRun').disabled = true;
   try {
     msg('Identificando a liga…');
@@ -141,9 +143,11 @@ $('#btnRun').onclick = async () => {
     await refreshOdds();
     msg('');
     render();
-  } catch (e) { msg(e.message, true); }
-  $('#btnRun').disabled = false;
-};
+    return true;
+  } catch (e) { msg(e.message, true); return false; }
+  finally { state.running = false; $('#btnRun').disabled = false; }
+}
+$('#btnRun').onclick = runAnalysis;
 
 // Busca as odds da Pinnacle agora (sem cache), preenche a tabela e refaz o dossiê com elas.
 async function refreshOdds() {
@@ -481,19 +485,16 @@ $('#entryForm').onsubmit = e => {
 };
 
 // ---- varredura do dia ----
-// Abre a análise completa de um jogo vindo da varredura (mesmo fluxo do botão "Analisar jogo").
-async function openFull(fx) {
-  let national = false;
-  try { national = !!(await api.teamInfo(fx.home.id))?.national; } catch { /* segue como clube */ }
+// Analisa um jogo vindo de fora da busca (varredura do dia), pelo mesmo fluxo do botão "Analisar jogo".
+async function analyzeFixture(fx, national) {
+  if (state.running) { msg('Espere a análise em andamento terminar.', true); return false; }
   state.teams = [{ id: fx.home.id, name: fx.home.name, national }];
   state.fixtures = [fx];
   $('#teamSel').innerHTML = `<option value="${fx.home.id}">${esc(fx.home.name)}</option>`;
   $('#fixSel').innerHTML = `<option value="0">${hour(fx.t)} · ${esc(fx.home.name)} x ${esc(fx.away.name)} · ${esc(fx.league.name)}</option>`;
   $('#teamSel').hidden = false; $('#fixSel').hidden = false;
-  $('#btnRun').disabled = false;
   $('#teamInput').value = fx.home.name;
-  $('#btnRun').scrollIntoView({ behavior: 'smooth' });
-  $('#btnRun').click();
+  return runAnalysis();
 }
-initScan({ api, openEntry, openFull, banca: BANCA });
+initScan({ api, openEntry, analyzeFixture, banca: BANCA });
 bindSpecialist($('#btnSpec'), () => state.dossier && briefGame(state.dossier));
