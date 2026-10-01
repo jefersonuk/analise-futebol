@@ -20,7 +20,7 @@ function compact(f) {
 }
 
 // [dentro, fora, noGol, total, escanteios] do mandante e depois do visitante; null se não houver.
-function statsOf(f) {
+export function statsOf(f) {
   const by = {};
   for (const s of f.statistics || []) by[s.team.id] = Object.fromEntries(s.statistics.map(x => [x.type, x.value]));
   const H = by[f.teams.home.id], A = by[f.teams.away.id];

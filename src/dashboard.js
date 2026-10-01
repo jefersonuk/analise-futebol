@@ -62,15 +62,39 @@ export function history(id, role, teamName, games) {
   return { what: s.what, threshold: s.threshold, bars, wins };
 }
 
-// Colunas com baseline no zero (saldo pode ser negativo), linha de referência e rótulo no topo.
-function chart(h) {
-  const W = 320, H = 156, top = 16, bottom = 32, left = 6, right = 34;   // margem direita guarda o rótulo da linha
+const n1 = x => x.toFixed(1).replace('.', ',');
+const pair = p => (p ? `${p[0]}–${p[1]}` : '—');
+
+// Conteúdo do quadro que aparece ao passar o mouse numa barra: o jogo inteiro, com destaque para
+// a métrica do gráfico e o resultado que a aposta teria.
+function tipHtml(b, h, teamName) {
+  const g = b.g, d = new Date(g.t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const score = g.home ? `${esc(teamName)} <b>${g.gf}–${g.ga}</b> ${esc(g.opp)}` : `${esc(g.opp)} <b>${g.ga}–${g.gf}</b> ${esc(teamName)}`;
+  const rows = [
+    ['Escanteios', g.corners ? `${pair(g.corners)}${g.c1 ? ` · 1º tempo ${pair(g.c1)}` : ''}` : '—'],
+    ['Chutes', g.shots ? `${pair(g.shots)} · no gol ${pair(g.sot)}` : '—'],
+    ['xG-proxy', g.xf != null ? `${n1(g.xf)}–${n1(g.xa)}` : '—'],
+  ];
+  return `<div class="tip-head">${d}${g.league ? ` · ${esc(g.league)}` : ''} · ${g.home ? 'em casa' : 'fora'}</div>
+    <div class="tip-score">${score}</div>
+    <div class="tip-metric ${RES[b.res].cls}"><span>${esc(h.what)}: <b>${b.v}</b> (linha ${numBR(h.threshold)})</span>
+      <span>→ ${RES[b.res].label}</span></div>
+    <table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
+    <div class="tip-note">valores do ponto de vista de ${esc(teamName)} (a favor–contra)</div>`;
+}
+
+// Colunas com baseline no zero (saldo pode ser negativo), grade leve, linha da aposta e média.
+function chart(h, teamName) {
+  const W = 340, H = 170, top = 16, bottom = 34, left = 24, right = 36;   // esquerda: eixo; direita: rótulo da linha
   const vals = h.bars.map(b => b.v).concat([h.threshold, 0]);
-  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const lo = Math.min(...vals), hi = Math.max(...vals) + 0.5;
   const span = hi - lo || 1;
   const y = v => top + (hi - v) / span * (H - top - bottom);
   const slot = (W - left - right) / Math.max(h.bars.length, 1), bw = Math.min(24, slot - 6);
   const r = 4, y0 = y(0);
+  const step = span > 12 ? 5 : span > 6 ? 2 : 1, ticks = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
+  const mean = h.bars.reduce((t, b) => t + b.v, 0) / (h.bars.length || 1);
   const bar = (b, i) => {
     const x = left + i * slot + (slot - bw) / 2, yv = y(b.v), up = b.v >= 0;
     const hgt = Math.abs(y0 - yv);
@@ -78,21 +102,49 @@ function chart(h) {
     const d = hgt < 3 ? `M${x},${y0 - 3}h${bw}v3h${-bw}z`   // valor zero: toco visível sobre a base
       : up ? `M${x},${y0}V${yv + rr}q0,${-rr} ${rr},${-rr}h${bw - 2 * rr}q${rr},0 ${rr},${rr}V${y0}z`
         : `M${x},${y0}V${yv - rr}q0,${rr} ${rr},${rr}h${bw - 2 * rr}q${rr},0 ${rr},${-rr}V${y0}z`;
-    const g = b.g, date = new Date(g.t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    const tip = `${date} ${g.home ? 'casa' : 'fora'} vs ${g.opp} ${g.gf}–${g.ga} · ${h.what}: ${b.v} → ${RES[b.res].label}`;
     const cx = x + bw / 2;
-    return `<g class="bar"><title>${esc(tip)}</title>
-      <rect x="${left + i * slot}" y="0" width="${slot}" height="${H}" fill="transparent"/>
+    return `<g class="bar" tabindex="0" data-tip="${esc(tipHtml(b, h, teamName))}">
+      <rect x="${left + i * slot}" y="0" width="${slot}" height="${H}" class="hit"/>
       <path d="${d}" class="${RES[b.res].cls}"/>
       <text x="${cx}" y="${up ? yv - 4 : yv + 12}" class="val">${b.v}</text>
-      <text x="${cx}" y="${H - 4}" class="ax">${esc(g.opp.slice(0, 3).toUpperCase())}${g.home ? '' : '*'}</text></g>`;
+      <text x="${cx}" y="${H - 18}" class="ax">${esc(b.g.opp.slice(0, 3).toUpperCase())}</text>
+      <text x="${cx}" y="${H - 6}" class="ax small">${b.g.home ? 'C' : 'F'}</text></g>`;
   };
   return `<svg viewBox="0 0 ${W} ${H}" class="hist" role="img" aria-label="${esc(h.what)} nos últimos jogos">
+    ${ticks.map(v => `<line x1="${left}" x2="${W - right}" y1="${y(v)}" y2="${y(v)}" class="grid"/>
+      <text x="${left - 5}" y="${y(v) + 3.5}" class="tick">${v}</text>`).join('')}
     <line x1="${left}" x2="${W - right}" y1="${y0}" y2="${y0}" class="base"/>
+    <line x1="${left}" x2="${W - right}" y1="${y(mean)}" y2="${y(mean)}" class="mean"/>
     ${h.bars.map(bar).join('')}
     <line x1="${left}" x2="${W - right + 2}" y1="${y(h.threshold)}" y2="${y(h.threshold)}" class="ref"/>
     <text x="${W - right + 5}" y="${y(h.threshold) + 3.5}" class="reflabel">${numBR(h.threshold)}</text>
   </svg>`;
+}
+
+// Quadro flutuante único para todos os gráficos (mouse, toque e teclado).
+export function bindTooltips(root) {
+  let tip = document.getElementById('chartTip');
+  if (!tip) { tip = document.createElement('div'); tip.id = 'chartTip'; tip.hidden = true; document.body.appendChild(tip); }
+  const show = (bar, x, yy) => {
+    tip.innerHTML = bar.dataset.tip;
+    tip.hidden = false;
+    root.querySelectorAll('.bar.on').forEach(b => b.classList.remove('on'));
+    bar.classList.add('on');
+    bar.closest('svg').classList.add('focus');
+    const w = tip.offsetWidth, hgt = tip.offsetHeight;
+    const left = Math.min(window.innerWidth - w - 8, Math.max(8, x + 14));
+    const top = yy + hgt + 16 > window.innerHeight ? yy - hgt - 12 : yy + 14;
+    tip.style.left = `${left}px`; tip.style.top = `${Math.max(8, top)}px`;
+  };
+  const hide = () => {
+    tip.hidden = true;
+    root.querySelectorAll('.bar.on').forEach(b => b.classList.remove('on'));
+    root.querySelectorAll('svg.focus').forEach(s => s.classList.remove('focus'));
+  };
+  root.onpointermove = e => { const b = e.target.closest('.bar'); if (b) show(b, e.clientX, e.clientY); else hide(); };
+  root.onpointerleave = hide;
+  root.onfocusin = e => { const b = e.target.closest('.bar'); if (b) { const r = b.getBoundingClientRect(); show(b, r.right, r.top); } };
+  root.onfocusout = hide;
 }
 
 const pct = x => `${Math.round(x * 100)}%`;
@@ -140,14 +192,15 @@ export function pickDashboard(dossier, n = 5, { focus = true, side = id => id } 
 export function renderDashboard(lines, teams) {
   if (!lines.length) return '<p class="muted">Sem odds da Pinnacle para este jogo: o painel precisa da régua de preço.</p>';
   const legend = `<div class="legend"><span><i class="good"></i>venceria</span><span><i class="push"></i>devolveria</span>
-    <span><i class="critical"></i>perderia</span><span class="muted">* = jogo fora de casa · passe o mouse nas barras</span></div>`;
+    <span><i class="critical"></i>perderia</span><span><i class="mean"></i>média dos 10 jogos</span>
+    <span class="muted">C/F = casa/fora · passe o mouse (ou toque) numa barra para ver o jogo</span></div>`;
   return legend + lines.map(l => {
     const charts = teams.map(t => {
       const h = history(l.id, t.role, t.name, t.games);
       if (!h || !h.bars.length) return `<div class="histbox"><b>${esc(t.name)}</b><p class="muted">sem dados para esta linha</p></div>`;
       return `<div class="histbox"><div class="histhead"><b>${esc(t.name)}</b>
         <span>${numBR(h.wins)}/${h.bars.length} ${h.bars.length > 1 ? 'venceriam' : 'venceria'}</span></div>
-        <small class="muted">${esc(h.what)}</small>${chart(h)}</div>`;
+        <small class="muted">${esc(h.what)} · média ${n1(h.bars.reduce((t, b) => t + b.v, 0) / h.bars.length)}</small>${chart(h, t.name)}</div>`;
     }).join('');
     const tierCls = l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no';
     return `<article class="dash">
@@ -159,6 +212,7 @@ export function renderDashboard(lines, teams) {
           <span>${l.entry_brl ? `entrada R$ ${l.entry_brl} · ${l.politica_e}` : `sem entrada · ${l.politica_e}`}</span>
           ${l.fragile ? '<span class="tag">frágil</span>' : ''}
           ${l.outside ? `<span class="tag no">${esc(l.outside)}</span>` : ''}
+          <button class="enter" data-enter="${esc(l.id)}">➕ Entrar</button>
         </div></header>
       <div class="teams">${charts}</div></article>`;
   }).join('');

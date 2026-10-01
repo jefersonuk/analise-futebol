@@ -13,7 +13,7 @@ export function recentGames(prep, team, n = 10) {
       const home = m.h === team, s = m.s;
       const pick = i => (s ? [s[(home ? 0 : 5) + i], s[(home ? 5 : 0) + i]] : null);
       return {
-        t: m.t, home, opp: home ? m.an : m.hn,
+        t: m.t, home, opp: home ? m.an : m.hn, league: m.ln || '',
         gf: home ? m.hg : m.ag, ga: home ? m.ag : m.hg,
         xf: s ? prep.xg(m, home) : null, xa: s ? prep.xg(m, !home) : null,
         corners: pick(4), shots: pick(3), sot: pick(2),

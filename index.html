@@ -69,6 +69,27 @@
   </section>
 </main>
 
+<dialog id="entryDlg">
+  <form method="dialog" id="entryForm">
+    <h2 id="enTitle"></h2>
+    <p id="enGame" class="muted"></p>
+    <div id="enFacts" class="facts"></div>
+    <label for="enHouse">Casa</label>
+    <select id="enHouse"></select>
+    <input id="enHouseOther" type="text" placeholder="Nome da casa" hidden>
+    <div class="grid2">
+      <div><label for="enOdd">Odd que você pegou</label><input id="enOdd" type="number" step="0.01" min="1.01" inputmode="decimal" required></div>
+      <div><label for="enStake">Stake (R$)</label><input id="enStake" type="number" step="1" min="1" inputmode="decimal" required></div>
+    </div>
+    <p id="enCheck" class="check"></p>
+    <p id="enMsg" class="msg" hidden></p>
+    <div class="row end">
+      <button value="cancel" class="ghost" id="enCancel">Cancelar</button>
+      <button id="enSend" class="primary" value="send">Registrar no app de apostas</button>
+    </div>
+  </form>
+</dialog>
+
 <script type="module" src="src/app.js"></script>
 </body>
 </html>

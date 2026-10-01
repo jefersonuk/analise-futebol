@@ -2,12 +2,13 @@ import * as api from './api.js';
 import { METRICS, analyzeMatch, ev, fairOdd, politicaE } from './model.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
-import { pickDashboard, renderDashboard } from './dashboard.js';
+import { BETS_URL, betsApp, buildEntry, sendEntry } from './entry.js';
+import { bindTooltips, pickDashboard, renderDashboard } from './dashboard.js';
 import { ODDS_STALE_MIN, buildDossier, loadLeague, resolveBase, side } from './dossier.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const pct = x => (x * 100).toFixed(1) + '%';
+const pct = x => (x * 100).toFixed(1).replace('.', ',') + '%';
 const num = (x, d = 2) => x.toFixed(d).replace('.', ',');
 const date = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 const hour = t => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -241,6 +242,7 @@ function renderDash() {
     .map(([t, f]) => `<button class="${state.focus === f ? 'on' : ''}" data-f="${f}">${t}</button>`).join('');
   for (const b of $('#dashMode').children) b.onclick = () => { state.focus = b.dataset.f === 'true'; renderDash(); };
   $('#dash').innerHTML = renderDashboard(pickDashboard(state.dossier, 5, { focus: state.focus, side }), teams);
+  bindTooltips($('#dash'));
 }
 
 function renderRank() {
@@ -267,3 +269,89 @@ function renderGames() {
       <td>${pair(g.shots)}</td><td>${pair(g.corners)}</td></tr>`).join('') + '</table></div>';
   $('#games').innerHTML = col(fx.home) + col(fx.away);
 }
+
+// ---- entrar numa linha: manda a aposta para o app de apostas de valor ----
+const money = v => `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+let entry = null;   // { line, houses }
+
+function lineById(id) {
+  const d = state.dossier;
+  return d && d.lines_with_pinnacle.concat(d.lines_anchored || []).find(l => l.id === id);
+}
+
+$('#dash').addEventListener('click', e => {
+  const b = e.target.closest('[data-enter]');
+  if (b) openEntry(b.dataset.enter);
+});
+
+function openEntry(id) {
+  const line = lineById(id), app = betsApp(), fx = state.fixture;
+  if (!line) return;
+  entry = { line, houses: app.houses };
+  $('#enTitle').textContent = `${line.market}: ${line.line}`;
+  $('#enGame').textContent = `${fx.home.name} x ${fx.away.name} · ${fx.league.name} · ${hour(fx.t)}`;
+  $('#enFacts').innerHTML = [
+    ['Consistência', `${line.tier} · acerta ${pct(line.p_blend)}`],
+    ['Preço justo', num(line.fair_odd_blend)],
+    ['Odd mínima', `<b>${num(line.odd_min)}</b>`],
+    ['Pinnacle', line.pinnacle_odd ? num(line.pinnacle_odd) : 'sem odd (modelo ancorado)'],
+  ].map(([k, v]) => `<span class="muted">${k}</span><span>${v}</span>`).join('');
+  const opts = app.houses.map((h, i) => `<option value="${i}">${esc(h.name)} — ${h.currency === 'BRL' ? money(h.value) : `${h.currency} ${h.value.toFixed(2)}`}${h.limited ? ' · ⊘ limitada' : ''}</option>`);
+  $('#enHouse').innerHTML = opts.join('') + '<option value="other">Outra casa…</option>';
+  $('#enHouseOther').hidden = app.houses.length > 0;
+  if (!app.houses.length) $('#enHouse').value = 'other';
+  $('#enOdd').value = line.odd_min.toFixed(2);
+  $('#enStake').value = app.stake ?? line.entry_brl;
+  $('#enMsg').hidden = true;
+  $('#enSend').disabled = false;
+  if (!app.found) showEntryMsg('Não encontrei os dados do app de apostas neste navegador: abra-o uma vez aqui para listar suas casas.', true);
+  entry.stakeHint = app.stake;
+  checkEntry();
+  $('#entryDlg').showModal();
+}
+
+function entryHouse() {
+  const v = $('#enHouse').value;
+  if (v === 'other') return { name: $('#enHouseOther').value.trim(), currency: 'BRL', value: null };
+  return entry.houses[Number(v)];
+}
+
+function checkEntry() {
+  const { line } = entry, odd = parseFloat($('#enOdd').value), stake = parseFloat($('#enStake').value), h = entryHouse();
+  const out = [];
+  if (odd > 1) {
+    const evv = line.p_blend * odd - 1;
+    out.push(`EV nessa odd: <b class="${evv > 0 ? 'pos' : 'neg'}">${(evv * 100).toFixed(1).replace('.', ',')}%</b> (acerto ${pct(line.p_blend)})`);
+    if (odd < line.odd_min) out.push(`<span class="neg">Abaixo da odd mínima ${num(line.odd_min)}: a margem de segurança some.</span>`);
+    if (odd < 1.5) out.push('<span class="neg">Fora do seu núcleo (odd abaixo de 1,50).</span>');
+  }
+  if (entry.stakeHint) out.push(`<span class="muted">Stake do Modelo F no app de apostas: ${money(entry.stakeHint)} · a análise sugeria ${money(line.entry_brl)}.</span>`);
+  if (h?.value != null && stake > h.value && h.currency === 'BRL') out.push(`<span class="neg">Stake maior que o saldo da casa (${money(h.value)}).</span>`);
+  if (h?.limited) out.push('<span class="neg">Casa marcada como limitada no app de apostas.</span>');
+  $('#enCheck').innerHTML = out.join('<br>');
+}
+
+function showEntryMsg(text, err = false) {
+  const el = $('#enMsg');
+  el.hidden = false;
+  el.innerHTML = text;
+  el.classList.toggle('err', err);
+}
+
+$('#enHouse').onchange = () => { $('#enHouseOther').hidden = $('#enHouse').value !== 'other'; checkEntry(); };
+for (const id of ['#enOdd', '#enStake', '#enHouseOther']) $(id).oninput = checkEntry;
+$('#enCancel').onclick = () => $('#entryDlg').close();
+
+$('#entryForm').onsubmit = e => {
+  e.preventDefault();
+  const h = entryHouse(), odd = parseFloat($('#enOdd').value), stake = parseFloat($('#enStake').value);
+  if (!h?.name) return showEntryMsg('Escolha ou digite a casa.', true);
+  if (!(odd > 1) || !(stake > 0)) return showEntryMsg('Informe a odd e a stake.', true);
+  sendEntry(buildEntry({ line: entry.line, fx: state.fixture, casa: h.name, currency: h.currency, odd, stake }));
+  $('#enSend').disabled = true;
+  showEntryMsg(`Enviada ✓ ${esc(h.name)} @ ${num(odd)}, ${money(stake)}. O app de apostas registra ao abrir (aba ⚽ Análise). `
+    + `<a href="${BETS_URL}" target="apostas">Abrir app de apostas ↗</a>`);
+  window.open(BETS_URL, 'apostas');
+  const btn = document.querySelector(`[data-enter="${CSS.escape(entry.line.id)}"]`);
+  if (btn) { btn.textContent = '✓ Enviada'; btn.disabled = true; }
+};
