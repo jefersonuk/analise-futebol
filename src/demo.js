@@ -72,7 +72,8 @@ export function lastPlayed(teamId) {
 export const leaguesOf = () => [LEAGUE];
 export const leagueMatches = (leagueId, season) => schedule(season).filter(g => g.t < Date.now()).map(play);
 export const injuries = () => [];
-export const attachHalfCorners = (leagueId, season, matches) => matches;
+export const attachHalfCorners = (scope, season, matches) => matches;
+export const teamMatches = (teamId, season) => leagueMatches(1, season).filter(m => m.h === teamId || m.a === teamId);
 
 export function standings(leagueId, season) {
   const tab = new Map(TEAMS.map(t => [t.id, { team: t.id, points: 0, played: 0, gd: 0 }]));

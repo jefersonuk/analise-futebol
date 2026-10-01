@@ -10,6 +10,7 @@ import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { history } from './dashboard.js';
 import { ODD_FLOOR, TIER_ORDER, consistency } from './consistency.js';
+import { HALF_FROM } from './client.js';
 
 const DAY = 864e5;
 // Mercados em que o Jeferson concentra o trabalho (painel e candidatas de foco).
@@ -44,6 +45,7 @@ export const seasonsFor = S => [S, S - 1, S - 2].filter(s => s !== 2020);
 // Jogos da liga nas temporadas do modelo; escanteios do 1º tempo só na atual e na anterior
 // (1 requisição por jogo, e a API só tem estatística por tempo a partir de 2024).
 export async function loadLeague(api, lg, S, onProgress) {
+  if (lg.national) return loadNational(api, lg, S, onProgress);
   let matches = [];
   for (const s of seasonsFor(S)) {
     try {
@@ -53,19 +55,72 @@ export async function loadLeague(api, lg, S, onProgress) {
       matches = matches.concat(ms);
     } catch (e) { if (s === S) throw e; }
   }
+  await api.indexMatches?.(matches, false);
   return { matches, seasons: seasonsFor(S) };
+}
+
+// Seleções não têm liga em comum (eliminatórias, torneios, amistosos intercontinentais). A base é
+// o conjunto dos jogos dos dois times e de cada adversário que eles enfrentaram — isso liga as
+// confederações e permite ajustar pela força do adversário. Amistosos pesam metade; jogos com mais
+// de 4 anos saem. Escanteios do 1º tempo só dos dois times (1 requisição por jogo).
+export const FRIENDLIES = 10;
+export async function loadNational(api, base, S, onProgress) {
+  const seasons = [S, S - 1, S - 2], cutoff = Date.now() - 4 * 365 * DAY, byId = new Map();
+  const teamGames = async (id, name) => {
+    let out = [];
+    for (const s of seasons) {
+      try { out = out.concat(await api.teamMatches(id, s, (d, n) => onProgress?.(`${name} ${s}: estatísticas ${d}/${n}…`))); }
+      catch { /* temporada sem jogos */ }
+    }
+    return out.filter(m => m.t >= cutoff);
+  };
+  const own = [];
+  for (const t of base.teams) {
+    onProgress?.(`Jogos de ${t.name}…`);
+    let ms = await teamGames(t.id, t.name);
+    for (const s of seasons.filter(x => x >= HALF_FROM && x >= S - 1)) {
+      const part = ms.filter(m => seasonOf(m, S) === s);
+      if (part.length) {
+        const withC1 = await api.attachHalfCorners(`tm${t.id}`, s, part, (d, n) =>
+          onProgress?.(`Escanteios do 1º tempo de ${t.name}: ${d}/${n} jogos (só na primeira vez)…`));
+        const c1 = new Map(withC1.map(m => [m.id, m.c1]));
+        ms = ms.map(m => (c1.has(m.id) ? { ...m, c1: c1.get(m.id) } : m));
+      }
+    }
+    own.push(...ms);
+  }
+  for (const m of own) byId.set(m.id, m);
+  const opponents = new Map();
+  for (const m of own) for (const [id, name] of [[m.h, m.hn], [m.a, m.an]])
+    if (!base.teams.some(t => t.id === id)) opponents.set(id, name);
+  let i = 0;
+  for (const [id, name] of opponents) {
+    onProgress?.(`Adversários (${++i}/${opponents.size}): ${name}…`);
+    for (const m of await teamGames(id, name)) if (!byId.has(m.id)) byId.set(m.id, m);
+  }
+  const matches = [...byId.values()].map(m => (m.lg === FRIENDLIES ? { ...m, wm: 0.5 } : m));
+  await api.indexMatches?.(matches, true);
+  return { matches, seasons };
+}
+
+// Temporada aproximada de um jogo de seleção para agrupar o cache de 1º tempo (ano do jogo).
+const seasonOf = (m, S) => Math.min(S, new Date(m.t).getUTCFullYear());
+
+// Base de comparação do jogo: a liga comum dos dois times (clubes) ou o conjunto de seleções.
+export async function resolveBase(api, fx, national) {
+  if (national) return { id: 'nt', name: 'seleções', national: true, teams: [fx.home, fx.away] };
+  const S = fx.league.season;
+  const [lh, la] = await Promise.all([api.leaguesOf(fx.home.id, S), api.leaguesOf(fx.away.id, S)]);
+  const common = lh.filter(l => la.some(x => x.id === l.id));
+  return common.find(l => l.id === fx.league.id) || common[0] || null;
 }
 
 // fx: jogo (de upcoming). team: time buscado. fixtures: próximos jogos dele (evita chamada repetida).
 // matches/lg: jogos da liga já baixados pelo app (opcional). banca em R$.
 // oddsPayload: resultado de api.fixtureOdds já buscado pelo app (para a tabela e o dossiê usarem as mesmas odds).
-export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtures = [], banca = 44000, matches = null, lg = null, oddsPayload = null, onProgress }) {
+export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtures = [], banca = 44000, matches = null, lg = null, oddsPayload = null, national = false, onProgress }) {
   const S = fx.league.season;
-  if (!lg) {
-    const [lh, la] = await Promise.all([api.leaguesOf(fx.home.id, S), api.leaguesOf(fx.away.id, S)]);
-    const common = lh.filter(l => la.some(x => x.id === l.id));
-    lg = common.find(l => l.id === fx.league.id) || common[0];
-  }
+  if (!lg) lg = await resolveBase(api, fx, national);
   if (!lg) throw new Error('os dois times não disputam a mesma liga nesta temporada; confronto entre ligas não é suportado');
 
   if (!matches) ({ matches } = await loadLeague(api, lg, S, onProgress));
@@ -75,7 +130,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   const other = team.id === fx.home.id ? fx.away : fx.home;   // o time que não foi buscado
   const SOURCES = ['odds_pinnacle', 'desfalques', 'classificacao', 'ultimo_jogo_mandante', 'ultimo_jogo_visitante', 'proximos_do_outro_time'];
   const settled = await Promise.allSettled([
-    oddsPayload ?? api.fixtureOdds(fx.id), api.injuries(fx.id), api.standings(lg.id, S),
+    oddsPayload ?? api.fixtureOdds(fx.id), api.injuries(fx.id), lg.national ? [] : api.standings(lg.id, S),
     api.lastPlayed(fx.home.id), api.lastPlayed(fx.away.id), api.upcoming(other.id),
   ]);
   const val = (i, d) => (settled[i].status === 'fulfilled' ? settled[i].value : d);
@@ -97,7 +152,9 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     const w = res.fits.goals.games.get(t.id) || 0;
     if (w < 8) alerts.push(`${t.name}: só ${w.toFixed(1)} jogos-equivalentes na liga`);
   }
-  if (lg.id !== fx.league.id) alerts.push(`jogo de ${fx.league.name} medido pela liga ${lg.name} (rotação provável)`);
+  if (lg.national) alerts.push(`jogo de seleções (${fx.league.name}): base com ${res.prep.rows.length} jogos dos dois times e dos adversários; amostra bem menor que a de clubes`);
+  else if (lg.id !== fx.league.id) alerts.push(`jogo de ${fx.league.name} medido pela liga ${lg.name} (rotação provável)`);
+  if (lg.national && fx.league.id === FRIENDLIES) alerts.push('amistoso: rotação e intensidade imprevisíveis');
   if (!odds.size) alerts.push('sem odds da Pinnacle: não há régua de preço');
   else if (oddsAgeMin > ODDS_STALE_MIN) alerts.push(`odds da Pinnacle com ${oddsAgeMin} min de idade (a API atualiza a cada ~3 h): confira o preço atual antes de entrar`);
 

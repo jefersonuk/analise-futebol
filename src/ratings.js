@@ -27,7 +27,8 @@ export function prepare(matches, refTime) {
   let g = 0, x = 0;
   for (const m of past) if (m.s) { g += m.hg + m.ag; x += xgRaw(m.s, true) + xgRaw(m.s, false); }
   const scale = x > 0 ? g / x : 1;
-  const rows = past.map(m => ({ ...m, w: Math.exp(-XI * (refTime - m.t) / DAY) }));
+  // wm: peso extra do jogo (amistoso de seleção pesa menos)
+  const rows = past.map(m => ({ ...m, w: Math.exp(-XI * (refTime - m.t) / DAY) * (m.wm ?? 1) }));
   const xg = (m, home) => (m.s ? scale * xgRaw(m.s, home) : null);
   const share = f => (past.length ? past.filter(f).length / past.length : 0);
   return { rows, scale, xg, coverage: share(m => m.s), coverage1h: share(m => m.c1) };

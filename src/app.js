@@ -3,7 +3,7 @@ import { METRICS, analyzeMatch, ev, fairOdd, politicaE } from './model.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { pickDashboard, renderDashboard } from './dashboard.js';
-import { ODDS_STALE_MIN, buildDossier, loadLeague, side } from './dossier.js';
+import { ODDS_STALE_MIN, buildDossier, loadLeague, resolveBase, side } from './dossier.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -13,7 +13,7 @@ const date = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', mont
 const hour = t => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const BANCA = 44000;
 
-const state = { fixtures: [], fixture: null, result: null, matches: [], dossier: null, oddsP: null, focus: true,
+const state = { teams: [], fixtures: [], fixture: null, result: null, matches: [], dossier: null, oddsP: null, focus: true,
   odds: new Map(), books: new Map(), pinn: new Map(), market: 'Todos' };
 
 function msg(text, err = false) {
@@ -22,8 +22,12 @@ function msg(text, err = false) {
   el.textContent = text || '';
   el.classList.toggle('err', err);
 }
+let statsAt = api.stats();   // contador no início da ação atual
+const startAction = () => { statsAt = api.stats(); };
 function showQuota() {
-  $('#quota').textContent = api.remaining != null ? `${api.remaining} requisições restantes hoje` : '';
+  const s = api.stats(), used = s.api - statsAt.api, hits = s.cache - statsAt.cache;
+  $('#quota').textContent = [api.remaining != null ? `${api.remaining} requisições restantes hoje` : '',
+    used || hits ? `esta ação: ${used} na API, ${hits} do cache` : ''].filter(Boolean).join(' · ');
 }
 
 // ---- chave ----
@@ -37,19 +41,23 @@ $('#btnSaveKey').onclick = () => {
 if (!api.getKey()) $('#keyBox').hidden = false;
 
 // ---- time -> próximos jogos ----
-async function search() {
+async function search(fromApi = false) {
+  startAction();
   const q = $('#teamInput').value.trim();
   if (q.length < 3) return msg('Digite ao menos 3 letras do nome do time.', true);
   if (!api.getKey()) return msg('Informe a chave da API em ⚙️ Chave.', true);
   msg('Buscando…');
   try {
-    const list = await api.searchTeams(q);
+    const list = await api.searchTeams(q, { fromApi });
+    state.teams = list;
     showQuota();
+    $('#btnSearchApi').hidden = fromApi || !list.some(t => t.local);
     if (!list.length) return msg(`Nenhum time encontrado para "${q}".`, true);
     const sel = $('#teamSel');
-    sel.innerHTML = list.map(t => `<option value="${t.id}">${esc(t.name)} — ${esc(t.country)}</option>`).join('');
+    sel.innerHTML = list.map(t => `<option value="${t.id}">${esc(t.name)}${t.country ? ` — ${esc(t.country)}` : ''}${t.national ? ' · seleção' : ''}</option>`).join('');
     sel.hidden = false;
     await loadFixtures();
+    if (list.some(t => t.local)) msg('Times do seu histórico (sem gastar requisição). Não achou? Use "Buscar na API".');
   } catch (e) { msg(e.message, true); }
 }
 async function loadFixtures() {
@@ -67,26 +75,23 @@ async function loadFixtures() {
     msg('');
   } catch (e) { msg(e.message, true); }
 }
-$('#btnSearch').onclick = search;
+$('#btnSearch').onclick = () => search();
+$('#btnSearchApi').onclick = () => search(true);
 $('#teamInput').onkeydown = e => { if (e.key === 'Enter') search(); };
 $('#teamSel').onchange = loadFixtures;
 
 // ---- análise ----
-async function baseLeague(fx) {
-  const s = fx.league.season;
-  const [lh, la] = await Promise.all([api.leaguesOf(fx.home.id, s), api.leaguesOf(fx.away.id, s)]);
-  const common = lh.filter(l => la.some(x => x.id === l.id));
-  return common.find(l => l.id === fx.league.id) || common[0] || null;
-}
+const selectedTeam = () => state.teams.find(t => t.id === Number($('#teamSel').value)) || { id: Number($('#teamSel').value) };
 
 $('#btnRun').onclick = async () => {
+  startAction();
   const fx = state.fixtures[Number($('#fixSel').value)];
   if (!fx) return;
   $('#btnRun').disabled = true;
   try {
     msg('Identificando a liga…');
-    const lg = await baseLeague(fx);
-    if (!lg) throw new Error('Os dois times não disputam a mesma liga nesta temporada: confronto entre ligas ainda não é suportado.');
+    const lg = await resolveBase(api.dossierApi, fx, !!selectedTeam().national);
+    if (!lg) throw new Error('Os dois times não disputam a mesma liga nesta temporada: confronto entre ligas de clubes ainda não é suportado.');
     const { matches, seasons } = await loadLeague(api.dossierApi, lg, fx.league.season, t => { msg(t); showQuota(); });
     showQuota();
     msg('Ajustando forças da liga…');
@@ -114,13 +119,14 @@ async function refreshOdds() {
   state.pinn = fair;
   msg('Montando o dossiê (desfalques, tabela, descanso)…');
   state.dossier = await buildDossier(api.dossierApi, {
-    fx: state.fixture, team: { id: Number($('#teamSel').value) }, fixtures: state.fixtures,
+    fx: state.fixture, team: selectedTeam(), fixtures: state.fixtures, national: !!state.fixture.base.national,
     matches: state.matches, lg: state.fixture.base, oddsPayload: state.oddsP, banca: BANCA,
   });
   showQuota();
 }
 
 $('#btnOdds').onclick = async () => {
+  startAction();
   if (!state.result) return;
   $('#btnOdds').disabled = true;
   try {
@@ -148,7 +154,8 @@ function render() {
   const fx = state.fixture, r = state.result;
   $('#out').hidden = false;
   $('#title').textContent = `${fx.home.name} x ${fx.away.name} — ${hour(fx.t)}`;
-  const cup = fx.base.id !== fx.league.id ? `Jogo de ${fx.league.name}; forças medidas em ${fx.base.name}. ` : '';
+  const cup = fx.base.national ? `Jogo de seleções (${fx.league.name}): forças medidas nos jogos dos dois times e de todos os adversários que eles enfrentaram (amistosos com metade do peso). `
+    : fx.base.id !== fx.league.id ? `Jogo de ${fx.league.name}; forças medidas em ${fx.base.name}. ` : '';
   $('#basis').textContent = `${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
     + `peso decrescente com o tempo (meia-vida ≈ 1 ano), ${(r.prep.coverage * 100).toFixed(0)}% com estatística de chutes, `
     + `${(r.prep.coverage1h * 100).toFixed(0)}% com escanteios do 1º tempo (a API só tem desde 2024).`

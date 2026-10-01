@@ -77,7 +77,7 @@ async function main() {
   const fx = o.fixture ? fixtures.find(f => f.id === o.fixture) : fixtures[o.jogo];
   if (!fx) fail(`jogo não encontrado. Próximos de ${team.name}:\n${listing()}`);
 
-  const out = await buildDossier(api, { fx, team, teams, fixtures, banca: o.banca, onProgress: log });
+  const out = await buildDossier(api, { fx, team, teams, fixtures, banca: o.banca, national: !!team.national, onProgress: log });
   process.stdout.write(JSON.stringify(out) + '\n');
 }
 
