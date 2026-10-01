@@ -52,7 +52,7 @@ async function search(fromApi = false) {
     const list = await api.searchTeams(q, { fromApi });
     state.teams = list;
     showQuota();
-    $('#btnSearchApi').hidden = fromApi || !list.some(t => t.local);
+    $('#btnSearchApi').hidden = fromApi;
     if (!list.length) return msg(`Nenhum time encontrado para "${q}".`, true);
     const sel = $('#teamSel');
     sel.innerHTML = list.map(t => `<option value="${t.id}">${esc(t.name)}${t.country ? ` — ${esc(t.country)}` : ''}${t.national ? ' · seleção' : ''}</option>`).join('');
@@ -92,7 +92,7 @@ $('#btnRun').onclick = async () => {
   try {
     msg('Identificando a liga…');
     const lg = await resolveBase(api.dossierApi, fx, !!selectedTeam().national);
-    if (!lg) throw new Error('Os dois times não disputam a mesma liga nesta temporada: confronto entre ligas de clubes ainda não é suportado.');
+    if (!lg) throw new Error('Não encontrei a liga de nenhum dos dois times nesta temporada.');
     const { matches, seasons } = await loadLeague(api.dossierApi, lg, fx.league.season, t => { msg(t); showQuota(); });
     showQuota();
     msg('Ajustando forças da liga…');
@@ -155,7 +155,8 @@ function render() {
   const fx = state.fixture, r = state.result;
   $('#out').hidden = false;
   $('#title').textContent = `${fx.home.name} x ${fx.away.name} — ${hour(fx.t)}`;
-  const cup = fx.base.national ? `Jogo de seleções (${fx.league.name}): forças medidas nos jogos dos dois times e de todos os adversários que eles enfrentaram (amistosos com metade do peso). `
+  const cup = fx.base.cross ? `Jogo entre ligas (${fx.league.name}): forças medidas em ${fx.base.name}; os jogos da competição entre times das duas ligas põem as ligas na mesma escala. `
+    : fx.base.national ? `Jogo de seleções (${fx.league.name}): forças medidas nos jogos dos dois times e de todos os adversários que eles enfrentaram (amistosos com metade do peso). `
     : fx.base.id !== fx.league.id ? `Jogo de ${fx.league.name}; forças medidas em ${fx.base.name}. ` : '';
   $('#basis').textContent = `${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
     + `peso decrescente com o tempo (meia-vida ≈ 1 ano), ${(r.prep.coverage * 100).toFixed(0)}% com estatística de chutes, `

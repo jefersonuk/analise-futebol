@@ -57,17 +57,49 @@ async function searchLocal(q) {
     .slice(0, 25);
 }
 
-// Busca de time: primeiro o índice local (0 requisição); a API só quando o índice não acha
-// ou quando o usuário pede (fromApi).
+// Nomes de países em português -> nome da seleção na API (que usa inglês).
+const COUNTRIES = {
+  brasil: 'Brazil', alemanha: 'Germany', espanha: 'Spain', franca: 'France', inglaterra: 'England', holanda: 'Netherlands',
+  'paises baixos': 'Netherlands', italia: 'Italy', japao: 'Japan', coreia: 'South Korea', 'coreia do sul': 'South Korea',
+  'estados unidos': 'USA', eua: 'USA', mexico: 'Mexico', uruguai: 'Uruguay', colombia: 'Colombia', equador: 'Ecuador',
+  paraguai: 'Paraguay', bolivia: 'Bolivia', belgica: 'Belgium', croacia: 'Croatia', suica: 'Switzerland', marrocos: 'Morocco',
+  nigeria: 'Nigeria', egito: 'Egypt', 'arabia saudita': 'Saudi Arabia', australia: 'Australia', india: 'India', catar: 'Qatar',
+  qatar: 'Qatar', ira: 'Iran', escocia: 'Scotland', 'pais de gales': 'Wales', gales: 'Wales', irlanda: 'Ireland',
+  dinamarca: 'Denmark', suecia: 'Sweden', noruega: 'Norway', polonia: 'Poland', turquia: 'Turkey', grecia: 'Greece',
+  servia: 'Serbia', canada: 'Canada', panama: 'Panama', camaroes: 'Cameroon', gana: 'Ghana', 'costa do marfim': 'Ivory Coast',
+  argelia: 'Algeria', tunisia: 'Tunisia', 'africa do sul': 'South Africa', 'nova zelandia': 'New Zealand', russia: 'Russia',
+  ucrania: 'Ukraine', austria: 'Austria', hungria: 'Hungary', 'republica tcheca': 'Czech Republic', tchequia: 'Czech Republic',
+  eslovaquia: 'Slovakia', eslovenia: 'Slovenia', romenia: 'Romania', islandia: 'Iceland', finlandia: 'Finland',
+  albania: 'Albania', georgia: 'Georgia', singapura: 'Singapore', jamaica: 'Jamaica', 'costa rica': 'Costa Rica',
+  argentina: 'Argentina', chile: 'Chile', peru: 'Peru', venezuela: 'Venezuela', portugal: 'Portugal', senegal: 'Senegal',
+  china: 'China', honduras: 'Honduras', 'el salvador': 'El Salvador', guatemala: 'Guatemala', haiti: 'Haiti',
+};
+const countryOf = q => COUNTRIES[norm(q).trim()] || null;
+
+// Busca de time: primeiro o índice local (0 requisição); a API quando o índice não acha, quando o
+// usuário pede (fromApi) ou quando o nome é de um país e a seleção ainda não está no índice.
+// Seleções masculinas vêm primeiro quando a busca é um país.
 export async function searchTeams(q, { fromApi = false } = {}) {
   if (isDemo()) return demo.searchTeams(q);
-  if (!fromApi) {
-    const local = await searchLocal(q);
-    if (local.length) return local;
+  const country = countryOf(q), terms = [country || q];
+  let list = fromApi ? [] : await searchLocal(q);
+  if (country && !fromApi) list = list.concat(await searchLocal(country));
+  const hasNational = list.some(t => t.national && norm(t.name) === norm(country || ''));
+  if (fromApi || !list.length || (country && !hasNational)) {
+    for (const term of fromApi && country ? [country, q] : terms) {
+      const found = await client.searchTeams(term);
+      await indexTeams(found);
+      list = list.concat(found);
+    }
   }
-  const list = await client.searchTeams(q);
-  await indexTeams(list);
-  return list;
+  const seen = new Set(), n = norm(country || q);
+  return list.filter(t => !seen.has(t.id) && seen.add(t.id))
+    .sort((a, b) => score(b, n) - score(a, n) || a.name.length - b.name.length);
+}
+// seleção principal com o nome exato > seleção > nome que começa com o termo > resto; feminino/base no fim
+function score(t, n) {
+  const name = norm(t.name), minor = / w$|u\d\d| women/.test(name);
+  return (t.national && name === n ? 8 : 0) + (t.national && !minor ? 4 : 0) + (name.startsWith(n) ? 2 : 0) - (minor ? 3 : 0);
 }
 
 export const upcoming = teamId => pick('upcoming', teamId);

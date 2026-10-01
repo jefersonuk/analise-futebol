@@ -46,6 +46,7 @@ export const seasonsFor = S => [S, S - 1, S - 2].filter(s => s !== 2020);
 // (1 requisição por jogo, e a API só tem estatística por tempo a partir de 2024).
 export async function loadLeague(api, lg, S, onProgress) {
   if (lg.national) return loadNational(api, lg, S, onProgress);
+  if (lg.cross) return loadCross(api, lg, S, onProgress);
   let matches = [];
   for (const s of seasonsFor(S)) {
     try {
@@ -106,13 +107,60 @@ export async function loadNational(api, base, S, onProgress) {
 // Temporada aproximada de um jogo de seleção para agrupar o cache de 1º tempo (ano do jogo).
 const seasonOf = (m, S) => Math.min(S, new Date(m.t).getUTCFullYear());
 
-// Base de comparação do jogo: a liga comum dos dois times (clubes) ou o conjunto de seleções.
+// Primeira divisão nacional de um time entre as ligas (pontos corridos) que ele disputa. A API também
+// classifica campeonatos estaduais e ligas de reservas como "liga", então: ids conhecidos primeiro,
+// depois o primeiro nome que não seja estadual, copa, reservas, base ou feminino.
+const TOP = new Set([71, 128, 39, 140, 135, 78, 61, 94, 88, 262, 253, 203, 144, 179, 281, 239, 265, 268, 250, 242, 344, 299]);
+const NOT_TOP = /paulista|carioca|mineiro|ga[uú]cho|paranaense|baiano|pernambucano|cearense|catarinense|goiano|capixaba|copa|cup|super|reserv|u\d\d|women|femin|youth|primavera/i;
+export function domesticLeague(leagues) {
+  return leagues.find(l => TOP.has(l.id)) || leagues.find(l => !NOT_TOP.test(l.name)) || leagues[0] || null;
+}
+
+// Base de comparação do jogo:
+//   clubes da mesma liga        -> a liga (3 temporadas)
+//   clubes de ligas diferentes  -> a liga de cada um + a própria competição (Libertadores, Champions…),
+//                                   cujos jogos entre ligas põem as duas na mesma escala
+//   seleções                    -> jogos dos dois times e dos adversários deles
 export async function resolveBase(api, fx, national) {
   if (national) return { id: 'nt', name: 'seleções', national: true, teams: [fx.home, fx.away] };
   const S = fx.league.season;
-  const [lh, la] = await Promise.all([api.leaguesOf(fx.home.id, S), api.leaguesOf(fx.away.id, S)]);
+  const of = async t => { const l = await api.leaguesOf(t.id, S); return l.length ? l : api.leaguesOf(t.id, S - 1); };
+  const [lh, la] = await Promise.all([of(fx.home), of(fx.away)]);
   const common = lh.filter(l => la.some(x => x.id === l.id));
-  return common.find(l => l.id === fx.league.id) || common[0] || null;
+  const same = common.find(l => l.id === fx.league.id) || (common.length && domesticLeague(common));
+  if (same) return same;
+  const dh = domesticLeague(lh), da = domesticLeague(la);
+  const leagues = [dh, da, { id: fx.league.id, name: fx.league.name }].filter(Boolean)
+    .filter((l, i, a) => a.findIndex(x => x.id === l.id) === i);
+  return { id: `x${leagues.map(l => l.id).join('-')}`, cross: true, leagues, teams: [fx.home, fx.away],
+    name: leagues.map(l => l.name).join(' + ') };
+}
+
+// Clubes de ligas diferentes: as ligas dos dois e a competição do jogo. Escanteios do 1º tempo só dos
+// jogos dos dois times (1 requisição por jogo; as ligas inteiras custariam centenas).
+export async function loadCross(api, base, S, onProgress) {
+  const byId = new Map();
+  for (const lg of base.leagues) {
+    for (const s of seasonsFor(S)) {
+      try {
+        for (const m of await api.leagueMatches(lg.id, s, (d, n) => onProgress?.(`Baixando ${lg.name} ${s}: ${d}/${n} jogos…`)))
+          byId.set(m.id, m);
+      } catch { /* temporada sem jogos (ex.: liga que o time ainda não disputava) */ }
+    }
+  }
+  let matches = [...byId.values()];
+  for (const t of base.teams) {
+    for (const s of [S, S - 1].filter(x => x >= HALF_FROM)) {
+      const own = matches.filter(m => (m.h === t.id || m.a === t.id) && seasonOf(m, S) === s);
+      if (!own.length) continue;
+      const withC1 = await api.attachHalfCorners(`tm${t.id}`, s, own, (d, n) =>
+        onProgress?.(`Escanteios do 1º tempo de ${t.name}: ${d}/${n} jogos (só na primeira vez)…`));
+      const c1 = new Map(withC1.map(m => [m.id, m.c1]));
+      matches = matches.map(m => (c1.has(m.id) && m.c1 == null ? { ...m, c1: c1.get(m.id) } : m));
+    }
+  }
+  await api.indexMatches?.(matches, false);
+  return { matches, seasons: seasonsFor(S) };
 }
 
 // fx: jogo (de upcoming). team: time buscado. fixtures: próximos jogos dele (evita chamada repetida).
@@ -130,7 +178,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   const other = team.id === fx.home.id ? fx.away : fx.home;   // o time que não foi buscado
   const SOURCES = ['odds_pinnacle', 'desfalques', 'classificacao', 'ultimo_jogo_mandante', 'ultimo_jogo_visitante', 'proximos_do_outro_time'];
   const settled = await Promise.allSettled([
-    oddsPayload ?? api.fixtureOdds(fx.id), api.injuries(fx.id), lg.national ? [] : api.standings(lg.id, S),
+    oddsPayload ?? api.fixtureOdds(fx.id), api.injuries(fx.id), lg.national ? [] : api.standings(lg.cross ? fx.league.id : lg.id, S),
     api.lastPlayed(fx.home.id), api.lastPlayed(fx.away.id), api.upcoming(other.id),
   ]);
   const val = (i, d) => (settled[i].status === 'fulfilled' ? settled[i].value : d);
@@ -153,6 +201,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     if (w < 8) alerts.push(`${t.name}: só ${w.toFixed(1)} jogos-equivalentes na liga`);
   }
   if (lg.national) alerts.push(`jogo de seleções (${fx.league.name}): base com ${res.prep.rows.length} jogos dos dois times e dos adversários; amostra bem menor que a de clubes`);
+  else if (lg.cross) alerts.push(`jogo entre ligas (${fx.league.name}): ${lg.name} — a comparação entre as ligas vem dos jogos da competição; confira se a diferença de nível faz sentido`);
   else if (lg.id !== fx.league.id) alerts.push(`jogo de ${fx.league.name} medido pela liga ${lg.name} (rotação provável)`);
   if (lg.national && fx.league.id === FRIENDLIES) alerts.push('amistoso: rotação e intensidade imprevisíveis');
   if (!odds.size) alerts.push('sem odds da Pinnacle: não há régua de preço');

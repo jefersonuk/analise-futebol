@@ -76,3 +76,33 @@ test('seleções: base com os dois times e os adversários; amistoso com metade 
   assert.deepEqual(matches.find(x => x.id === 1).c1, [2, 1]);                       // 1º tempo dos jogos próprios
   assert.equal(matches.find(x => x.id === 4).c1, undefined);                        // jogo só de adversários: sem custo extra
 });
+
+import { domesticLeague, loadCross, resolveBase } from '../src/dossier.js';
+
+test('liga nacional do time: ignora estaduais, copas e base', () => {
+  assert.equal(domesticLeague([{ id: 624, name: 'Carioca - 1' }, { id: 71, name: 'Serie A' }]).id, 71);
+  assert.equal(domesticLeague([{ id: 9001, name: 'Paulista - A1' }, { id: 9002, name: 'Primera División' }]).id, 9002);
+});
+
+test('Libertadores entre ligas: base com as duas ligas e a própria copa', async () => {
+  const fx = { league: { id: 13, name: 'CONMEBOL Libertadores', season: 2026 }, home: { id: 127, name: 'Flamengo' }, away: { id: 435, name: 'River Plate' } };
+  const api = { leaguesOf: async id => (id === 127 ? [{ id: 624, name: 'Carioca - 1' }, { id: 71, name: 'Serie A' }] : [{ id: 128, name: 'Liga Profesional Argentina' }]) };
+  const base = await resolveBase(api, fx, false);
+  assert.equal(base.cross, true);
+  assert.deepEqual(base.leagues.map(l => l.id), [71, 128, 13]);
+  // mesma liga: continua usando a liga
+  const same = await resolveBase({ leaguesOf: async () => [{ id: 71, name: 'Serie A' }] }, { ...fx, away: { id: 121, name: 'Palmeiras' } }, false);
+  assert.equal(same.id, 71);
+
+  const now = Date.now(), m = (id, h, a, lg) => ({ id, t: now - id * 864e5, h, a, hn: `T${h}`, an: `T${a}`, hg: 1, ag: 0, lg, s: null });
+  const byLeague = { 71: [m(1, 127, 121, 71)], 128: [m(2, 451, 450, 128), m(4, 435, 451, 128)], 13: [m(3, 127, 450, 13), m(1, 127, 121, 71)] };
+  const seen = [];
+  const { matches } = await loadCross({
+    leagueMatches: async (l, s) => (s === 2026 ? byLeague[l] || [] : []),
+    attachHalfCorners: async (scope, s, ms) => { seen.push(scope); return ms.map(x => ({ ...x, c1: [1, 1] })); },
+  }, base, 2026);
+  assert.deepEqual(matches.map(x => x.id).sort(), [1, 2, 3, 4]);           // sem duplicar
+  assert.ok(matches.find(x => x.id === 3).c1);                              // jogo do Flamengo na copa ganha 1º tempo
+  assert.equal(matches.find(x => x.id === 2).c1, undefined);                // jogo só de outros times: sem custo
+  assert.ok(seen.every(s => s === 'tm127' || s === 'tm435'));
+});
