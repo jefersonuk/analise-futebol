@@ -54,7 +54,7 @@ function analyze(fx, matches, oddsP, banca, teamBase = false) {
   if (!res.lines.length) return { skip: 'jogos insuficientes na liga' };
   const games = id => res.fits.corners?.games.get(id) || 0;
   const thin = [fx.home, fx.away].filter(t => games(t.id) < MIN_GAMES);
-  if (thin.length) return { skip: `${thin.map(t => t.name).join(' e ')} com menos de ${MIN_GAMES} jogos na liga` };
+  if (thin.length) return { skip: `${thin.map(t => t.name).join(' e ')} com menos de ${MIN_GAMES} jogos com estatística de escanteios na base` };
   const teams = [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(res.prep, t.id) }));
   const ageMin = oddsP.updatedAt ? Math.round((Date.now() - Date.parse(oddsP.updatedAt)) / 60e3) : null;
   const alerts = ageMin > 90 ? [`odds da Pinnacle com ${ageMin} min`] : [];
@@ -123,7 +123,7 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
   }
 
   // Jogos cuja liga não tem histórico dos times: base pelos jogos dos times, um conjunto por torneio
-  const thinRe = /com menos de \d+ jogos na liga|jogos insuficientes/;
+  const thinRe = /com menos de \d+ jogos com estatística|jogos insuficientes/;
   const byLeague = new Map();
   for (const s of skipped.filter(x => thinRe.test(x.why))) {
     if (!byLeague.has(s.fx.league.id)) byLeague.set(s.fx.league.id, []);
@@ -140,7 +140,7 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
     base.set(lg.id, matches);
     for (const s of group) {
       const a = analyze(s.fx, matches, { ...odds.get(s.fx.id), fetchedAt: Date.now() }, banca, true);
-      if (a.skip) s.why = `${a.skip} (mesmo somando todas as competições)`;
+      if (a.skip) s.why = `${a.skip}, mesmo somando todas as competições (a API não tem estatística desses jogos)`;
       else { games.push(a); skipped.splice(skipped.indexOf(s), 1); }
     }
   }
