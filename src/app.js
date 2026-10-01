@@ -481,8 +481,10 @@ $('#entryForm').onsubmit = e => {
 
 // ---- varredura do dia ----
 // Abre a análise completa de um jogo vindo da varredura (mesmo fluxo do botão "Analisar jogo").
-function openFull(fx) {
-  state.teams = [{ id: fx.home.id, name: fx.home.name }];
+async function openFull(fx) {
+  let national = false;
+  try { national = !!(await api.teamInfo(fx.home.id))?.national; } catch { /* segue como clube */ }
+  state.teams = [{ id: fx.home.id, name: fx.home.name, national }];
   state.fixtures = [fx];
   $('#teamSel').innerHTML = `<option value="${fx.home.id}">${esc(fx.home.name)}</option>`;
   $('#fixSel').innerHTML = `<option value="0">${hour(fx.t)} · ${esc(fx.home.name)} x ${esc(fx.away.name)} · ${esc(fx.league.name)}</option>`;

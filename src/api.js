@@ -135,6 +135,7 @@ export const lastPlayed = teamId => pick('lastPlayed', teamId);
 export const attachHalfCorners = (scope, season, matches, onProgress, opts) =>
   pick('attachHalfCorners', scope, season, matches, onProgress, opts);
 export const dayFixtures = date => pick('dayFixtures', date);
+export const teamInfo = id => (isDemo() ? Promise.resolve(null) : client.teamInfo(id));
 export const dayOdds = (date, bet) => pick('dayOdds', date, bet);
 export const hasLeague = (leagueId, season) => pick('hasLeague', leagueId, season);
 export const stats = () => (isDemo() ? { api: 0, cache: 0 } : client.stats());

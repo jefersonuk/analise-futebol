@@ -13,10 +13,30 @@
 import { analyzeMatch, politicaE } from './model.js';
 import { collect } from './odds.js';
 import { recentGames } from './insights.js';
-import { byConsistency, isCandidate, priceLines, seasonsFor } from './dossier.js';
+import { FRIENDLIES, byConsistency, isCandidate, priceLines, seasonsFor } from './dossier.js';
 
 export const SCAN_MARKETS = ['Total escanteios 1T', 'Handicap escanteios 1T'];
 const LEAGUE_COST = 70, TEAM_COST = 10, MIN_GAMES = 8;
+const DAY = 864e5;
+// Liga sem histórico suficiente dos times (seleções, copas, base, feminino, 2ª fase): a base passa a ser
+// os jogos dos times em todas as competições (3 temporadas, até 4 anos), juntando todos os times do mesmo
+// torneio no dia — os confrontos entre eles (eliminatórias, Nations League) ligam as forças. Amistoso pesa metade.
+async function teamPool(api, fixtures, S, onProgress) {
+  const teams = new Map(fixtures.flatMap(f => [[f.home.id, f.home.name], [f.away.id, f.away.name]]));
+  const cutoff = Date.now() - 4 * 365 * DAY, byId = new Map();
+  let i = 0;
+  for (const [id, name] of teams) {
+    i++;
+    for (const s of [S, S - 1, S - 2]) {
+      try {
+        for (const m of await api.teamMatches(id, s, (d, n) => onProgress(`${name} ${s}: estatísticas ${d}/${n}…`)))
+          if (m.t >= cutoff) byId.set(m.id, m);
+      } catch { /* temporada sem jogos */ }
+    }
+    onProgress(`Histórico dos times (${i}/${teams.size}): ${name}…`);
+  }
+  return [...byId.values()].map(m => (m.lg === FRIENDLIES ? { ...m, wm: 0.5 } : m));
+}
 const r2 = x => Math.round(x * 100) / 100;
 
 const playable = l => l.odd_min >= 1.5 && politicaE(l.odd_min).factor > 0;
@@ -28,7 +48,7 @@ export function bestLine(lines, { market = null } = {}) {
   return pool.find(isCandidate) || pool[0] || null;
 }
 
-function analyze(fx, matches, oddsP, banca) {
+function analyze(fx, matches, oddsP, banca, teamBase = false) {
   const { odds, fair } = collect(oddsP.bookmakers);
   const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t, { fair, share1hBelow: 0.5 });
   if (!res.lines.length) return { skip: 'jogos insuficientes na liga' };
@@ -38,12 +58,13 @@ function analyze(fx, matches, oddsP, banca) {
   const teams = [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(res.prep, t.id) }));
   const ageMin = oddsP.updatedAt ? Math.round((Date.now() - Date.parse(oddsP.updatedAt)) / 60e3) : null;
   const alerts = ageMin > 90 ? [`odds da Pinnacle com ${ageMin} min`] : [];
+  if (teamBase) alerts.push('base: jogos dos dois times em todas as competições (amostra menor que a de uma liga)');
   const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => SCAN_MARKETS.includes(l.market) });
   const lines = priced.concat(anchored);
   const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
   const a = res.anchors;
   return {
-    fx, teams, lines, best, alerts, odds_age_min: ageMin,
+    fx, teams, lines, best, alerts, odds_age_min: ageMin, team_base: teamBase,
     c1_known: teams.map(t => t.games.filter(g => g.c1).length),
     pinnacle_1h: a.corners1h ? { line: a.corners1h.from_line, total: r2(a.corners1h.pinnacle_total), model: r2(a.corners1h.model_total) } : null,
     share_1h: a.corners1hShare ? r2(a.corners1hShare.share) : null,
@@ -101,6 +122,29 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
     }
   }
 
+  // Jogos cuja liga não tem histórico dos times: base pelos jogos dos times, um conjunto por torneio
+  const thinRe = /com menos de \d+ jogos na liga|jogos insuficientes/;
+  const byLeague = new Map();
+  for (const s of skipped.filter(x => thinRe.test(x.why))) {
+    if (!byLeague.has(s.fx.league.id)) byLeague.set(s.fx.league.id, []);
+    byLeague.get(s.fx.league.id).push(s);
+  }
+  for (const group of [...byLeague.values()].sort((a, b) => b.length - a.length)) {
+    const fxs = group.map(s => s.fx), lg = fxs[0].league;
+    const cost = fxs.length * 2 * TEAM_COST;
+    if (used() + cost > budget) { group.forEach(s => { s.why = 'times sem histórico na liga; base pelos times fora do orçamento'; }); continue; }
+    onProgress(`${lg.name}: montando a base pelos jogos dos times… · ${used()} requisições`);
+    let matches;
+    try { matches = await teamPool(api, fxs, lg.season, t => onProgress(`${lg.name}: ${t} · ${used()} requisições`)); }
+    catch (e) { group.forEach(s => { s.why = `base pelos times falhou: ${e.message}`; }); continue; }
+    base.set(lg.id, matches);
+    for (const s of group) {
+      const a = analyze(s.fx, matches, { ...odds.get(s.fx.id), fetchedAt: Date.now() }, banca, true);
+      if (a.skip) s.why = `${a.skip} (mesmo somando todas as competições)`;
+      else { games.push(a); skipped.splice(skipped.indexOf(s), 1); }
+    }
+  }
+
   // 2ª passada: histórico do 1º tempo dos dois times nos jogos mais promissores
   const short = rankGames(games).slice(0, Math.ceil(top * 1.5));
   let gi = 0;
@@ -117,7 +161,7 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
         const withC1 = await api.attachHalfCorners(`tm${t.id}`, g.fx.league.season, last);
         for (const m of withC1) if (m.c1 && byId.has(m.id)) byId.get(m.id).c1 = m.c1;
       }
-      Object.assign(g, analyze(g.fx, matches, { ...odds.get(g.fx.id), fetchedAt: Date.now() }, banca));
+      Object.assign(g, analyze(g.fx, matches, { ...odds.get(g.fx.id), fetchedAt: Date.now() }, banca, g.team_base));
     } catch (e) { g.no_history = `histórico do 1º tempo falhou: ${e.message}`; }
   }
 

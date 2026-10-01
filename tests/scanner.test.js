@@ -50,3 +50,18 @@ test('varredura respeita o orçamento: liga nova que não cabe fica de fora', as
   assert.equal(scan.games.length, 0);
   assert.ok(scan.skipped.length > 0 && scan.skipped.every(s => /orçamento/.test(s.why)));
 });
+
+test('seleções e copas: sem histórico na liga, a base vira os jogos dos times em todas as competições', async () => {
+  const base = demoApi();
+  const asked = [];
+  const api = {
+    ...base,
+    leagueMatches: () => [],   // torneio sem jogos anteriores dos times (Nations League, copa)
+    teamMatches: (id, s) => { asked.push(id); return demo.teamMatches(id, s).map(m => ({ ...m, c1: undefined })); },
+  };
+  const scan = await scanDay(api, { date: '2026-10-01', top: 5, budget: 5000 });
+  assert.ok(scan.games.length > 0, 'jogos analisados pela base dos times');
+  assert.ok(scan.games.every(g => g.team_base && g.alerts.some(a => /todas as competições/.test(a))));
+  assert.ok(scan.games.every(g => g.lines.every(l => l.fragile)));
+  assert.equal(new Set(asked).size, 20, 'todos os times dos jogos do torneio, juntos numa base');
+});
