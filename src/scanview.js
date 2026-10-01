@@ -15,7 +15,7 @@ const dayStr = off => new Date(Date.now() + off * 864e5).toLocaleDateString('sv-
 const BUDGET_KEY = 'afScanBudget';
 
 export function initScan({ api, openEntry, openFull, banca }) {
-  let scan = null, market = null, asian = true, ranked = [];
+  let scan = null, market = null, ranked = [];
   $('#scanDate').innerHTML = [['Hoje', 0], ['Amanhã', 1]].map(([t, o]) => `<option value="${dayStr(o)}">${t} (${dayStr(o).split('-').reverse().slice(0, 2).join('/')})</option>`).join('');
   $('#scanBudget').value = localStorage.getItem(BUDGET_KEY) || 1500;
   const msg = (text, err = false) => { const el = $('#scanMsg'); el.hidden = !text; el.textContent = text || ''; el.classList.toggle('err', err); };
@@ -43,11 +43,10 @@ export function initScan({ api, openEntry, openFull, banca }) {
   function render() {
     const out = $('#scanOut');
     if (!scan) { out.innerHTML = ''; return; }
-    ranked = rankGames(scan.games, { market, asian });
+    ranked = rankGames(scan.games, { market });
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const chips = [['Melhor dos dois', null], ...SCAN_MARKETS.map(m => [m.replace('escanteios ', ''), m])]
-      .map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('')
-      + `<button class="${asian ? 'on' : ''}" data-asian="1" title="Só linhas inteiras e de quarto (4, 4,25, 4,75; −0,25, −0,75…)">Linhas asiáticas</button>`;
+      .map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
     const rows = ranked.map(({ g, line }, i) => {
       const h = line.history || {};
       const hist = [h.home, h.away].map(x => (x && x.n ? `${nb(x.wins)}/${x.n}` : '—')).join(' · ');
@@ -92,7 +91,7 @@ export function initScan({ api, openEntry, openFull, banca }) {
 
   $('#scanOut').addEventListener('click', e => {
     const m = e.target.closest('#scanChips button');
-    if (m) { if (m.dataset.asian) asian = !asian; else market = m.dataset.m || null; render(); return; }
+    if (m) { market = m.dataset.m || null; render(); return; }
     const go = e.target.closest('[data-go]');
     if (go) { $(`#scan-${go.dataset.go}`).scrollIntoView({ behavior: 'smooth' }); return; }
     const full = e.target.closest('[data-full]');

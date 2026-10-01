@@ -25,9 +25,7 @@ test('linhas no texto do surebet.com e do app', () => {
   assert.equal(id('H1(-0.25)'), 'ahH-0.25');
   assert.equal(id('Casa −0,5'), 'ahH-0.5');
   assert.equal(id('X'), 'X');
-  assert.equal(id('Acima 4.0, 4.5 1º período - escanteios'), 'c1O4.25');
-  assert.equal(id('H1(-0.5, -1) 1º período - escanteios'), 'c1hH-0.75');
-  assert.equal(id('Abaixo 4.75 1º período - escanteios'), 'c1U4.75');
+  assert.equal(id('Acima 4.0, 4.5 1º período - escanteios'), 'c1O4.25');   // reconhece; o app oferece a vizinha de 0,5
   assert.equal(id('Ambas marcam - não'), 'bttsN');
   assert.ok(parseLine('Acima 1.5 2º tempo').error);
   assert.ok(parseLine('qualquer coisa').error);

@@ -84,11 +84,10 @@ function goalLines(lh, la) {
 }
 
 // c = centro das linhas, fixo entre cenários para que todas as linhas existam em todos eles.
-// step 0,5: meias-linhas e inteiras; 0,25: também as de quarto (linhas asiáticas 4,25, 4,75…).
-function countLines(key, market, prefix, mu, phi, span, c, step = 0.5) {
+function countLines(key, market, prefix, mu, phi, span, c) {
   const e = pmfEntries(dist(mu, phi, Math.ceil(mu * 3 + 25)));
   const L = [];
-  for (let d = -span; d < span; d += step) {
+  for (let d = -span; d < span; d += 0.5) {   // de 0,5 em 0,5: meias-linhas e linhas inteiras
     const ln = c + d + 0.5;
     if (ln < 0.5) continue;
     L.push({ id: `${key}O${ln}`, market, label: `${prefix}Mais de ${num(ln)}`, ...settle(e, -ln) });
@@ -105,11 +104,10 @@ function diffDist(muH, muA, phiD) {
   return [...diff];
 }
 
-// Handicap sobre a diferença. id: `${key}H${h}` (mandante com handicap h) e `${key}A${-h}`.
-// step 0,25 inclui as linhas asiáticas de quarto (−0,25, −0,75…).
-function handicapLines(key, market, e, span, step = 0.5) {
+// Handicap sobre a diferença, de 0,5 em 0,5. id: `${key}H${h}` (mandante com handicap h) e `${key}A${-h}`.
+function handicapLines(key, market, e, span) {
   const L = [];
-  for (let h = -span; h <= span; h += step) {
+  for (let h = -span; h <= span; h += 0.5) {
     L.push({ id: `${key}H${h}`, market, label: `Casa ${fmt(h)}`, ...settle(e, h) });
     L.push({ id: `${key}A${-h}`, market, label: `Fora ${fmt(-h)}`, ...settle(neg(e), -h) });
   }
@@ -155,8 +153,8 @@ export function raceLines(muH, muA, phi, Ns = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 }
 
 // Mercados de escanteios precificados pelo modelo ancorado num total da Pinnacle: handicap, quem tem mais,
-// corrida (total do jogo) e as linhas do 1º tempo que a Pinnacle não cota (handicap e linhas asiáticas
-// de quarto do total 1T), com o total puxado para o dela.
+// corrida (total do jogo) e as linhas do 1º tempo que a Pinnacle não cota (handicap e linhas inteiras do
+// total 1T), com o total puxado para o dela.
 export const DERIVED = { 'Total escanteios 1T': 'corners1h', 'Handicap de escanteios': 'corners', 'Resultado escanteios': 'corners', 'Corrida de escanteios': 'corners',
   'Handicap escanteios 1T': 'corners1h', 'Resultado escanteios 1T': 'corners1h' };
 
@@ -168,19 +166,19 @@ function buildLines(pred, phi, shift = [0, 0], derived = {}) {
   for (const k of ['corners', 'shots', 'sot']) {
     if (!pred[k]) continue;
     const x = v(k), name = METRICS[k].name, c = { t: Math.round(pred[k].h + pred[k].a), h: Math.round(pred[k].h), a: Math.round(pred[k].a) };
-    L = L.concat(countLines(k, `Total de ${name.toLowerCase()}`, '', x.h + x.a, phi[k], k === 'shots' ? 5 : 4, c.t, k === 'corners' ? 0.25 : 0.5));
+    L = L.concat(countLines(k, `Total de ${name.toLowerCase()}`, '', x.h + x.a, phi[k], k === 'shots' ? 5 : 4, c.t));
     if (k === 'corners') {
       L = L.concat(countLines('cH', 'Escanteios por time', 'Casa: ', x.h, phi[k], 3, c.h));
       L = L.concat(countLines('cA', 'Escanteios por time', 'Fora: ', x.a, phi[k], 3, c.a));
       const d = sh(derived.corners || pred.corners, k), e = diffDist(d.h, d.a, phi.cornersDiff || phi[k]);
-      L = L.concat(handicapLines('ch', 'Handicap de escanteios', e, 5, 0.25), resultLines('cx', 'Resultado escanteios', e, 'escanteios'),
+      L = L.concat(handicapLines('ch', 'Handicap de escanteios', e, 5), resultLines('cx', 'Resultado escanteios', e, 'escanteios'),
         raceLines(d.h, d.a, phi[k]));
     }
   }
   if (pred.corners1h) {
     const x = v('corners1h'), p = pred.corners1h, e = diffDist(x.h, x.a, phi.corners1hDiff);
-    L = L.concat(countLines('c1', 'Total escanteios 1T', '', x.h + x.a, phi.corners1h, 3, Math.round(p.h + p.a), 0.25));
-    L = L.concat(handicapLines('c1h', 'Handicap escanteios 1T', e, 3, 0.25), resultLines('c1x', 'Resultado escanteios 1T', e, 'escanteios no 1º tempo'));
+    L = L.concat(countLines('c1', 'Total escanteios 1T', '', x.h + x.a, phi.corners1h, 3, Math.round(p.h + p.a)));
+    L = L.concat(handicapLines('c1h', 'Handicap escanteios 1T', e, 3), resultLines('c1x', 'Resultado escanteios 1T', e, 'escanteios no 1º tempo'));
   }
   return L;
 }

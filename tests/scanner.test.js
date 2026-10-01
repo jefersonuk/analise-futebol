@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
-import { SCAN_MARKETS, isAsian, rankGames, scanDay } from '../src/scanner.js';
+import { SCAN_MARKETS, rankGames, scanDay } from '../src/scanner.js';
 import { TIER_ORDER } from '../src/consistency.js';
 
 // Demo sem os escanteios do 1º tempo da liga (como na varredura real): só os dos times, sob demanda.
@@ -38,10 +38,9 @@ test('varredura: ranking pela linha de escanteios do 1º tempo mais consistente,
   assert.ok(scan.games[0].c1_known.every(n => n > 0));
   // ordem: nível de consistência nunca piora ao descer o ranking entre candidatas
   const ranked = rankGames(scan.games).map(x => x.line);
-  // linhas asiáticas do 1º tempo: quartos existem e o filtro só deixa inteiras e de quarto
-  assert.ok(scan.games[0].lines.some(l => /^c1(O|U|h[HA])-?\d+\.(25|75)$/.test(l.id)));
-  assert.ok(rankGames(scan.games, { asian: true }).every(x => isAsian(x.line.id)));
-  assert.equal(isAsian('c1O4.5'), false); assert.equal(isAsian('c1hH-0.75'), true); assert.equal(isAsian('c1U4'), true);
+  // linhas do 1º tempo de 0,5 em 0,5 (meias e inteiras), sem quartos
+  assert.ok(scan.games.every(g => g.lines.every(l => Math.abs(parseFloat(l.id.match(/-?[\d.]+$/)[0]) * 2 % 1) < 1e-9)));
+  assert.ok(scan.games[0].lines.some(l => /^c1(O|U)\d+$/.test(l.id)), 'linha inteira do total 1T');
   for (let i = 1; i < ranked.length; i++) assert.ok(TIER_ORDER[ranked[i - 1].tier] <= TIER_ORDER[ranked[i].tier] || ranked[i - 1].tier === 'âncora');
 });
 
