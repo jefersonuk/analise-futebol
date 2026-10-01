@@ -24,7 +24,9 @@ async function call(path, params) {
   const json = await res.json();
   const errs = json.errors && !Array.isArray(json.errors) ? Object.values(json.errors) : json.errors || [];
   if (errs.length) throw new Error(errs.join(' · '));
-  return json.response;
+  const out = json.response;
+  if (json.paging && Array.isArray(out)) Object.defineProperty(out, 'paging', { value: json.paging });
+  return out;
 }
 
 // ---- cache compartilhado no GitHub (repositório privado) ----
@@ -130,10 +132,13 @@ export const teamMatches = (teamId, season, onProgress) => pick('teamMatches', t
 export const injuries = fixtureId => pick('injuries', fixtureId);
 export const standings = (leagueId, season) => pick('standings', leagueId, season);
 export const lastPlayed = teamId => pick('lastPlayed', teamId);
-export const attachHalfCorners = (scope, season, matches, onProgress) =>
-  pick('attachHalfCorners', scope, season, matches, onProgress);
+export const attachHalfCorners = (scope, season, matches, onProgress, opts) =>
+  pick('attachHalfCorners', scope, season, matches, onProgress, opts);
+export const dayFixtures = date => pick('dayFixtures', date);
+export const dayOdds = (date, bet) => pick('dayOdds', date, bet);
+export const hasLeague = (leagueId, season) => pick('hasLeague', leagueId, season);
 export const stats = () => (isDemo() ? { api: 0, cache: 0 } : client.stats());
 
 // O conjunto que o dossiê do especialista usa (mesma interface do script do Claude Code).
 export const dossierApi = { searchTeams, upcoming, leaguesOf, leagueMatches, teamMatches, attachHalfCorners, fixtureOdds,
-  injuries, standings, lastPlayed, indexMatches, quota: () => remaining };
+  injuries, standings, lastPlayed, indexMatches, dayFixtures, dayOdds, hasLeague, stats, quota: () => remaining };

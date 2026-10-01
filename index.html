@@ -44,6 +44,18 @@
   <p id="msg" class="msg" hidden></p>
 </section>
 
+<section class="card" id="scanSec">
+  <h2>🔎 Melhores do dia: escanteios do 1º tempo <span class="muted">jogos em que a Pinnacle cota o 1º tempo, ordenados pela linha mais consistente</span></h2>
+  <div class="row">
+    <select id="scanDate"></select>
+    <label for="scanBudget">Limite de requisições</label>
+    <input id="scanBudget" type="number" min="50" step="50" inputmode="numeric">
+    <button id="scanRun" class="primary">Varrer jogos</button>
+  </div>
+  <p id="scanMsg" class="msg" hidden></p>
+  <div id="scanOut"></div>
+</section>
+
 <main id="out" hidden>
   <section class="card">
     <h2 id="title"></h2>

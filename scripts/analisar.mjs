@@ -54,7 +54,9 @@ function nodeClient(key) {
     const json = await res.json();
     const errs = json.errors && !Array.isArray(json.errors) ? Object.values(json.errors) : json.errors || [];
     if (errs.length) throw new Error(errs.join(' · '));
-    return json.response;
+    const out = json.response;
+    if (json.paging && Array.isArray(out)) Object.defineProperty(out, 'paging', { value: json.paging });
+    return out;
   };
   const local = {
     load: k => { try { return JSON.parse(fs.readFileSync(file(k), 'utf8')); } catch { return null; } },

@@ -198,6 +198,60 @@ export function lineHistory(id, teams) {
   return { home: one(teams.find(t => t.role === 'home')), away: one(teams.find(t => t.role === 'away')) };
 }
 
+// Preço de cada linha do modelo: com Pinnacle (mistura log-linear, odd mínima ×1,03/×1,05), ancorada
+// ou só do modelo (modelEntry), e as linhas de mercado soft sem preço (model_only). Usado pelo dossiê
+// e pela varredura do dia. teams: [{ role, name, games }]; only: filtro opcional de linhas.
+export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000, only = null }) {
+  const hist = l => lineHistory(l.id, teams);
+  const g1x2 = ['1', 'X', '2'];
+  const x12 = g1x2.every(id => fair.has(id)) ? (() => {
+    const lines = g1x2.map(id => res.lines.find(l => l.id === id));
+    const raw = lines.map((l, i) => fair.get(g1x2[i]) ** 0.9 * cond(l) ** 0.1), z = raw.reduce((s, x) => s + x, 0);
+    return Object.fromEntries(g1x2.map((id, i) => [id, raw[i] / z]));
+  })() : {};
+
+  const stake = (p, odd) => stakeFor(p, odd, banca);
+
+  const priced = [], anchored = [], modelOnly = [];
+  for (const l of res.lines) {
+    if (only && !only(l)) continue;
+    const pm = cond(l), range = l.sc.map(cond), odd = odds.get(l.id), pp = fair.get(l.id);
+    const soft = /escanteios|chutes/i.test(l.market);
+    const base = { id: l.id, market: l.market, line: l.label, p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
+      fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0 };
+    const hi = hist(l), cons = p => consistency({ p, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
+    if (odd && pp != null) {
+      const pb = x12[l.id] ?? blend(pp, pm, W_MODEL[l.market] ?? 0.1), e = ev(l, odd), diff = (pm - pp) * 100;
+      const fragile = alerts.length > 0 || Math.abs(diff) >= (soft ? 10 : 5);
+      const oddMin = (1 / pb) * (fragile ? 1.05 : 1.03), c = cons(pb);
+      priced.push({ ...base, priced_by: 'pinnacle', pinnacle_odd: odd, p_pinnacle: r(pp), diff_pp: r(diff, 1), p_blend: r(pb),
+        tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
+        fair_odd_blend: r(1 / pb, 2), fragile, odd_min: r(oddMin, 2),
+        odd_min_vs_pinnacle_pct: r((oddMin / odd - 1) * 100, 1), ...stake(pb, oddMin),
+        ev_model_at_pinnacle: r(e.mid), ev_model_worst: r(e.low), history: hi });
+    } else if (res.anchors[DERIVED[l.market]] || !odds.size) {
+      // Sem preço na API para esta linha: mercado de escanteios derivado (handicap, quem tem mais, corrida)
+      // com o total ancorado na Pinnacle (margem 5%), ou, quando a Pinnacle ainda não publicou nada para o
+      // jogo, o modelo puro (margem 8%). Sempre frágil.
+      anchored.push(modelEntry(l, { res, hi, banca }));
+    } else if (pm >= 0.35 && soft && odds.size) {
+      const c = cons(pm);
+      if (c.tier !== 'especulativa' || pm <= 0.65)
+        modelOnly.push({ ...base, tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
+          odd_min_model_only: r(fairOdd(l) * 1.08, 2), history: hi });
+    }
+  }
+  return { priced, anchored, modelOnly };
+}
+
+// Candidata (consistência primeiro, preço depois): âncora/sólida, odd mínima ≥ 1,50 e permitida pela
+// Política E, e que uma casa soft consegue pagar (até ~5% acima da Pinnacle).
+export const isCandidate = l => l.tier !== 'especulativa' && l.odd_min >= ODD_FLOOR && l.politica_e !== 'não entrar'
+  && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5);
+// Ordem: nível, não frágil antes de frágil, score de consistência, facilidade do preço.
+export const byConsistency = (a, b) => TIER_ORDER[a.tier] - TIER_ORDER[b.tier] || a.fragile - b.fragile
+  || b.consistency_score - a.consistency_score || (a.odd_min_vs_pinnacle_pct ?? 99) - (b.odd_min_vs_pinnacle_pct ?? 99);
+
 // fx: jogo (de upcoming). team: time buscado. fixtures: próximos jogos dele (evita chamada repetida).
 // matches/lg: jogos da liga já baixados pelo app (opcional). banca em R$.
 // oddsPayload: resultado de api.fixtureOdds já buscado pelo app (para a tabela e o dossiê usarem as mesmas odds).
@@ -285,53 +339,14 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   };
 
   // ---- linhas ----
-  const hist = l => lineHistory(l.id, [{ role: 'home', name: fx.home.name, games: recent[fx.home.id] },
-    { role: 'away', name: fx.away.name, games: recent[fx.away.id] }]);
-  const g1x2 = ['1', 'X', '2'];
-  const x12 = g1x2.every(id => fair.has(id)) ? (() => {
-    const lines = g1x2.map(id => res.lines.find(l => l.id === id));
-    const raw = lines.map((l, i) => fair.get(g1x2[i]) ** 0.9 * cond(l) ** 0.1), z = raw.reduce((s, x) => s + x, 0);
-    return Object.fromEntries(g1x2.map((id, i) => [id, raw[i] / z]));
-  })() : {};
-
-  const stake = (p, odd) => stakeFor(p, odd, banca);
-
-  const priced = [], anchored = [], modelOnly = [];
-  for (const l of res.lines) {
-    const pm = cond(l), range = l.sc.map(cond), odd = odds.get(l.id), pp = fair.get(l.id);
-    const soft = /escanteios|chutes/i.test(l.market);
-    const base = { id: l.id, market: l.market, line: l.label, p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
-      fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0 };
-    const hi = hist(l), cons = p => consistency({ p, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
-    if (odd && pp != null) {
-      const pb = x12[l.id] ?? blend(pp, pm, W_MODEL[l.market] ?? 0.1), e = ev(l, odd), diff = (pm - pp) * 100;
-      const fragile = alerts.length > 0 || Math.abs(diff) >= (soft ? 10 : 5);
-      const oddMin = (1 / pb) * (fragile ? 1.05 : 1.03), c = cons(pb);
-      priced.push({ ...base, priced_by: 'pinnacle', pinnacle_odd: odd, p_pinnacle: r(pp), diff_pp: r(diff, 1), p_blend: r(pb),
-        tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
-        fair_odd_blend: r(1 / pb, 2), fragile, odd_min: r(oddMin, 2),
-        odd_min_vs_pinnacle_pct: r((oddMin / odd - 1) * 100, 1), ...stake(pb, oddMin),
-        ev_model_at_pinnacle: r(e.mid), ev_model_worst: r(e.low), history: hi });
-    } else if (res.anchors[DERIVED[l.market]] || !odds.size) {
-      // Sem preço na API para esta linha: mercado de escanteios derivado (handicap, quem tem mais, corrida)
-      // com o total ancorado na Pinnacle (margem 5%), ou, quando a Pinnacle ainda não publicou nada para o
-      // jogo, o modelo puro (margem 8%). Sempre frágil.
-      anchored.push(modelEntry(l, { res, hi, banca }));
-    } else if (pm >= 0.35 && soft && odds.size) {
-      const c = cons(pm);
-      if (c.tier !== 'especulativa' || pm <= 0.65)
-        modelOnly.push({ ...base, tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
-          odd_min_model_only: r(fairOdd(l) * 1.08, 2), history: hi });
-    }
-  }
+  const teamsHist = [{ role: 'home', name: fx.home.name, games: recent[fx.home.id] },
+    { role: 'away', name: fx.away.name, games: recent[fx.away.id] }];
+  const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams: teamsHist, banca });
   priced.sort((a, b) => Math.abs(b.diff_pp) - Math.abs(a.diff_pp));
   // Candidatas — consistência primeiro, preço depois: só linhas âncora/sólida, com odd mínima dentro da
   // faixa operada (≥ 1,50 e permitida pela Política E) e que uma casa soft consegue pagar (até ~5% acima da Pinnacle).
   // Ordem: nível de consistência, não frágil antes de frágil, score de consistência, facilidade do preço.
-  const ranked = l => l.tier !== 'especulativa' && l.odd_min >= ODD_FLOOR && l.politica_e !== 'não entrar'
-    && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5);
-  const order = (a, b) => TIER_ORDER[a.tier] - TIER_ORDER[b.tier] || a.fragile - b.fragile
-    || b.consistency_score - a.consistency_score || (a.odd_min_vs_pinnacle_pct ?? 99) - (b.odd_min_vs_pinnacle_pct ?? 99);
+  const ranked = isCandidate, order = byConsistency;
   const candidatesFocus = priced.concat(anchored).filter(l => FOCUS.includes(l.market) && ranked(l))
     .sort(order).filter(distinct()).slice(0, 8).map(l => l.id);
   const candidates = priced.concat(anchored)

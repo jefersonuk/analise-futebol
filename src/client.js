@@ -37,6 +37,7 @@ const fixtureOut = f => ({
   away: { id: f.teams.away.id, name: f.teams.away.name },
 });
 
+const TZ = 'America/Sao_Paulo';
 export const HALF_FROM = 2024;   // a API só tem estatística por tempo a partir da temporada 2024
 const HALF_RATE = 3;             // requisições por segundo (~180/min, abaixo do limite por minuto do plano)
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -129,11 +130,12 @@ export function makeClient({ get: rawGet, load, save }) {
 
     // Escanteios do 1º tempo de cada jogo encerrado (1 requisição por jogo: o lote ?ids= não traz
     // estatística por tempo). Fica guardado por jogo; só os novos são baixados. Devolve os jogos com c1.
-    async attachHalfCorners(scope, season, matches, onProgress) {
+    // onlyCached: só o que já está guardado, sem nenhuma requisição (varredura do dia).
+    async attachHalfCorners(scope, season, matches, onProgress, { onlyCached = false } = {}) {
       if (season < HALF_FROM) return matches;
       const key = `af:h1:${scope}:${season}`;
       const store = (await load(key)) || { m: {} };
-      const pending = matches.filter(m => store.m[m.id] === undefined).map(m => m.id);
+      const pending = onlyCached ? [] : matches.filter(m => store.m[m.id] === undefined).map(m => m.id);
       if (!pending.length) stats.cache++;
       let done = 0;
       for (const ids of chunk(pending, HALF_RATE)) {
@@ -162,6 +164,29 @@ export function makeClient({ get: rawGet, load, save }) {
       if (pending.length) await save(key, store);
       return matches.map(m => ({ ...m, c1: store.m[m.id] ?? null }));
     },
+
+    // Jogos de uma data (fuso de Brasília) que ainda não começaram. Validade de 30 min.
+    dayFixtures: date => cached(`af:day:${date}`, 30 * 60e3, async () =>
+      (await get('/fixtures', { date, timezone: TZ })).filter(f => f.fixture.status.short === 'NS').map(fixtureOut)),
+
+    // Odds da Pinnacle de um mercado para todos os jogos de uma data (paginado, 10 jogos por página).
+    // Validade de 20 min: a API só atualiza odds a cada ~3 h. Devolve [{ fixture, league, updatedAt, bookmakers }].
+    dayOdds: (date, bet) => cached(`af:dayodds:${date}:${bet}`, 20 * 60e3, async () => {
+      const out = [];
+      let tz = { timezone: TZ };
+      for (let page = 1, total = 1; page <= total && page <= 60; page++) {
+        let res;
+        try { res = await get('/odds', { date, bookmaker: 4, bet, page, ...tz }); }
+        catch (e) { if (tz.timezone && /timezone/i.test(e.message)) { tz = {}; page--; continue; } throw e; }
+        total = res.paging?.total || total;
+        for (const r of res) out.push({ fixture: r.fixture.id, league: { id: r.league.id, name: r.league.name, season: r.league.season,
+          country: r.league.country }, updatedAt: r.update || null, bookmakers: r.bookmakers || [] });
+      }
+      return out;
+    }),
+
+    // A liga/temporada já está guardada neste dispositivo (ou na nuvem)? Sem requisição à API-Football.
+    hasLeague: async (leagueId, season) => !!(await load(`af:lg:${leagueId}:${season}`)),
 
     // Jogos encerrados de uma liga/temporada, com estatísticas.
     leagueMatches: (leagueId, season, onProgress) =>

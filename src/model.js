@@ -7,6 +7,7 @@ export const RHO = -0.13;          // correção Dixon-Coles para placares baixo
 const MAXG = 10;
 const VMR_CAP = { corners: 1.35, shots: 1.6, sot: 1.6, corners1h: 1.6 };
 const ANCHOR_W = 0.8;   // peso da Pinnacle ao ancorar o total de escanteios do 1º tempo
+export const SHARE_1H = 0.472;   // fração dos escanteios no 1º tempo (Footiqo, 141 mil jogos) quando a liga não tem dado
 
 // PMF de contagem com média mu e variância phi*mu (Poisson se phi ~ 1, senão binomial negativa).
 export function dist(mu, phi, max) {
@@ -216,7 +217,9 @@ const ALWAYS = new Set(['1X2', 'Ambas marcam', 'Resultado escanteios', 'Resultad
 // fair: probabilidades sem margem da Pinnacle (odds.js collect). Quando ela precifica o total de
 // escanteios do 1º tempo, o total do modelo é puxado para o dela (peso ANCHOR_W) mantendo a divisão
 // entre os times — é daí que sai o handicap do 1º tempo, mercado que a API não traz.
-export function analyzeMatch(matches, home, away, refTime, { fair = null } = {}) {
+// share1hBelow: abaixo dessa cobertura de escanteios do 1º tempo, o 1º tempo sai dos escanteios do jogo
+// × fração do 1º tempo (a varredura do dia usa 0,5; a análise de um jogo, só quando não há ajuste).
+export function analyzeMatch(matches, home, away, refTime, { fair = null, share1hBelow = 0 } = {}) {
   const prep = prepare(matches, refTime);
   const fits = {}, pred = {}, phi = { goals: 1 }, anchors = {};
   for (const k of Object.keys(METRICS)) {
@@ -228,6 +231,14 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null } = {})
       if (k === 'corners1h') phi.corners1hDiff = r.diff;
       if (k === 'corners') phi.cornersDiff = r.diff;
     }
+  }
+  if (pred.corners && (!pred.corners1h || prep.coverage1h < share1hBelow)) {
+    let c1 = 0, c = 0, n = 0;
+    for (const m of prep.rows) if (m.c1 && m.s) { c1 += m.c1[0] + m.c1[1]; c += m.s[4] + m.s[9]; n++; }
+    const share = n >= 30 && c ? c1 / c : SHARE_1H;
+    pred.corners1h = { ...pred.corners, h: pred.corners.h * share, a: pred.corners.a * share };
+    phi.corners1h = phi.corners; phi.corners1hDiff = phi.cornersDiff;
+    anchors.corners1hShare = { share, from_games: n };
   }
   if (pred.corners1h && fair) {
     const imp = impliedTotal(fair, 'c1', phi.corners1h), p = pred.corners1h, model = p.h + p.a;

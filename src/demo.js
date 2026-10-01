@@ -73,6 +73,12 @@ export const leaguesOf = () => [LEAGUE];
 export const leagueMatches = (leagueId, season) => schedule(season).filter(g => g.t < Date.now()).map(play);
 export const injuries = () => [];
 export const attachHalfCorners = (scope, season, matches) => matches;
+export const hasLeague = () => true;
+// Jogos do dia na demo: a próxima rodada inteira.
+const nextRound = () => { const f = schedule(SEASON()).filter(g => g.t > Date.now()); return f.filter(g => g.t === f[0]?.t); };
+export const dayFixtures = () => nextRound().map(g => out(g, SEASON()));
+export const dayOdds = () => nextRound().map(g => { const o = fixtureOdds(g.id);
+  return { fixture: g.id, league: { ...LEAGUE, season: SEASON() }, updatedAt: o.updatedAt, bookmakers: o.bookmakers }; });
 export const teamMatches = (teamId, season) => leagueMatches(1, season).filter(m => m.h === teamId || m.a === teamId);
 
 export function standings(leagueId, season) {

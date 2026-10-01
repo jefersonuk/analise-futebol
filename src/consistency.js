@@ -13,7 +13,8 @@ export function consistency({ p, pLow, hits = [] }) {
   const wins = hits.reduce((s, h) => s + h.wins, 0), n = hits.reduce((s, h) => s + h.n, 0);
   const hitShrunk = (wins + PRIOR * p) / (n + PRIOR);
   const score = 0.5 * p + 0.25 * pLow + 0.25 * hitShrunk;
-  const eachTeamOk = hits.length > 0 && hits.every(h => !h.n || h.wins / h.n >= 0.6);
+  // âncora exige histórico de verdade: os dois times com 5+ jogos na linha e 60%+ de acerto
+  const eachTeamOk = hits.length > 0 && hits.every(h => h.n >= 5 && h.wins / h.n >= 0.6);
   const bothOk = n < 10 || wins / n >= 0.5;   // o histórico somado não pode contradizer a linha
   const tier = p >= 0.6 && pLow >= 0.5 && eachTeamOk ? 'âncora'
     : p >= 0.52 && pLow >= 0.42 && bothOk ? 'sólida'

@@ -6,6 +6,7 @@ import { BETS_URL, betsApp, buildEntry, sendEntry } from './entry.js';
 import { bindTooltips, pickDashboard, renderDashboard } from './dashboard.js';
 import { FOCUS, ODDS_STALE_MIN, buildDossier, loadLeague, resolveBase, side } from './dossier.js';
 import { alternatives, makePricer, nearest, parseLine, renderMyLine, verdict } from './myline.js';
+import { initScan } from './scanview.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -403,10 +404,11 @@ $('#dash').addEventListener('click', e => {
   if (b) openEntry(b.dataset.enter);
 });
 
-function openEntry(id, odd = null) {
-  const line = lineById(id), app = betsApp(), fx = state.fixture;
+// ctx: { line, fx, btn } quando a linha vem de fora da análise aberta (varredura do dia)
+function openEntry(id, odd = null, ctx = null) {
+  const line = ctx?.line || lineById(id), app = betsApp(), fx = ctx?.fx || state.fixture;
   if (!line) return;
-  entry = { line, houses: app.houses };
+  entry = { line, fx, houses: app.houses, btn: ctx?.btn };
   $('#enTitle').textContent = `${line.market}: ${line.line}`;
   $('#enGame').textContent = `${fx.home.name} x ${fx.away.name} · ${fx.league.name} · ${hour(fx.t)}`;
   $('#enFacts').innerHTML = [
@@ -468,11 +470,26 @@ $('#entryForm').onsubmit = e => {
   const h = entryHouse(), odd = parseFloat($('#enOdd').value), stake = parseFloat($('#enStake').value);
   if (!h?.name) return showEntryMsg('Escolha ou digite a casa.', true);
   if (!(odd > 1) || !(stake > 0)) return showEntryMsg('Informe a odd e a stake.', true);
-  sendEntry(buildEntry({ line: entry.line, fx: state.fixture, casa: h.name, currency: h.currency, odd, stake }));
+  sendEntry(buildEntry({ line: entry.line, fx: entry.fx, casa: h.name, currency: h.currency, odd, stake }));
   $('#enSend').disabled = true;
   showEntryMsg(`Enviada ✓ ${esc(h.name)} @ ${num(odd)}, ${money(stake)}. O app de apostas registra ao abrir (aba ⚽ Análise). `
     + `<a href="${BETS_URL}" target="apostas">Abrir app de apostas ↗</a>`);
   window.open(BETS_URL, 'apostas');
-  const btn = document.querySelector(`[data-enter="${CSS.escape(entry.line.id)}"]`);
+  const btn = entry.btn || document.querySelector(`[data-enter="${CSS.escape(entry.line.id)}"]`);
   if (btn) { btn.textContent = '✓ Enviada'; btn.disabled = true; }
 };
+
+// ---- varredura do dia ----
+// Abre a análise completa de um jogo vindo da varredura (mesmo fluxo do botão "Analisar jogo").
+function openFull(fx) {
+  state.teams = [{ id: fx.home.id, name: fx.home.name }];
+  state.fixtures = [fx];
+  $('#teamSel').innerHTML = `<option value="${fx.home.id}">${esc(fx.home.name)}</option>`;
+  $('#fixSel').innerHTML = `<option value="0">${hour(fx.t)} · ${esc(fx.home.name)} x ${esc(fx.away.name)} · ${esc(fx.league.name)}</option>`;
+  $('#teamSel').hidden = false; $('#fixSel').hidden = false;
+  $('#btnRun').disabled = false;
+  $('#teamInput').value = fx.home.name;
+  $('#btnRun').scrollIntoView({ behavior: 'smooth' });
+  $('#btnRun').click();
+}
+initScan({ api, openEntry, openFull, banca: BANCA });
