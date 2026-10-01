@@ -32,6 +32,10 @@ const fixtureOut = f => ({
   away: { id: f.teams.away.id, name: f.teams.away.name },
 });
 
+export const HALF_FROM = 2024;   // a API só tem estatística por tempo a partir da temporada 2024
+const HALF_RATE = 3;             // requisições por segundo (~180/min, abaixo do limite por minuto do plano)
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
 export function makeClient({ get, load, save }) {
   async function cached(key, ttl, fn) {
     const hit = load(key);
@@ -73,6 +77,41 @@ export function makeClient({ get, load, save }) {
         team: s.team.id, rank: s.rank, points: s.points, played: s.all.played, gd: s.goalsDiff,
         form: s.form, group: s.group, zone: s.description,
       }))),
+
+    // Escanteios do 1º tempo de cada jogo encerrado (1 requisição por jogo: o lote ?ids= não traz
+    // estatística por tempo). Fica em cache por jogo; só os novos são baixados. Devolve os jogos com c1.
+    async attachHalfCorners(leagueId, season, matches, onProgress) {
+      if (season < HALF_FROM) return matches;
+      const key = `af:h1:${leagueId}:${season}`;
+      const store = load(key) || { m: {} };
+      const pending = matches.filter(m => store.m[m.id] === undefined).map(m => m.id);
+      let done = 0;
+      for (const ids of chunk(pending, HALF_RATE)) {
+        const started = Date.now();
+        await Promise.all(ids.map(async id => {
+          let res;
+          for (let tries = 0; ; tries++) {
+            try { res = await get('/fixtures/statistics', { fixture: id, half: 'true' }); break; }
+            catch (e) {
+              if (tries < 2 && /many|limit|rate/i.test(e.message)) { await sleep(20e3); continue; }
+              throw e;
+            }
+          }
+          const by = Object.fromEntries(res.map(t => [t.team.id, t.statistics_1h || []]));
+          const m = matches.find(x => x.id === id);
+          const c = t => by[t]?.find(x => x.type === 'Corner Kicks');
+          const h = c(m.h), a = c(m.a);
+          if (h || a) store.m[id] = [Number(h?.value) || 0, Number(a?.value) || 0];
+          else if (Date.now() - m.t > 2 * 24 * HOUR) store.m[id] = null;   // sem dado (recente: tenta de novo depois)
+        }));
+        done += ids.length;
+        onProgress?.(done, pending.length);
+        if (done % 30 === 0 || done === pending.length) save(key, store);
+        await sleep(Math.max(0, 1000 - (Date.now() - started)));
+      }
+      save(key, store);
+      return matches.map(m => ({ ...m, c1: store.m[m.id] ?? null }));
+    },
 
     // Todos os jogos encerrados de uma liga/temporada, com estatísticas.
     // Jogo encerrado não muda: fica em cache e só os novos são baixados.

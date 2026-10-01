@@ -46,3 +46,29 @@ test('consistência: acerto alto e estável vira âncora; histórico contra derr
   const b = consistency({ p: 0.62, pLow: 0.52, hits: [{ wins: 5, n: 10 }, { wins: 5, n: 10 }] });
   assert.ok(a.score > b.score);
 });
+
+test('handicap de escanteios 1T usa o saldo de escanteios do 1º tempo do time', () => {
+  const gs = [{ ...g(1, 0, 6, 2), c1: [3, 1] }, { ...g(0, 0, 4, 4), c1: [1, 2] }, { ...g(2, 2, 5, 5), c1: null }];
+  const home = history('c1hH-1', 'home', 'Casa', gs), away = history('c1hH-1', 'away', 'Fora', gs);
+  assert.deepEqual(home.bars.map(b => b.v).reverse(), [2, -1]);   // jogo sem dado de 1º tempo fica de fora
+  assert.deepEqual(home.bars.map(b => b.res).reverse(), ['win', 'lose']);
+  assert.deepEqual(away.bars.map(b => b.res).reverse(), ['lose', 'push']);   // visto pelo visitante: perder o 1T por 1 = devolve
+  assert.deepEqual(history('c1O2.5', 'home', 'Casa', gs).bars.map(b => b.res).reverse(), ['win', 'win']);
+});
+
+import { pickDashboard } from '../src/dashboard.js';
+
+test('painel em foco: candidata de cada mercado, escada só na faixa 1,50–3,00', () => {
+  const L = (id, market, tier, score, odd) => ({ id, market, tier, consistency_score: score, odd_min: odd, politica_e: odd > 3 ? 'não entrar' : 'cheia', odd_min_vs_pinnacle_pct: 0, p_model_range: [0.5, 0.6] });
+  const dossier = {
+    focus_markets: ['Total de gols', 'Handicap escanteios 1T'],
+    candidates_focus: ['gO1.5', 'c1hA1.5'], candidates: ['gO1.5'],
+    lines_with_pinnacle: [L('gO1.5', 'Total de gols', 'sólida', 0.6, 1.7), L('gO2.5', 'Total de gols', 'especulativa', 0.4, 2.2), L('1', '1X2', 'sólida', 0.6, 1.9)],
+    lines_anchored: [L('c1hA1.5', 'Handicap escanteios 1T', 'sólida', 0.6, 1.75), L('c1hA3', 'Handicap escanteios 1T', 'âncora', 0.9, 1.23), L('c1hA1', 'Handicap escanteios 1T', 'sólida', 0.55, 2.0)],
+  };
+  const side = id => id.replace(/-?[\d.]+$/, '');
+  const ids = pickDashboard(dossier, 5, { focus: true, side }).map(l => l.id);
+  assert.deepEqual(ids.slice(0, 3), ['gO1.5', 'c1hA1.5', 'c1hA1']);   // escada pula a odd 1,23
+  assert.ok(!ids.includes('1'));                                     // foco não mostra 1X2
+  assert.ok(pickDashboard(dossier, 5, { focus: false, side }).some(l => l.id === '1'));
+});

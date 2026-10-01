@@ -115,3 +115,19 @@ test('política E por faixa de odd', () => {
   assert.equal(politicaE(3).factor, 0.25);
   assert.equal(politicaE(3.01).factor, 0);
 });
+
+test('escanteios 1º tempo: total ancorado na Pinnacle e handicap coerente', () => {
+  const matches = leagueMatches(1, 2025).concat(leagueMatches(1, 2024));
+  const free = analyzeMatch(matches, 9001, 9002, Date.UTC(2026, 0, 10));
+  const model = free.pred.corners1h.h + free.pred.corners1h.a;
+  // Pinnacle "precifica" 4,5 com over a 40%: total implícito abaixo do modelo
+  const fair = new Map([['c1O4.5', 0.4], ['c1U4.5', 0.6]]);
+  const anc = analyzeMatch(matches, 9001, 9002, Date.UTC(2026, 0, 10), { fair });
+  const t = anc.pred.corners1h.h + anc.pred.corners1h.a;
+  assert.ok(anc.anchors.corners1h && t < model, `${t} vs ${model}`);
+  near(anc.pred.corners1h.h / anc.pred.corners1h.a, free.pred.corners1h.h / free.pred.corners1h.a, 1e-9);   // divisão entre os times mantida
+  const h = id => anc.lines.find(l => l.id === id);
+  const home = h('c1hH-0.5'), away = h('c1hA0.5');
+  if (home && away) near(home.pWin + away.pWin, 1, 1e-9);
+  assert.ok(anc.lines.some(l => l.market === 'Handicap escanteios 1T'));
+});

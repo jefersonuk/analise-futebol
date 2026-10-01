@@ -41,6 +41,7 @@ function play(g) {
     id: g.id, t: g.t, h: TEAMS[g.h].id, a: TEAMS[g.a].id, hn: TEAMS[g.h].name, an: TEAMS[g.a].name,
     hg: h.goals, ag: a.goals,
     s: [h.inside, h.out, h.sot, h.tot, h.cor, a.inside, a.out, a.sot, a.tot, a.cor],
+    c1: [Math.round(h.cor * (0.38 + r() * 0.16)), Math.round(a.cor * (0.38 + r() * 0.16))],
   };
 }
 
@@ -71,6 +72,7 @@ export function lastPlayed(teamId) {
 export const leaguesOf = () => [LEAGUE];
 export const leagueMatches = (leagueId, season) => schedule(season).filter(g => g.t < Date.now()).map(play);
 export const injuries = () => [];
+export const attachHalfCorners = (leagueId, season, matches) => matches;
 
 export function standings(leagueId, season) {
   const tab = new Map(TEAMS.map(t => [t.id, { team: t.id, points: 0, played: 0, gd: 0 }]));
@@ -101,6 +103,8 @@ export function fixtureOdds(fixtureId) {
   const muC = 5 * 1.1 * H.cor + 5 * 0.9 * A.cor, pc = dist(muC, 1, 60).map((p, k) => [k, p]);
   for (let L = Math.round(muC) - 1.5; L <= Math.round(muC) + 1.5; L++)
     co.push({ value: `Over ${L}`, odd: odd(eff(settle(pc, -L))) }, { value: `Under ${L}`, odd: odd(eff(settle(neg(pc), L))) });
-  bets.push({ id: 4, values: ah }, { id: 5, values: ou }, { id: 45, values: co });
+  const c1 = [], pc1 = dist(0.46 * muC, 1, 40).map((p, k) => [k, p]);
+  for (const L of [3.5, 4.5, 5.5]) c1.push({ value: `Over ${L}`, odd: odd(eff(settle(pc1, -L))) }, { value: `Under ${L}`, odd: odd(eff(settle(neg(pc1), L))) });
+  bets.push({ id: 4, values: ah }, { id: 5, values: ou }, { id: 45, values: co }, { id: 77, values: c1 });
   return { updatedAt: new Date(Date.now() - 40 * 60e3).toISOString(), fetchedAt: Date.now(), bookmakers: [{ id: 4, name: 'Pinnacle', bets }] };
 }

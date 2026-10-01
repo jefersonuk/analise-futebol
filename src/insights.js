@@ -17,6 +17,7 @@ export function recentGames(prep, team, n = 10) {
         gf: home ? m.hg : m.ag, ga: home ? m.ag : m.hg,
         xf: s ? prep.xg(m, home) : null, xa: s ? prep.xg(m, !home) : null,
         corners: pick(4), shots: pick(3), sot: pick(2),
+        c1: m.c1 ? (home ? [m.c1[0], m.c1[1]] : [m.c1[1], m.c1[0]]) : null,
       };
     });
 }

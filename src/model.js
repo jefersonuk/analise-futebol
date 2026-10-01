@@ -1,11 +1,12 @@
 // Probabilidades de cada linha a partir das forças da liga (ratings.js).
 
-import { METRICS, fit, predict, prepare } from './ratings.js';
+import { METRICS, fit, observe, predict, prepare } from './ratings.js';
 
 export { METRICS };
 export const RHO = -0.13;          // correção Dixon-Coles para placares baixos
 const MAXG = 10;
-const VMR_CAP = { corners: 1.35, shots: 1.6, sot: 1.6 };
+const VMR_CAP = { corners: 1.35, shots: 1.6, sot: 1.6, corners1h: 1.6 };
+const ANCHOR_W = 0.8;   // peso da Pinnacle ao ancorar o total de escanteios do 1º tempo
 
 // PMF de contagem com média mu e variância phi*mu (Poisson se phi ~ 1, senão binomial negativa).
 export function dist(mu, phi, max) {
@@ -94,6 +95,20 @@ function countLines(key, market, prefix, mu, phi, span, c) {
   return L;
 }
 
+// Handicap sobre a diferença casa − fora de duas contagens (binomiais negativas com a dispersão
+// da diferença medida na liga). id: `${key}H${h}` (mandante com handicap h) e `${key}A${-h}`.
+function handicapLines(key, market, muH, muA, phiD, span) {
+  const max = Math.ceil(Math.max(muH, muA) * 3 + 20);
+  const ph = dist(muH, phiD, max), pa = dist(muA, phiD, max), diff = new Map();
+  for (let i = 0; i <= max; i++) for (let j = 0; j <= max; j++) diff.set(i - j, (diff.get(i - j) || 0) + ph[i] * pa[j]);
+  const e = [...diff], L = [];
+  for (let h = -span; h <= span; h += 0.5) {
+    L.push({ id: `${key}H${h}`, market, label: `Casa ${fmt(h)}`, ...settle(e, h) });
+    L.push({ id: `${key}A${-h}`, market, label: `Fora ${fmt(-h)}`, ...settle(neg(e), -h) });
+  }
+  return L;
+}
+
 function buildLines(pred, phi, shift = [0, 0]) {
   const v = k => ({ h: pred[k].h * Math.exp(shift[0] * pred[k].seH), a: pred[k].a * Math.exp(shift[1] * pred[k].seA) });
   let L = [];
@@ -107,40 +122,77 @@ function buildLines(pred, phi, shift = [0, 0]) {
       L = L.concat(countLines('cA', 'Escanteios por time', 'Fora: ', x.a, phi[k], 3, c.a));
     }
   }
+  if (pred.corners1h) {
+    const x = v('corners1h'), p = pred.corners1h;
+    L = L.concat(countLines('c1', 'Total escanteios 1T', '', x.h + x.a, phi.corners1h, 3, Math.round(p.h + p.a)));
+    L = L.concat(handicapLines('c1h', 'Handicap escanteios 1T', x.h, x.a, phi.corners1hDiff, 3));
+  }
   return L;
 }
 
-// Dispersão residual (variância/média) do total na liga, dado o que o modelo prevê para cada jogo.
+// Dispersão residual na liga, dado o que o modelo prevê para cada jogo: do total (variância/média)
+// e da diferença casa − fora (variância da diferença / soma das médias).
 function residualVMR(f, prep, key) {
-  const i = METRICS[key].idx;
-  let num = 0, den = 0;
+  let ns = 0, nd = 0, den = 0;
   for (const m of prep.rows) {
-    if (!m.s) continue;
-    const p = predict(f, m.h, m.a), mu = p.h + p.a, x = m.s[i] + m.s[5 + i];
-    num += m.w * (x - mu) ** 2; den += m.w * mu;
+    const o = observe(key, m, prep.xg);
+    if (!o) continue;
+    const p = predict(f, m.h, m.a), dh = o[0] - p.h, da = o[1] - p.a;
+    ns += m.w * (dh + da) ** 2; nd += m.w * (dh - da) ** 2; den += m.w * (p.h + p.a);
   }
-  return den ? Math.min(VMR_CAP[key], Math.max(1, num / den)) : 1.15;
+  const clip = (x, cap) => Math.min(cap, Math.max(1, x));
+  return den ? { sum: clip(ns / den, VMR_CAP[key]), diff: clip(nd / den, 2) } : { sum: 1.15, diff: 1.15 };
+}
+
+// Total que a Pinnacle está precificando: a média que reproduz a probabilidade sem margem da
+// meia-linha mais equilibrada do mercado de totais (ids `${prefix}O${linha}`).
+export function impliedTotal(fair, prefix, phi) {
+  const c = [...fair].filter(([id]) => id.startsWith(`${prefix}O`)).map(([id, p]) => [parseFloat(id.slice(prefix.length + 1)), p])
+    .filter(([L]) => L % 1 === 0.5).sort((a, b) => Math.abs(a[1] - 0.5) - Math.abs(b[1] - 0.5))[0];
+  if (!c) return null;
+  let lo = 0.05, hi = 60;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2, pmf = dist(mid, phi, Math.ceil(mid * 3 + 25));
+    const over = 1 - pmf.slice(0, Math.floor(c[0]) + 1).reduce((t, x) => t + x, 0);
+    if (over < c[1]) lo = mid; else hi = mid;
+  }
+  return { from_line: c[0], p_over_no_vig: c[1], implied_total: (lo + hi) / 2 };
 }
 
 const SCENARIOS = [[1, -1], [-1, 1], [1, 1], [-1, -1]];   // ±1 erro-padrão em cada lado
 const ALWAYS = new Set(['1X2', 'Ambas marcam']);          // mercados exibidos inteiros, qualquer probabilidade
 
-export function analyzeMatch(matches, home, away, refTime) {
+// fair: probabilidades sem margem da Pinnacle (odds.js collect). Quando ela precifica o total de
+// escanteios do 1º tempo, o total do modelo é puxado para o dela (peso ANCHOR_W) mantendo a divisão
+// entre os times — é daí que sai o handicap do 1º tempo, mercado que a API não traz.
+export function analyzeMatch(matches, home, away, refTime, { fair = null } = {}) {
   const prep = prepare(matches, refTime);
-  const fits = {}, pred = {}, phi = { goals: 1 };
+  const fits = {}, pred = {}, phi = { goals: 1 }, anchors = {};
   for (const k of Object.keys(METRICS)) {
     fits[k] = fit(k, prep);
     pred[k] = fits[k] ? predict(fits[k], home, away) : null;
-    if (fits[k] && k !== 'goals') phi[k] = residualVMR(fits[k], prep, k);
+    if (fits[k] && k !== 'goals') {
+      const r = residualVMR(fits[k], prep, k);
+      phi[k] = r.sum;
+      if (k === 'corners1h') phi.corners1hDiff = r.diff;
+    }
   }
-  if (!pred.goals) return { prep, fits, pred, phi, lines: [] };
+  if (pred.corners1h && fair) {
+    const imp = impliedTotal(fair, 'c1', phi.corners1h), p = pred.corners1h, model = p.h + p.a;
+    if (imp) {
+      const f = (imp.implied_total / model) ** ANCHOR_W;
+      pred.corners1h = { ...p, h: p.h * f, a: p.a * f };
+      anchors.corners1h = { model_total: model, pinnacle_total: imp.implied_total, from_line: imp.from_line, factor: f };
+    }
+  }
+  if (!pred.goals) return { prep, fits, pred, phi, anchors, lines: [] };
   const base = buildLines(pred, phi);
   const alt = SCENARIOS.map(s => new Map(buildLines(pred, phi, s).map(l => [l.id, l])));
   const lines = base
     .map(l => ({ ...l, sc: alt.map(m => m.get(l.id)) }))
     .filter(l => l.sc.every(Boolean) && (ALWAYS.has(l.market)
       || (l.pWin >= 0.15 && l.pWin <= 0.85 && l.pWin + l.pLose > 0.3)));
-  return { prep, fits, pred, phi, lines };
+  return { prep, fits, pred, phi, anchors, lines };
 }
 
 export const fairOdd = l => 1 + l.pLose / l.pWin;

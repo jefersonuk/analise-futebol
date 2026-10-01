@@ -3,7 +3,7 @@ import { METRICS, analyzeMatch, ev, fairOdd, politicaE } from './model.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { pickDashboard, renderDashboard } from './dashboard.js';
-import { ODDS_STALE_MIN, buildDossier, hypothesis } from './dossier.js';
+import { ODDS_STALE_MIN, buildDossier, loadLeague, side } from './dossier.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -11,10 +11,9 @@ const pct = x => (x * 100).toFixed(1) + '%';
 const num = (x, d = 2) => x.toFixed(d).replace('.', ',');
 const date = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 const hour = t => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const SEASONS_BACK = 2;   // temporada atual + 2 anteriores (o decaimento cuida do peso)
 const BANCA = 44000;
 
-const state = { fixtures: [], fixture: null, result: null, matches: [], dossier: null, oddsP: null,
+const state = { fixtures: [], fixture: null, result: null, matches: [], dossier: null, oddsP: null, focus: true,
   odds: new Map(), books: new Map(), pinn: new Map(), market: 'Todos' };
 
 function msg(text, err = false) {
@@ -88,19 +87,11 @@ $('#btnRun').onclick = async () => {
     msg('Identificando a liga…');
     const lg = await baseLeague(fx);
     if (!lg) throw new Error('Os dois times não disputam a mesma liga nesta temporada: confronto entre ligas ainda não é suportado.');
-    const S = fx.league.season, seasons = [];
-    for (let s = S; s >= S - SEASONS_BACK; s--) if (s !== 2020) seasons.push(s);   // 2020/21 sem público distorce o mando
-    let matches = [];
-    for (const s of seasons) {
-      try {
-        matches = matches.concat(await api.leagueMatches(lg.id, s, (d, n) => msg(`Baixando ${lg.name} ${s}: ${d}/${n} jogos…`)));
-      } catch (e) { if (s === S) throw e; }
-      showQuota();
-    }
+    const { matches, seasons } = await loadLeague(api.dossierApi, lg, fx.league.season, t => { msg(t); showQuota(); });
+    showQuota();
     msg('Ajustando forças da liga…');
     state.fixture = { ...fx, base: lg, seasons, n: matches.length };
     state.matches = matches;
-    state.result = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t);
     state.odds.clear(); state.books.clear(); state.pinn.clear();
     state.market = 'Todos';
     await refreshOdds();
@@ -115,6 +106,8 @@ async function refreshOdds() {
   msg('Buscando odds da Pinnacle…');
   state.oddsP = await api.fixtureOdds(state.fixture.id);
   const { odds, fair } = collect(state.oddsP.bookmakers);
+  // refaz o modelo com as odds: o total de escanteios do 1º tempo é ancorado no da Pinnacle
+  state.result = analyzeMatch(state.matches, state.fixture.home.id, state.fixture.away.id, state.fixture.t, { fair });
   for (const [id, b] of state.books) if (b === 'Pinnacle') { state.odds.delete(id); state.books.delete(id); }
   const ids = new Set(state.result.lines.map(l => l.id));
   for (const [id, odd] of odds) if (ids.has(id) && state.books.get(id) !== 'manual') { state.odds.set(id, odd); state.books.set(id, 'Pinnacle'); }
@@ -157,7 +150,10 @@ function render() {
   $('#title').textContent = `${fx.home.name} x ${fx.away.name} — ${hour(fx.t)}`;
   const cup = fx.base.id !== fx.league.id ? `Jogo de ${fx.league.name}; forças medidas em ${fx.base.name}. ` : '';
   $('#basis').textContent = `${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
-    + `peso decrescente com o tempo (meia-vida ≈ 1 ano), ${(r.prep.coverage * 100).toFixed(0)}% com estatística de chutes.`;
+    + `peso decrescente com o tempo (meia-vida ≈ 1 ano), ${(r.prep.coverage * 100).toFixed(0)}% com estatística de chutes, `
+    + `${(r.prep.coverage1h * 100).toFixed(0)}% com escanteios do 1º tempo (a API só tem desde 2024).`
+    + (r.anchors.corners1h ? ` Total de escanteios do 1º tempo ancorado na Pinnacle: modelo ${num(r.anchors.corners1h.model_total)} → `
+      + `${num(r.anchors.corners1h.model_total * r.anchors.corners1h.factor)} (Pinnacle ${num(r.anchors.corners1h.pinnacle_total)}).` : '');
   if (!r.lines.length) return msg('Jogos insuficientes na liga para ajustar o modelo.', true);
   renderExpect();
   $('#insights').innerHTML = buildInsights(r, fx.home.id, fx.away.id, { home: fx.home.name, away: fx.away.name })
@@ -234,7 +230,10 @@ function renderDash() {
   const { prep } = state.result, fx = state.fixture;
   const teams = [['home', fx.home], ['away', fx.away]]
     .map(([role, t]) => ({ role, name: t.name, games: recentGames(prep, t.id) }));
-  $('#dash').innerHTML = renderDashboard(pickDashboard(state.dossier, 5, hypothesis), teams);
+  $('#dashMode').innerHTML = [['Foco: gols + escanteios 1T', true], ['Todos os mercados', false]]
+    .map(([t, f]) => `<button class="${state.focus === f ? 'on' : ''}" data-f="${f}">${t}</button>`).join('');
+  for (const b of $('#dashMode').children) b.onclick = () => { state.focus = b.dataset.f === 'true'; renderDash(); };
+  $('#dash').innerHTML = renderDashboard(pickDashboard(state.dossier, 5, { focus: state.focus, side }), teams);
 }
 
 function renderRank() {

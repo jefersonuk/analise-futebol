@@ -42,7 +42,9 @@ export const leagueMatches = (leagueId, season, onProgress) =>
 export const injuries = fixtureId => pick('injuries', fixtureId);
 export const standings = (leagueId, season) => pick('standings', leagueId, season);
 export const lastPlayed = teamId => pick('lastPlayed', teamId);
+export const attachHalfCorners = (leagueId, season, matches, onProgress) =>
+  pick('attachHalfCorners', leagueId, season, matches, onProgress);
 
 // O conjunto que o dossiê do especialista usa (mesma interface do script do Claude Code).
-export const dossierApi = { searchTeams, upcoming, leaguesOf, leagueMatches, fixtureOdds, injuries, standings, lastPlayed,
+export const dossierApi = { searchTeams, upcoming, leaguesOf, leagueMatches, attachHalfCorners, fixtureOdds, injuries, standings, lastPlayed,
   quota: () => remaining };

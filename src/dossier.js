@@ -4,7 +4,7 @@
 //
 // api: searchTeams, upcoming, leaguesOf, leagueMatches, fixtureOdds, injuries, standings, lastPlayed, quota
 
-import { METRICS, analyzeMatch, dist, ev, fairOdd, politicaE } from './model.js';
+import { METRICS, analyzeMatch, ev, fairOdd, impliedTotal, politicaE } from './model.js';
 import { rank } from './ratings.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
@@ -12,18 +12,21 @@ import { history } from './dashboard.js';
 import { ODD_FLOOR, TIER_ORDER, consistency } from './consistency.js';
 
 const DAY = 864e5;
+// Mercados em que o Jeferson concentra o trabalho (painel e candidatas de foco).
+export const FOCUS = ['Total de gols', 'Handicap escanteios 1T'];
 export const ODDS_STALE_MIN = 90;   // acima disso a odd da API provavelmente já andou
 // Peso do modelo na mistura log-linear com a Pinnacle (o resto é da Pinnacle). Valores iniciais
 // do relatório (0,05–0,15 em mercados líquidos; mais onde a Pinnacle é fraca); calibrar por CLV.
 const W_MODEL = { '1X2': 0.1, 'Handicap asiático': 0.1, 'Total de gols': 0.1, 'Ambas marcam': 0.1,
   'Total de escanteios': 0.2, 'Escanteios por time': 0.2, 'Total de chutes': 0.2, 'Total de chutes no gol': 0.2 };
 
-// Uma linha por hipótese: Mais de 8,5 e Mais de 9,5 escanteios, ou Fora +0,5 e Fora +0,75, são a mesma
-// aposta em preços diferentes. Mantém a primeira (a melhor, pela ordenação) de cada mercado e lado.
-export const hypothesis = id => (/^[12X]$/.test(id) ? id : id.replace(/-?[\d.]+$/, ''));
+// Lado de uma linha: Mais de 8,5 e Mais de 9,5 escanteios, ou Fora +0,5 e Fora +0,75, são o mesmo lado
+// do mesmo mercado em preços diferentes.
+export const side = id => (/^[12X]$/.test(id) ? '1X2' : id.replace(/-?[\d.]+$/, ''));
+// Uma linha por mercado: lados opostos do mesmo mercado (Casa 0 e Fora +1,5) não viram duas apostas.
 export function distinct() {
   const seen = new Set();
-  return l => !seen.has(hypothesis(l.id)) && seen.add(hypothesis(l.id));
+  return l => !seen.has(l.market) && seen.add(l.market);
 }
 
 const r = (x, d = 3) => (x == null || Number.isNaN(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
@@ -33,6 +36,24 @@ const cond = s => s.pWin / (s.pWin + s.pLose);   // probabilidade sem o push (co
 function blend(pPin, pMod, w) {
   const a = pPin ** (1 - w) * pMod ** w, b = (1 - pPin) ** (1 - w) * (1 - pMod) ** w;
   return a / (a + b);
+}
+
+// Temporadas usadas: atual + 2 anteriores (o decaimento cuida do peso); 2020/21 sem público distorce o mando.
+export const seasonsFor = S => [S, S - 1, S - 2].filter(s => s !== 2020);
+
+// Jogos da liga nas temporadas do modelo; escanteios do 1º tempo só na atual e na anterior
+// (1 requisição por jogo, e a API só tem estatística por tempo a partir de 2024).
+export async function loadLeague(api, lg, S, onProgress) {
+  let matches = [];
+  for (const s of seasonsFor(S)) {
+    try {
+      let ms = await api.leagueMatches(lg.id, s, (d, n) => onProgress?.(`Baixando ${lg.name} ${s}: ${d}/${n} jogos…`));
+      if (s >= S - 1) ms = await api.attachHalfCorners(lg.id, s, ms, (d, n) =>
+        onProgress?.(`Escanteios do 1º tempo ${lg.name} ${s}: ${d}/${n} jogos (só na primeira vez)…`));
+      matches = matches.concat(ms);
+    } catch (e) { if (s === S) throw e; }
+  }
+  return { matches, seasons: seasonsFor(S) };
 }
 
 // fx: jogo (de upcoming). team: time buscado. fixtures: próximos jogos dele (evita chamada repetida).
@@ -47,17 +68,9 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   }
   if (!lg) throw new Error('os dois times não disputam a mesma liga nesta temporada; confronto entre ligas não é suportado');
 
-  const seasons = [S, S - 1, S - 2].filter(s => s !== 2020);   // 2020/21 sem público distorce o mando
-  if (!matches) {
-    matches = [];
-    for (const s of seasons) {
-      try { matches = matches.concat(await api.leagueMatches(lg.id, s, (d, n) => onProgress?.(`Baixando ${lg.name} ${s}: ${d}/${n} jogos…`))); }
-      catch (e) { if (s === S) throw e; }
-    }
-  }
+  if (!matches) ({ matches } = await loadLeague(api, lg, S, onProgress));
+  const seasons = seasonsFor(S);
   onProgress?.('Montando o dossiê (Pinnacle, desfalques, tabela, descanso)…');
-  const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t);
-  if (!res.lines.length) throw new Error('jogos insuficientes na liga para ajustar o modelo');
 
   const other = team.id === fx.home.id ? fx.away : fx.home;   // o time que não foi buscado
   const SOURCES = ['odds_pinnacle', 'desfalques', 'classificacao', 'ultimo_jogo_mandante', 'ultimo_jogo_visitante', 'proximos_do_outro_time'];
@@ -72,6 +85,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   const { odds, fair } = collect(oddsP.bookmakers);
   const oddsAgeMin = oddsP.updatedAt ? Math.round((oddsP.fetchedAt - Date.parse(oddsP.updatedAt)) / 60e3) : null;
   const injuries = val(1, []), table = val(2, []);
+  const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t, { fair });
+  if (!res.lines.length) throw new Error('jogos insuficientes na liga para ajustar o modelo');
   const nextOf = { [team.id]: fixtures, [other.id]: val(5, []) };
 
   // Alertas de qualidade: qualquer um deixa todas as linhas frágeis.
@@ -152,24 +167,31 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
       entry_brl: Math.round(Math.min(raw, cap) * pe.factor) };
   };
 
-  const priced = [], modelOnly = [];
+  const priced = [], anchored = [], modelOnly = [];
   for (const l of res.lines) {
     const pm = cond(l), range = l.sc.map(cond), odd = odds.get(l.id), pp = fair.get(l.id);
     const soft = /escanteios|chutes/i.test(l.market);
     const base = { id: l.id, market: l.market, line: l.label, p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
       fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0 };
+    const hi = hist(l), cons = p => consistency({ p, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
     if (odd && pp != null) {
       const pb = x12[l.id] ?? blend(pp, pm, W_MODEL[l.market] ?? 0.1), e = ev(l, odd), diff = (pm - pp) * 100;
       const fragile = alerts.length > 0 || Math.abs(diff) >= (soft ? 10 : 5);
-      const oddMin = (1 / pb) * (fragile ? 1.05 : 1.03);
-      const hi = hist(l), c = consistency({ p: pb, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
-      priced.push({ ...base, pinnacle_odd: odd, p_pinnacle: r(pp), diff_pp: r(diff, 1), p_blend: r(pb),
+      const oddMin = (1 / pb) * (fragile ? 1.05 : 1.03), c = cons(pb);
+      priced.push({ ...base, priced_by: 'pinnacle', pinnacle_odd: odd, p_pinnacle: r(pp), diff_pp: r(diff, 1), p_blend: r(pb),
         tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
         fair_odd_blend: r(1 / pb, 2), fragile, odd_min: r(oddMin, 2),
         odd_min_vs_pinnacle_pct: r((oddMin / odd - 1) * 100, 1), ...stake(pb, oddMin),
         ev_model_at_pinnacle: r(e.mid), ev_model_worst: r(e.low), history: hi });
+    } else if (l.market === 'Handicap escanteios 1T' && res.anchors.corners1h) {
+      // Sem preço na API: modelo com o total ancorado na Pinnacle (total de escanteios 1T); sempre frágil.
+      const oddMin = (1 / pm) * 1.05, c = cons(pm);
+      anchored.push({ ...base, priced_by: 'modelo ancorado no total 1T da Pinnacle', pinnacle_odd: null, p_pinnacle: null, diff_pp: null,
+        p_blend: r(pm), tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
+        fair_odd_blend: r(1 / pm, 2), fragile: true, odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null,
+        ...stake(pm, oddMin), history: hi });
     } else if (pm >= 0.35 && soft) {
-      const hi = hist(l), c = consistency({ p: pm, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
+      const c = cons(pm);
       if (c.tier !== 'especulativa' || pm <= 0.65)
         modelOnly.push({ ...base, tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
           odd_min_model_only: r(fairOdd(l) * 1.08, 2), history: hi });
@@ -179,33 +201,30 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   // Candidatas — consistência primeiro, preço depois: só linhas âncora/sólida, com odd mínima dentro da
   // faixa operada (≥ 1,50 e permitida pela Política E) e que uma casa soft consegue pagar (até ~5% acima da Pinnacle).
   // Ordem: nível de consistência, não frágil antes de frágil, score de consistência, facilidade do preço.
-  const candidates = priced
-    .filter(l => l.tier !== 'especulativa' && l.odd_min >= ODD_FLOOR && l.politica_e !== 'não entrar' && l.odd_min_vs_pinnacle_pct <= 5)
-    .sort((a, b) => TIER_ORDER[a.tier] - TIER_ORDER[b.tier] || a.fragile - b.fragile
-      || b.consistency_score - a.consistency_score || a.odd_min_vs_pinnacle_pct - b.odd_min_vs_pinnacle_pct)
+  const ranked = l => l.tier !== 'especulativa' && l.odd_min >= ODD_FLOOR && l.politica_e !== 'não entrar'
+    && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5);
+  const order = (a, b) => TIER_ORDER[a.tier] - TIER_ORDER[b.tier] || a.fragile - b.fragile
+    || b.consistency_score - a.consistency_score || (a.odd_min_vs_pinnacle_pct ?? 99) - (b.odd_min_vs_pinnacle_pct ?? 99);
+  const candidatesFocus = priced.concat(anchored).filter(l => FOCUS.includes(l.market) && ranked(l))
+    .sort(order).filter(distinct()).slice(0, 8).map(l => l.id);
+  const candidates = priced.concat(anchored)
+    .filter(ranked)
+    .sort(order)
     .filter(distinct()).slice(0, 8).map(l => l.id);
 
-  // Total implícito na Pinnacle: a média que reproduz a probabilidade sem margem da linha mais equilibrada.
-  const implied = (prefix, phi) => {
-    const c = [...fair].filter(([id]) => id.startsWith(`${prefix}O`)).map(([id, p]) => [parseFloat(id.slice(prefix.length + 1)), p])
-      .filter(([L]) => L % 1 === 0.5).sort((a, b) => Math.abs(a[1] - 0.5) - Math.abs(b[1] - 0.5))[0];
-    if (!c) return null;
-    let lo = 0.05, hi = 60;
-    for (let i = 0; i < 60; i++) {
-      const mid = (lo + hi) / 2, pmf = dist(mid, phi, Math.ceil(mid * 3 + 25));
-      const over = 1 - pmf.slice(0, Math.floor(c[0]) + 1).reduce((s, x) => s + x, 0);
-      if (over < c[1]) lo = mid; else hi = mid;
-    }
-    return { from_line: c[0], p_over_no_vig: r(c[1]), implied_total: r((lo + hi) / 2, 2) };
+  const imp = (prefix, phi) => {
+    const x = impliedTotal(fair, prefix, phi);
+    return x && { from_line: x.from_line, p_over_no_vig: r(x.p_over_no_vig), implied_total: r(x.implied_total, 2) };
   };
-  const impliedTotals = { goals: implied('g', 1), corners: implied('corners', res.phi.corners || 1) };
+  const impliedTotals = { goals: imp('g', 1), corners: imp('corners', res.phi.corners || 1), corners1h: imp('c1', res.phi.corners1h || 1) };
 
   const out = {
     generated_at: new Date().toISOString(),
     fixture: { id: fx.id, kickoff: new Date(fx.t).toISOString(), competition: fx.league.name, country: fx.league.country,
       model_league: lg.name, cup_note: lg.id !== fx.league.id ? `jogo de ${fx.league.name}; forças medidas em ${lg.name}` : null,
       home: fx.home.name, away: fx.away.name, team_candidates: teams.slice(0, 5).map(t => `${t.id} ${t.name} (${t.country})`) },
-    data_quality: { alerts, sources, odds_updated_at: oddsP.updatedAt, odds_age_min: oddsAgeMin, league_matches_used: res.prep.rows.length, seasons, stats_coverage: r(res.prep.coverage, 2),
+    data_quality: { alerts, sources, odds_updated_at: oddsP.updatedAt, odds_age_min: oddsAgeMin, league_matches_used: res.prep.rows.length, seasons, stats_coverage: r(res.prep.coverage, 2), corners_1h_coverage: r(res.prep.coverage1h, 2),
+      corners_1h_anchor: res.anchors.corners1h ? Object.fromEntries(Object.entries(res.anchors.corners1h).map(([k, v]) => [k, r(v, 2)])) : null,
       both_teams_known: res.pred.goals.known, pinnacle_lines: priced.length, api_requests_left: api.quota(),
       dispersion_at_floor: Object.entries(res.phi).filter(([k, v]) => k !== 'goals' && v <= 1.0001).map(([k]) => k) },
     league: { home_factor: Object.fromEntries(Object.entries(res.fits).filter(([, f]) => f).map(([k, f]) => [k, r(f.home)])),
@@ -218,8 +237,11 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
       home: teamOut(fx.home, 'mandante', val(3, null)),
       away: teamOut(fx.away, 'visitante', val(4, null)),
     },
+    focus_markets: FOCUS,
+    candidates_focus: candidatesFocus,
     candidates,
     lines_with_pinnacle: priced,
+    lines_anchored: anchored,
     model_only_lines: modelOnly,
     model_notes: buildInsights(res, fx.home.id, fx.away.id, names).map(i => i.text),
     method: { blend_weight_model: W_MODEL, blend: 'log-linear p ∝ p_pinnacle^(1−w)·p_modelo^w, normalizado nas pernas complementares',
@@ -230,7 +252,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
       odds_cache: 'odds da Pinnacle com até 10 minutos de cache',
       consistency: 'score = 0,5·p + 0,25·p_pior_cenário + 0,25·acerto_10_jogos_encolhido (10 jogos de peso para p); '
         + 'âncora: p ≥ 0,60, pior cenário ≥ 0,50 e cada time ≥ 6/10; sólida: p ≥ 0,52, pior cenário ≥ 0,42 e acerto somado ≥ 50%; resto especulativa',
-      candidates: 'âncora/sólida, odd mínima ≥ 1,50 e permitida pela Política E, até 5% acima da Pinnacle; ordem: nível, não frágil, score, preço' },
+      candidates: 'âncora/sólida, odd mínima ≥ 1,50 e permitida pela Política E, até 5% acima da Pinnacle; ordem: nível, não frágil, score, preço; candidates_focus: o mesmo só nos mercados de foco',
+      corners_1h_handicap: 'a API não traz odd de handicap de escanteios do 1º tempo: média de cada time pelo modelo, total puxado 80% para o total 1T implícito na Pinnacle, diferença com binomial negativa na dispersão da diferença medida na liga; odd mínima = justa × 1,05, sempre frágil' },
   };
   return out;
 }

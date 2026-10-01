@@ -1,8 +1,9 @@
 // Forças de ataque e defesa ajustadas pelo adversário (ponto fixo de Maher/Dixon-Coles),
 // com decaimento temporal, mando por liga e shrinkage por pseudo-jogos.
 //
-// Jogo compacto: { id, t, h, a, hg, ag, s }
-//   s = null (sem estatística) ou [dentroH, foraH, noGolH, totalH, escH, dentroA, foraA, noGolA, totalA, escA]
+// Jogo compacto: { id, t, h, a, hg, ag, s, c1 }
+//   s  = null (sem estatística) ou [dentroH, foraH, noGolH, totalH, escH, dentroA, foraA, noGolA, totalA, escA]
+//   c1 = escanteios do 1º tempo [mandante, visitante], ou null/ausente (a API só tem a partir de 2024)
 
 export const XI = 0.0018;                  // decaimento por dia (meia-vida ≈ 385 dias)
 const DAY = 864e5;
@@ -14,6 +15,7 @@ export const METRICS = {
   shots:   { name: 'Chutes',        K: 6, idx: 3 },
   sot:     { name: 'Chutes no gol', K: 6, idx: 2 },
   corners: { name: 'Escanteios',    K: 6, idx: 4 },
+  corners1h: { name: 'Escanteios 1º tempo', K: 6 },
 };
 
 const stat = (s, home, i) => s[(home ? 0 : 5) + i];
@@ -27,11 +29,13 @@ export function prepare(matches, refTime) {
   const scale = x > 0 ? g / x : 1;
   const rows = past.map(m => ({ ...m, w: Math.exp(-XI * (refTime - m.t) / DAY) }));
   const xg = (m, home) => (m.s ? scale * xgRaw(m.s, home) : null);
-  return { rows, scale, xg, coverage: past.length ? past.filter(m => m.s).length / past.length : 0 };
+  const share = f => (past.length ? past.filter(f).length / past.length : 0);
+  return { rows, scale, xg, coverage: share(m => m.s), coverage1h: share(m => m.c1) };
 }
 
 // Valor observado [casa, fora] de uma métrica num jogo, ou null se não houver dado.
-function observe(key, m, xg) {
+export function observe(key, m, xg) {
+  if (key === 'corners1h') return m.c1 || null;
   if (key === 'goals') {
     if (!m.s) return [m.hg, m.ag];
     return [BLEND * xg(m, true) + (1 - BLEND) * m.hg, BLEND * xg(m, false) + (1 - BLEND) * m.ag];

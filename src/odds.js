@@ -16,9 +16,9 @@ function mapValue(betId, value) {
     case 4:
       if (!(m = v.match(/^(Home|Away)\s*([+-]?[\d.]+)$/))) return null;
       return m[1] === 'Home' ? { id: `ahH${n(m[2])}`, group: `4:${n(m[2])}` } : { id: `ahA${n(-parseFloat(m[2]))}`, group: `4:${n(m[2])}` };
-    case 5: case 50: case 45: {
+    case 5: case 50: case 45: case 77: {   // 77 = total de escanteios do 1º tempo
       if (!(m = v.match(/^(Over|Under)\s*([\d.]+)$/))) return null;
-      const pre = betId === 45 ? 'corners' : 'g';
+      const pre = { 45: 'corners', 77: 'c1' }[betId] || 'g';
       return { id: `${pre}${m[1] === 'Over' ? 'O' : 'U'}${n(m[2])}`, group: `${betId}:${n(m[2])}` };
     }
     default: return null;

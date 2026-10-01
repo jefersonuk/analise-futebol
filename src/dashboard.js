@@ -21,6 +21,12 @@ function spec(id, role, teamName) {
     const what = { corners: 'escanteios no jogo', shots: 'chutes no jogo', sot: 'chutes no gol no jogo' }[m[1]];
     return { what, value: total(m[1]), ...ou(m[2], +m[3]) };
   }
+  if ((m = id.match(/^c1h([HA])(.+)$/))) {
+    const same = (m[1] === 'H') === (role === 'home'), h = +m[2];
+    return { what: `saldo de escanteios no 1º tempo do ${teamName}`, value: g => (g.c1 ? g.c1[0] - g.c1[1] : null),
+      x: v => (same ? v : -v), off: h, threshold: same ? -h : h };
+  }
+  if ((m = id.match(/^c1([OU])(.+)$/))) return { what: 'escanteios no 1º tempo', value: total('c1'), ...ou(m[1], +m[2]) };
   if ((m = id.match(/^c([HA])([OU])(.+)$/))) {
     const own = (m[1] === 'H') === (role === 'home');   // a linha é dos escanteios deste time?
     return { what: own ? `escanteios do ${teamName}` : `escanteios cedidos pelo ${teamName}`,
@@ -94,7 +100,8 @@ const odd2 = x => x.toFixed(2).replace('.', ',');
 const TIERS = { 'âncora': 0, 'sólida': 1, 'especulativa': 2 };
 
 // Por que uma linha que entrou só para completar o painel não passou no filtro de candidatas.
-function outsideReason(l) {
+function outsideReason(l, ok = []) {
+  if (ok.includes(l.id)) return null;
   if (l.tier === 'especulativa') {
     if (l.hit_rate_last10 != null && l.hit_rate_last10 < 0.5) return 'histórico contra';
     if (l.p_model_range[0] < 0.42) return 'pior cenário do modelo fraco';
@@ -103,23 +110,29 @@ function outsideReason(l) {
   if (l.odd_min < 1.5) return 'odd abaixo de 1,50';
   if (l.politica_e === 'não entrar') return 'odd acima de 3,00';
   if (l.odd_min_vs_pinnacle_pct > 5) return 'preço difícil de achar';
-  return 'fora do filtro';
+  return 'alternativa de linha';
 }
 
-// As n linhas do painel: primeiro as candidatas do dossiê (consistência primeiro, preço depois);
-// se faltarem, completa com as mais consistentes restantes, uma por hipótese, marcando o motivo.
-export function pickDashboard(dossier, n = 5, hypothesis = id => id) {
-  const byId = new Map(dossier.lines_with_pinnacle.map(l => [l.id, l]));
-  const out = dossier.candidates.map(id => byId.get(id)).filter(Boolean).slice(0, n);
-  const seen = new Set(out.map(l => hypothesis(l.id)));
-  const rest = dossier.lines_with_pinnacle.filter(l => !seen.has(hypothesis(l.id)) && l.odd_min >= 1.2)
-    .sort((a, b) => (a.odd_min < 1.5) - (b.odd_min < 1.5) || TIERS[a.tier] - TIERS[b.tier] || b.consistency_score - a.consistency_score);
-  for (const l of rest) {
-    if (out.length >= n) break;
-    if (seen.has(hypothesis(l.id))) continue;
-    seen.add(hypothesis(l.id));
-    out.push({ ...l, outside: outsideReason(l) });
+// As n linhas do painel. Modo foco: as candidatas dos mercados de foco e, em seguida, a escada do
+// mesmo lado (outras linhas do mesmo mercado e lado, para comparar acerto × odd). Modo todos: uma
+// candidata por mercado. Se faltar, completa com as mais consistentes restantes, marcando o motivo.
+export function pickDashboard(dossier, n = 5, { focus = true, side = id => id } = {}) {
+  const all = dossier.lines_with_pinnacle.concat(dossier.lines_anchored || []);
+  const byId = new Map(all.map(l => [l.id, l]));
+  const pool = focus ? all.filter(l => dossier.focus_markets.includes(l.market)) : all;
+  const first = (focus ? dossier.candidates_focus : dossier.candidates).map(id => byId.get(id)).filter(Boolean).slice(0, n);
+  const out = [...first], used = new Set(out.map(l => l.id));
+  const better = (a, b) => TIERS[a.tier] - TIERS[b.tier] || b.consistency_score - a.consistency_score;
+  const add = (l, outside) => { if (out.length < n && !used.has(l.id)) { used.add(l.id); out.push(outside ? { ...l, outside } : l); } };
+  if (focus) {
+    const sides = new Set(first.map(l => side(l.id)));
+    pool.filter(l => sides.has(side(l.id)) && l.odd_min >= 1.5 && l.politica_e !== 'não entrar').sort(better)
+      .forEach(l => add(l, outsideReason(l, dossier.candidates_focus)));
   }
+  const markets = new Set(out.map(l => l.market));
+  pool.filter(l => l.odd_min >= 1.2 && (focus || !markets.has(l.market)))
+    .sort((a, b) => (a.odd_min < 1.5) - (b.odd_min < 1.5) || better(a, b))
+    .forEach(l => { if (focus || !markets.has(l.market)) { markets.add(l.market); add(l, outsideReason(l, [])); } });
   return out;
 }
 
@@ -142,7 +155,7 @@ export function renderDashboard(lines, teams) {
         <div class="kpis">
           <span class="tag ${tierCls}">${l.tier} · acerta ${pct(l.p_blend)}${l.hit_rate_last10 != null ? ` · últimos 10: ${pct(l.hit_rate_last10)}` : ''}</span>
           <span>justa ${odd2(l.fair_odd_blend)}</span>
-          <span><b>mínima ${odd2(l.odd_min)}</b> <span class="muted">(Pinnacle ${odd2(l.pinnacle_odd)})</span></span>
+          <span><b>mínima ${odd2(l.odd_min)}</b> <span class="muted">${l.pinnacle_odd ? `(Pinnacle ${odd2(l.pinnacle_odd)})` : '(sem odd na API: modelo ancorado)'}</span></span>
           <span>${l.entry_brl ? `entrada R$ ${l.entry_brl} · ${l.politica_e}` : `sem entrada · ${l.politica_e}`}</span>
           ${l.fragile ? '<span class="tag">frágil</span>' : ''}
           ${l.outside ? `<span class="tag no">${esc(l.outside)}</span>` : ''}
