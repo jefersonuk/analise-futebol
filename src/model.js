@@ -95,13 +95,17 @@ function countLines(key, market, prefix, mu, phi, span, c) {
   return L;
 }
 
-// Handicap sobre a diferença casa − fora de duas contagens (binomiais negativas com a dispersão
-// da diferença medida na liga). id: `${key}H${h}` (mandante com handicap h) e `${key}A${-h}`.
-function handicapLines(key, market, muH, muA, phiD, span) {
+// Diferença casa − fora de duas contagens (binomiais negativas com a dispersão da diferença medida na liga).
+function diffDist(muH, muA, phiD) {
   const max = Math.ceil(Math.max(muH, muA) * 3 + 20);
   const ph = dist(muH, phiD, max), pa = dist(muA, phiD, max), diff = new Map();
   for (let i = 0; i <= max; i++) for (let j = 0; j <= max; j++) diff.set(i - j, (diff.get(i - j) || 0) + ph[i] * pa[j]);
-  const e = [...diff], L = [];
+  return [...diff];
+}
+
+// Handicap sobre a diferença. id: `${key}H${h}` (mandante com handicap h) e `${key}A${-h}`.
+function handicapLines(key, market, e, span) {
+  const L = [];
   for (let h = -span; h <= span; h += 0.5) {
     L.push({ id: `${key}H${h}`, market, label: `Casa ${fmt(h)}`, ...settle(e, h) });
     L.push({ id: `${key}A${-h}`, market, label: `Fora ${fmt(-h)}`, ...settle(neg(e), -h) });
@@ -109,8 +113,52 @@ function handicapLines(key, market, muH, muA, phiD, span) {
   return L;
 }
 
-function buildLines(pred, phi, shift = [0, 0]) {
-  const v = k => ({ h: pred[k].h * Math.exp(shift[0] * pred[k].seH), a: pred[k].a * Math.exp(shift[1] * pred[k].seA) });
+// Quem tem mais (escanteios): ids `${key}1`, `${key}X`, `${key}2`.
+function resultLines(key, market, e, what) {
+  const p = test => e.reduce((s, [d, q]) => (test(d) ? s + q : s), 0);
+  const h = p(d => d > 0), x = p(d => d === 0), a = p(d => d < 0);
+  return [
+    { id: `${key}1`, market, label: `Casa com mais ${what}`, pWin: h, pLose: 1 - h },
+    { id: `${key}X`, market, label: `Empate em ${what}`, pWin: x, pLose: 1 - x },
+    { id: `${key}2`, market, label: `Fora com mais ${what}`, pWin: a, pLose: 1 - a },
+  ];
+}
+
+// Corrida a N escanteios. Escanteios como sequência no tempo: o total segue a binomial negativa do
+// jogo e cada escanteio é do visitante com probabilidade q = μA/(μH+μA). O visitante chega a N primeiro
+// quando o seu N-ésimo escanteio é o (N+k)-ésimo do jogo, com k < N do mandante antes dele:
+//   P = Σ_{k<N} P(total ≥ N+k) · C(N−1+k, k) · q^N · (1−q)^k.
+// "Ninguém chega a N" é o resto (os dois terminam com menos de N). ids: crH{N}, crA{N}, crN{N}.
+export function raceLines(muH, muA, phi, Ns = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+  const max = Math.ceil((muH + muA) * 3 + 25), pN = dist(muH + muA, phi, max), q = muA / (muH + muA);
+  const tail = new Array(max + 2).fill(0);
+  for (let n = max; n >= 0; n--) tail[n] = tail[n + 1] + pN[n];
+  const first = (N, s) => {
+    let p = 0, c = 1;   // c = C(N−1+k, k)
+    for (let k = 0; k < N; k++) {
+      if (k) c = c * (N - 1 + k) / k;
+      p += (tail[N + k] || 0) * c * s ** N * (1 - s) ** k;
+    }
+    return p;
+  };
+  const L = [], market = 'Corrida de escanteios';
+  for (const N of Ns) {
+    const h = first(N, 1 - q), a = first(N, q), none = Math.max(0, 1 - h - a);
+    L.push({ id: `crH${N}`, market, label: `Casa chega a ${N} primeiro`, pWin: h, pLose: 1 - h });
+    L.push({ id: `crA${N}`, market, label: `Fora chega a ${N} primeiro`, pWin: a, pLose: 1 - a });
+    L.push({ id: `crN${N}`, market, label: `Ninguém chega a ${N}`, pWin: none, pLose: 1 - none });
+  }
+  return L;
+}
+
+// Mercados de escanteios derivados (handicap, quem tem mais, corrida): saem das médias de cada time,
+// com o total puxado para o da Pinnacle quando ela cota o total de escanteios do jogo.
+export const DERIVED = { 'Handicap de escanteios': 'corners', 'Resultado escanteios': 'corners', 'Corrida de escanteios': 'corners',
+  'Handicap escanteios 1T': 'corners1h', 'Resultado escanteios 1T': 'corners1h' };
+
+function buildLines(pred, phi, shift = [0, 0], derived = {}) {
+  const sh = (p, k) => ({ h: p.h * Math.exp(shift[0] * pred[k].seH), a: p.a * Math.exp(shift[1] * pred[k].seA) });
+  const v = k => sh(pred[k], k);
   let L = [];
   if (pred.goals) { const g = v('goals'); L = goalLines(g.h, g.a); }
   for (const k of ['corners', 'shots', 'sot']) {
@@ -120,12 +168,15 @@ function buildLines(pred, phi, shift = [0, 0]) {
     if (k === 'corners') {
       L = L.concat(countLines('cH', 'Escanteios por time', 'Casa: ', x.h, phi[k], 3, c.h));
       L = L.concat(countLines('cA', 'Escanteios por time', 'Fora: ', x.a, phi[k], 3, c.a));
+      const d = sh(derived.corners || pred.corners, k), e = diffDist(d.h, d.a, phi.cornersDiff || phi[k]);
+      L = L.concat(handicapLines('ch', 'Handicap de escanteios', e, 5), resultLines('cx', 'Resultado escanteios', e, 'escanteios'),
+        raceLines(d.h, d.a, phi[k]));
     }
   }
   if (pred.corners1h) {
-    const x = v('corners1h'), p = pred.corners1h;
+    const x = v('corners1h'), p = pred.corners1h, e = diffDist(x.h, x.a, phi.corners1hDiff);
     L = L.concat(countLines('c1', 'Total escanteios 1T', '', x.h + x.a, phi.corners1h, 3, Math.round(p.h + p.a)));
-    L = L.concat(handicapLines('c1h', 'Handicap escanteios 1T', x.h, x.a, phi.corners1hDiff, 3));
+    L = L.concat(handicapLines('c1h', 'Handicap escanteios 1T', e, 3), resultLines('c1x', 'Resultado escanteios 1T', e, 'escanteios no 1º tempo'));
   }
   return L;
 }
@@ -160,7 +211,7 @@ export function impliedTotal(fair, prefix, phi) {
 }
 
 const SCENARIOS = [[1, -1], [-1, 1], [1, 1], [-1, -1]];   // ±1 erro-padrão em cada lado
-const ALWAYS = new Set(['1X2', 'Ambas marcam']);          // mercados exibidos inteiros, qualquer probabilidade
+const ALWAYS = new Set(['1X2', 'Ambas marcam', 'Resultado escanteios', 'Resultado escanteios 1T']);          // mercados exibidos inteiros, qualquer probabilidade
 
 // fair: probabilidades sem margem da Pinnacle (odds.js collect). Quando ela precifica o total de
 // escanteios do 1º tempo, o total do modelo é puxado para o dela (peso ANCHOR_W) mantendo a divisão
@@ -175,6 +226,7 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null } = {})
       const r = residualVMR(fits[k], prep, k);
       phi[k] = r.sum;
       if (k === 'corners1h') phi.corners1hDiff = r.diff;
+      if (k === 'corners') phi.cornersDiff = r.diff;
     }
   }
   if (pred.corners1h && fair) {
@@ -185,14 +237,24 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null } = {})
       anchors.corners1h = { model_total: model, pinnacle_total: imp.implied_total, from_line: imp.from_line, factor: f };
     }
   }
-  if (!pred.goals) return { prep, fits, pred, phi, anchors, lines: [] };
-  const base = buildLines(pred, phi);
-  const alt = SCENARIOS.map(s => new Map(buildLines(pred, phi, s).map(l => [l.id, l])));
-  const lines = base
-    .map(l => ({ ...l, sc: alt.map(m => m.get(l.id)) }))
-    .filter(l => l.sc.every(Boolean) && (ALWAYS.has(l.market)
-      || (l.pWin >= 0.15 && l.pWin <= 0.85 && l.pWin + l.pLose > 0.3)));
-  return { prep, fits, pred, phi, anchors, lines };
+  // Total de escanteios do jogo: as linhas de total seguem com o modelo puro (misturado com a Pinnacle no
+  // dossiê); só os mercados derivados (handicap, quem tem mais, corrida) usam o total ancorado.
+  const derived = {};
+  if (pred.corners && fair) {
+    const imp = impliedTotal(fair, 'corners', phi.corners), p = pred.corners, model = p.h + p.a;
+    if (imp) {
+      const f = (imp.implied_total / model) ** ANCHOR_W;
+      derived.corners = { ...p, h: p.h * f, a: p.a * f };
+      anchors.corners = { model_total: model, pinnacle_total: imp.implied_total, from_line: imp.from_line, factor: f };
+    }
+  }
+  if (!pred.goals) return { prep, fits, pred, phi, anchors, lines: [], all: [] };
+  const base = buildLines(pred, phi, [0, 0], derived);
+  const alt = SCENARIOS.map(s => new Map(buildLines(pred, phi, s, derived).map(l => [l.id, l])));
+  // all: toda linha calculada (para a análise de uma linha pedida); lines: as exibidas nas tabelas
+  const all = base.map(l => ({ ...l, sc: alt.map(m => m.get(l.id)) })).filter(l => l.sc.every(Boolean));
+  const lines = all.filter(l => ALWAYS.has(l.market) || (l.pWin >= 0.15 && l.pWin <= 0.85 && l.pWin + l.pLose > 0.3));
+  return { prep, fits, pred, phi, anchors, lines, all };
 }
 
 export const fairOdd = l => 1 + l.pLose / l.pWin;

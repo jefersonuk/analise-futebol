@@ -4,7 +4,8 @@ import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { BETS_URL, betsApp, buildEntry, sendEntry } from './entry.js';
 import { bindTooltips, pickDashboard, renderDashboard } from './dashboard.js';
-import { ODDS_STALE_MIN, buildDossier, loadLeague, resolveBase, side } from './dossier.js';
+import { FOCUS, ODDS_STALE_MIN, buildDossier, loadLeague, resolveBase, side } from './dossier.js';
+import { alternatives, makePricer, nearest, parseLine, renderMyLine, verdict } from './myline.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -15,7 +16,7 @@ const hour = t => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '
 const BANCA = 44000;
 
 const state = { teams: [], fixtures: [], fixture: null, result: null, matches: [], dossier: null, oddsP: null, focus: true,
-  odds: new Map(), books: new Map(), pinn: new Map(), market: 'Todos' };
+  odds: new Map(), books: new Map(), pinn: new Map(), market: 'Todos', price: null, my: null };
 
 function msg(text, err = false) {
   const el = $('#msg');
@@ -100,6 +101,7 @@ $('#btnRun').onclick = async () => {
     state.matches = matches;
     state.odds.clear(); state.books.clear(); state.pinn.clear();
     state.market = 'Todos';
+    state.my = null;
     await refreshOdds();
     msg('');
     render();
@@ -123,6 +125,7 @@ async function refreshOdds() {
     fx: state.fixture, team: selectedTeam(), fixtures: state.fixtures, national: !!state.fixture.base.national,
     matches: state.matches, lg: state.fixture.base, oddsPayload: state.oddsP, banca: BANCA,
   });
+  state.price = makePricer({ dossier: state.dossier, result: state.result, teams: teamsHist(), banca: BANCA });
   showQuota();
 }
 
@@ -136,6 +139,7 @@ $('#btnOdds').onclick = async () => {
     renderLines();
     renderRank();
     renderDash();
+    if (state.my) runMy();
   } catch (e) { msg(e.message, true); }
   $('#btnOdds').disabled = false;
 };
@@ -171,6 +175,7 @@ function render() {
   renderLines();
   renderRank();
   renderDash();
+  renderMyForm();
   renderGames();
 }
 
@@ -236,15 +241,97 @@ function pinnCell(l) {
 function renderDash() {
   renderOddsInfo();
   if (!state.dossier) { $('#dash').innerHTML = ''; return; }
-  const { prep } = state.result, fx = state.fixture;
-  const teams = [['home', fx.home], ['away', fx.away]]
-    .map(([role, t]) => ({ role, name: t.name, games: recentGames(prep, t.id) }));
+  const teams = teamsHist();
   $('#dashMode').innerHTML = [['Foco: gols + escanteios 1T', true], ['Todos os mercados', false]]
     .map(([t, f]) => `<button class="${state.focus === f ? 'on' : ''}" data-f="${f}">${t}</button>`).join('');
   for (const b of $('#dashMode').children) b.onclick = () => { state.focus = b.dataset.f === 'true'; renderDash(); };
   $('#dash').innerHTML = renderDashboard(pickDashboard(state.dossier, 5, { focus: state.focus, side }), teams);
   bindTooltips($('#dash'));
 }
+
+// Últimos jogos de cada time, no formato dos gráficos.
+function teamsHist() {
+  const { prep } = state.result, fx = state.fixture;
+  return [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(prep, t.id) }));
+}
+
+// ---- minha linha: análise focada na linha que vou apostar ----
+const cond = l => l.pWin / (l.pWin + l.pLose);
+const thr = id => parseFloat(id.match(/-?[\d.]+$/)?.[0]) || 0;
+function renderMyForm() {
+  const all = state.result.all || state.result.lines;
+  const markets = [...new Set(all.map(l => l.market))].sort((a, b) => FOCUS.includes(b) - FOCUS.includes(a));
+  $('#myMarket').innerHTML = markets.map(m => `<option>${esc(m)}</option>`).join('');
+  fillMyLines();
+  $('#myOut').innerHTML = '';
+  $('#myMsg').hidden = true;
+}
+function fillMyLines(selected) {
+  const market = $('#myMarket').value, all = state.result.all || state.result.lines;
+  const rows = all.filter(l => l.market === market && (l.id === selected || (cond(l) > 0.05 && cond(l) < 0.95)))
+    .sort((a, b) => side(a.id).localeCompare(side(b.id)) || thr(a.id) - thr(b.id));
+  $('#myLine').innerHTML = rows.map(l => `<option value="${esc(l.id)}">${esc(l.label)} · acerta ${pct(cond(l))}</option>`).join('');
+  if (selected) $('#myLine').value = selected;
+}
+function selectMy(id) {
+  const l = (state.result.all || state.result.lines).find(x => x.id === id);
+  if (!l) return false;
+  $('#myMarket').value = l.market;
+  fillMyLines(id);
+  return true;
+}
+function myMsg(text, err = false) {
+  const el = $('#myMsg');
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.classList.toggle('err', err);
+}
+$('#myText').oninput = () => {
+  const text = $('#myText').value.trim();
+  if (!text || !state.price) return myMsg('');
+  const p = parseLine(text);
+  if (p.error) return myMsg(p.error, true);
+  if (!state.price(p.id)) {
+    const near = nearest(state.price, p.id);
+    if (near && selectMy(near)) return myMsg(`Essa linha está fora do que o modelo calcula; selecionei a mais próxima: ${state.price(near).line}.`, true);
+    return myMsg('O modelo não calcula essa linha para este jogo.', true);
+  }
+  selectMy(p.id);
+  const l = state.price(p.id);
+  myMsg(`Entendi: ${l.market} — ${l.line}`);
+};
+$('#myText').onkeydown = e => { if (e.key === 'Enter') $('#myRun').click(); };
+$('#myOdd').onkeydown = e => { if (e.key === 'Enter') $('#myRun').click(); };
+$('#myMarket').onchange = () => fillMyLines();
+$('#myRun').onclick = () => {
+  if (!state.price || !$('#myLine').value) return;
+  state.my = { id: $('#myLine').value, odd: parseFloat($('#myOdd').value) || null };
+  runMy();
+};
+function runMy() {
+  const line = state.price(state.my.id);
+  if (!line) { state.my = null; return myMsg('Essa linha não existe mais com as odds atuais.', true); }
+  const v = verdict(line, state.my.odd), { alts, best } = alternatives(state.price, line, state.dossier);
+  const alerts = state.dossier.data_quality.alerts;
+  if (alerts.length) v.notes.push(`Alertas do jogo: ${alerts.join('; ')}.`);
+  $('#myOut').innerHTML = renderMyLine({ line, v, alts, best, teams: teamsHist(), odd: state.my.odd });
+  bindTooltips($('#myOut'));
+}
+$('#myOut').addEventListener('click', e => {
+  const a = e.target.closest('[data-analyze]');
+  if (a) {
+    selectMy(a.dataset.analyze);
+    $('#myOdd').value = '';
+    $('#myText').value = '';
+    myMsg('Linha trocada: informe a odd da sua casa para ver o EV.');
+    state.my = { id: a.dataset.analyze, odd: null };
+    runMy();
+    $('#mySec').scrollIntoView({ behavior: 'smooth' });
+    return;
+  }
+  const b = e.target.closest('[data-enter]');
+  if (b) openEntry(b.dataset.enter, b.dataset.enter === state.my?.id ? state.my.odd : null);
+});
 
 function renderRank() {
   const rows = state.result.lines.filter(l => state.odds.has(l.id))
@@ -275,17 +362,14 @@ function renderGames() {
 const money = v => `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 let entry = null;   // { line, houses }
 
-function lineById(id) {
-  const d = state.dossier;
-  return d && d.lines_with_pinnacle.concat(d.lines_anchored || []).find(l => l.id === id);
-}
+const lineById = id => state.price?.(id) || null;
 
 $('#dash').addEventListener('click', e => {
   const b = e.target.closest('[data-enter]');
   if (b) openEntry(b.dataset.enter);
 });
 
-function openEntry(id) {
+function openEntry(id, odd = null) {
   const line = lineById(id), app = betsApp(), fx = state.fixture;
   if (!line) return;
   entry = { line, houses: app.houses };
@@ -301,7 +385,7 @@ function openEntry(id) {
   $('#enHouse').innerHTML = opts.join('') + '<option value="other">Outra casa…</option>';
   $('#enHouseOther').hidden = app.houses.length > 0;
   if (!app.houses.length) $('#enHouse').value = 'other';
-  $('#enOdd').value = line.odd_min.toFixed(2);
+  $('#enOdd').value = (odd || line.odd_min).toFixed(2);
   $('#enStake').value = app.stake ?? line.entry_brl;
   $('#enMsg').hidden = true;
   $('#enSend').disabled = false;

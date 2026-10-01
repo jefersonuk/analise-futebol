@@ -55,6 +55,19 @@
     <div id="dashMode" class="chips"></div>
     <div id="dash"></div>
   </section>
+  <section class="card" id="mySec">
+    <h2>🎯 Minha linha <span class="muted">a linha que você quer apostar: análise focada e alternativas</span></h2>
+    <input id="myText" type="text" autocomplete="off"
+      placeholder="Cole ou digite: Abaixo 4.5 1º período - escanteios · H1(-1.5) escanteios · Ninguém vai conseguir 9 escanteios · Acima 2.5">
+    <div class="row">
+      <select id="myMarket"></select>
+      <select id="myLine"></select>
+      <input id="myOdd" type="number" step="0.01" min="1.01" inputmode="decimal" placeholder="Odd da sua casa">
+      <button id="myRun" class="primary">Analisar linha</button>
+    </div>
+    <p id="myMsg" class="msg" hidden></p>
+    <div id="myOut"></div>
+  </section>
   <section class="card">
     <h2>EV contra a odd informada <span class="muted">(Pinnacle ou digitada na tabela)</span></h2>
     <div id="rank"></div>

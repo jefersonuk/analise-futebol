@@ -27,6 +27,32 @@ function spec(id, role, teamName) {
       x: v => (same ? v : -v), off: h, threshold: same ? -h : h };
   }
   if ((m = id.match(/^c1([OU])(.+)$/))) return { what: 'escanteios no 1º tempo', value: total('c1'), ...ou(m[1], +m[2]) };
+  // handicap / quem tem mais escanteios (jogo: ch, cx; 1º tempo: c1x), pelo saldo do time
+  const saldo = (key, what) => g => (g[key] ? g[key][0] - g[key][1] : null);
+  const hcp = (key, what, s, h) => {
+    const same = (s === 'H') === (role === 'home');
+    return { what: `saldo de ${what} do ${teamName}`, value: saldo(key), x: v => (same ? v : -v), off: h, threshold: same ? -h : h };
+  };
+  if ((m = id.match(/^ch([HA])(.+)$/))) return hcp('corners', 'escanteios', m[1], +m[2]);
+  if ((m = id.match(/^(cx|c1x)([12X])$/))) {
+    const [key, what] = m[1] === 'cx' ? ['corners', 'escanteios'] : ['c1', 'escanteios no 1º tempo'];
+    if (m[2] === 'X') return { what: `saldo de ${what} do ${teamName}`, value: saldo(key), x: v => -Math.abs(v), off: 0.5, threshold: 0 };
+    return hcp(key, what, m[2] === '1' ? 'H' : 'A', -0.5);
+  }
+  // corrida a N escanteios: "ninguém" pelo time que mais teve; "chega primeiro" só nos jogos em que
+  // um time só chegou a N (quando os dois chegaram, a ordem não está nos dados e o jogo fica de fora)
+  if ((m = id.match(/^cr([HAN])(\d+)$/))) {
+    const N = +m[2];
+    if (m[1] === 'N') return { what: 'escanteios do time que mais teve', value: g => (g.corners ? Math.max(...g.corners) : null),
+      x: v => -v, off: N - 0.5, threshold: N };
+    const own = (m[1] === 'H') === (role === 'home');
+    return { what: own ? `escanteios do ${teamName}` : `escanteios cedidos pelo ${teamName}`, threshold: N, x: v => v, off: -(N - 0.5),
+      value: g => {
+        if (!g.corners) return null;
+        const [mine, other] = own ? g.corners : [g.corners[1], g.corners[0]];
+        return mine >= N && other >= N ? null : mine;
+      } };
+  }
   if ((m = id.match(/^c([HA])([OU])(.+)$/))) {
     const own = (m[1] === 'H') === (role === 'home');   // a linha é dos escanteios deste time?
     return { what: own ? `escanteios do ${teamName}` : `escanteios cedidos pelo ${teamName}`,

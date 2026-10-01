@@ -4,7 +4,7 @@
 //
 // api: searchTeams, upcoming, leaguesOf, leagueMatches, fixtureOdds, injuries, standings, lastPlayed, quota
 
-import { METRICS, analyzeMatch, ev, fairOdd, impliedTotal, politicaE } from './model.js';
+import { DERIVED, METRICS, analyzeMatch, ev, fairOdd, impliedTotal, politicaE } from './model.js';
 import { rank } from './ratings.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
@@ -23,7 +23,7 @@ const W_MODEL = { '1X2': 0.1, 'Handicap asiático': 0.1, 'Total de gols': 0.1, '
 
 // Lado de uma linha: Mais de 8,5 e Mais de 9,5 escanteios, ou Fora +0,5 e Fora +0,75, são o mesmo lado
 // do mesmo mercado em preços diferentes.
-export const side = id => (/^[12X]$/.test(id) ? '1X2' : id.replace(/-?[\d.]+$/, ''));
+export const side = id => (/^[12X]$/.test(id) ? '1X2' : /^c1?x[12X]$/.test(id) ? id.slice(0, -1) : id.replace(/-?[\d.]+$/, ''));
 // Uma linha por mercado: lados opostos do mesmo mercado (Casa 0 e Fora +1,5) não viram duas apostas.
 export function distinct() {
   const seen = new Set();
@@ -163,6 +163,41 @@ export async function loadCross(api, base, S, onProgress) {
   return { matches, seasons: seasonsFor(S) };
 }
 
+// Entrada pela fórmula do app, na odd mínima: ¼ Kelly, teto 300·min(1, p/0,70), fator da Política E.
+export function stakeFor(p, odd, banca) {
+  const evv = p * odd - 1, kelly = evv / (odd - 1), cap = 300 * Math.min(1, p / 0.7), pe = politicaE(odd);
+  const raw = Math.max(0, banca * kelly * 0.25);
+  return { ev_at_min: r(evv), kelly_quarter_brl: Math.round(raw), cap_brl: Math.round(cap), politica_e: pe.label,
+    entry_brl: Math.round(Math.min(raw, cap) * pe.factor) };
+}
+
+// Linha sem odd da Pinnacle, precificada pelo modelo: ancorada no total da Pinnacle quando o mercado
+// deriva de um total que ela cota (odd mínima = justa × 1,05), senão modelo puro (× 1,08). Sempre frágil.
+// hi: histórico dos dois times na linha ({ home, away }, formato de hist() do dossiê).
+export function modelEntry(l, { res, hi, banca }) {
+  const pm = cond(l), range = l.sc.map(cond), anchor = res.anchors[DERIVED[l.market]];
+  const oddMin = (1 / pm) * (anchor ? 1.05 : 1.08);
+  const c = consistency({ p: pm, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
+  return { id: l.id, market: l.market, line: l.label, p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
+    fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0,
+    priced_by: anchor ? `modelo ancorado no total ${DERIVED[l.market] === 'corners1h' ? '1T ' : ''}de escanteios da Pinnacle`
+      : 'só o modelo (sem odd da Pinnacle nesta linha)',
+    pinnacle_odd: null, p_pinnacle: null, diff_pp: null,
+    p_blend: r(pm), tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
+    fair_odd_blend: r(1 / pm, 2), fragile: true, odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null,
+    ...stakeFor(pm, oddMin, banca), history: hi };
+}
+
+// Histórico dos dois times numa linha (últimos jogos de cada um, do mais recente ao mais antigo).
+export function lineHistory(id, teams) {
+  const one = t => {
+    const h = t && history(id, t.role, t.name, t.games);
+    return h && { what: h.what, threshold: h.threshold, hits: `${h.wins}/${h.bars.length}`, wins: h.wins, n: h.bars.length,
+      values_newest_first: h.bars.map(b => b.v).reverse() };
+  };
+  return { home: one(teams.find(t => t.role === 'home')), away: one(teams.find(t => t.role === 'away')) };
+}
+
 // fx: jogo (de upcoming). team: time buscado. fixtures: próximos jogos dele (evita chamada repetida).
 // matches/lg: jogos da liga já baixados pelo app (opcional). banca em R$.
 // oddsPayload: resultado de api.fixtureOdds já buscado pelo app (para a tabela e o dossiê usarem as mesmas odds).
@@ -250,14 +285,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   };
 
   // ---- linhas ----
-  const hist = l => {
-    const one = (role, t) => {
-      const h = history(l.id, role, t.name, recent[t.id]);
-      return h && { what: h.what, threshold: h.threshold, hits: `${h.wins}/${h.bars.length}`, wins: h.wins, n: h.bars.length,
-        values_newest_first: h.bars.map(b => b.v).reverse() };
-    };
-    return { home: one('home', fx.home), away: one('away', fx.away) };
-  };
+  const hist = l => lineHistory(l.id, [{ role: 'home', name: fx.home.name, games: recent[fx.home.id] },
+    { role: 'away', name: fx.away.name, games: recent[fx.away.id] }]);
   const g1x2 = ['1', 'X', '2'];
   const x12 = g1x2.every(id => fair.has(id)) ? (() => {
     const lines = g1x2.map(id => res.lines.find(l => l.id === id));
@@ -265,13 +294,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     return Object.fromEntries(g1x2.map((id, i) => [id, raw[i] / z]));
   })() : {};
 
-  // Entrada pela fórmula do app, na odd mínima: ¼ Kelly, teto 300·min(1, p/0,70), fator da Política E.
-  const stake = (p, odd) => {
-    const evv = p * odd - 1, kelly = evv / (odd - 1), cap = 300 * Math.min(1, p / 0.7), pe = politicaE(odd);
-    const raw = Math.max(0, banca * kelly * 0.25);
-    return { ev_at_min: r(evv), kelly_quarter_brl: Math.round(raw), cap_brl: Math.round(cap), politica_e: pe.label,
-      entry_brl: Math.round(Math.min(raw, cap) * pe.factor) };
-  };
+  const stake = (p, odd) => stakeFor(p, odd, banca);
 
   const priced = [], anchored = [], modelOnly = [];
   for (const l of res.lines) {
@@ -289,15 +312,11 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
         fair_odd_blend: r(1 / pb, 2), fragile, odd_min: r(oddMin, 2),
         odd_min_vs_pinnacle_pct: r((oddMin / odd - 1) * 100, 1), ...stake(pb, oddMin),
         ev_model_at_pinnacle: r(e.mid), ev_model_worst: r(e.low), history: hi });
-    } else if ((l.market === 'Handicap escanteios 1T' && res.anchors.corners1h) || !odds.size) {
-      // Sem preço na API para esta linha: handicap 1T com o total ancorado na Pinnacle (margem 5%), ou,
-      // quando a Pinnacle ainda não publicou nada para o jogo, o modelo puro (margem 8%). Sempre frágil.
-      const pure = !odds.size, oddMin = (1 / pm) * (pure ? 1.08 : 1.05), c = cons(pm);
-      anchored.push({ ...base, priced_by: pure ? 'só o modelo (Pinnacle ainda sem odds)' : 'modelo ancorado no total 1T da Pinnacle',
-        pinnacle_odd: null, p_pinnacle: null, diff_pp: null,
-        p_blend: r(pm), tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
-        fair_odd_blend: r(1 / pm, 2), fragile: true, odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null,
-        ...stake(pm, oddMin), history: hi });
+    } else if (res.anchors[DERIVED[l.market]] || !odds.size) {
+      // Sem preço na API para esta linha: mercado de escanteios derivado (handicap, quem tem mais, corrida)
+      // com o total ancorado na Pinnacle (margem 5%), ou, quando a Pinnacle ainda não publicou nada para o
+      // jogo, o modelo puro (margem 8%). Sempre frágil.
+      anchored.push(modelEntry(l, { res, hi, banca }));
     } else if (pm >= 0.35 && soft && odds.size) {
       const c = cons(pm);
       if (c.tier !== 'especulativa' || pm <= 0.65)
@@ -361,6 +380,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
       consistency: 'score = 0,5·p + 0,25·p_pior_cenário + 0,25·acerto_10_jogos_encolhido (10 jogos de peso para p); '
         + 'âncora: p ≥ 0,60, pior cenário ≥ 0,50 e cada time ≥ 6/10; sólida: p ≥ 0,52, pior cenário ≥ 0,42 e acerto somado ≥ 50%; resto especulativa',
       candidates: 'âncora/sólida, odd mínima ≥ 1,50 e permitida pela Política E, até 5% acima da Pinnacle; ordem: nível, não frágil, score, preço; candidates_focus: o mesmo só nos mercados de foco',
+      derived_corners: 'handicap de escanteios, quem tem mais escanteios (jogo e 1º tempo) e corrida a N escanteios: médias de cada time pelo modelo com o total puxado 80% para o total da Pinnacle (do jogo ou do 1º tempo); corrida: total binomial negativo, cada escanteio do visitante com prob. μA/(μH+μA); odd mínima = justa × 1,05 (× 1,08 sem âncora), sempre frágil',
       corners_1h_handicap: 'a API não traz odd de handicap de escanteios do 1º tempo: média de cada time pelo modelo, total puxado 80% para o total 1T implícito na Pinnacle, diferença com binomial negativa na dispersão da diferença medida na liga; odd mínima = justa × 1,05, sempre frágil' },
   };
   return out;

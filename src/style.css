@@ -115,3 +115,18 @@ dialog#entryDlg .facts b { font-weight: 600; }
 dialog#entryDlg .check { font-size: 13px; margin: 10px 0 0; line-height: 1.5; }
 dialog#entryDlg .row.end { justify-content: flex-end; margin-top: 14px; }
 dialog#entryDlg .row.end .primary { margin-left: 0; }
+
+#myText { width: 100%; }
+#myMarket, #myLine { flex: 1; min-width: 160px; }
+#myOdd { width: 140px; }
+.verdict { border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: 8px; padding: 10px 12px; margin: 12px 0 4px; }
+.verdict.ok { border-left-color: var(--accent); } .verdict.mid { border-left-color: var(--warn); } .verdict.no { border-left-color: var(--bad); }
+.verdict.info { border-left-color: var(--blue); }
+.verdict > b { font-size: 15px; margin-right: 8px; }
+.verdict ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.verdict li { margin: 2px 0; }
+h3.alt-h { font-size: 15px; margin: 16px 0 6px; }
+.sug { font-size: 14px; margin: 0 0 8px; }
+.sug button, table.alts button { padding: 3px 9px; font-size: 13px; }
+table.alts td.why { white-space: normal; min-width: 160px; text-align: left; }
+@media (max-width: 640px) { #myOdd { width: 100%; } }
