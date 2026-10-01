@@ -4,6 +4,7 @@
 //
 // Uso:  node scripts/analisar.mjs "<time>" [--listar] [--jogo N] [--fixture ID] [--time-id ID] [--banca R$] [--demo]
 // Chave: variável API_FOOTBALL_KEY ou arquivo .env na raiz do projeto (API_FOOTBALL_KEY=...).
+// Cache na nuvem (opcional, o mesmo do app): ANALISE_CACHE_REPO=dono/repo-privado e ANALISE_CACHE_TOKEN=...
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { makeClient } from '../src/client.js';
 import * as demo from '../src/demo.js';
 import { buildDossier } from '../src/dossier.js';
+import { withCloud } from '../src/cloud.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = path.join(ROOT, '.cache');
@@ -32,13 +34,15 @@ function args(argv) {
   return o;
 }
 
-function apiKey() {
-  if (process.env.API_FOOTBALL_KEY) return process.env.API_FOOTBALL_KEY.trim();
+function env(name) {
+  if (process.env[name]) return process.env[name].trim();
   try {
-    const line = fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split('\n').find(l => l.startsWith('API_FOOTBALL_KEY='));
-    return line ? line.slice('API_FOOTBALL_KEY='.length).trim() : '';
+    const line = fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split('\n').find(l => l.startsWith(`${name}=`));
+    return line ? line.slice(name.length + 1).trim() : '';
   } catch { return ''; }
 }
+const apiKey = () => env('API_FOOTBALL_KEY');
+let cloud = null;
 
 function nodeClient(key) {
   let remaining = null;
@@ -52,8 +56,13 @@ function nodeClient(key) {
     if (errs.length) throw new Error(errs.join(' · '));
     return json.response;
   };
-  const load = k => { try { return JSON.parse(fs.readFileSync(file(k), 'utf8')); } catch { return null; } };
-  const save = (k, d) => { fs.mkdirSync(CACHE, { recursive: true }); fs.writeFileSync(file(k), JSON.stringify(d)); };
+  const local = {
+    load: k => { try { return JSON.parse(fs.readFileSync(file(k), 'utf8')); } catch { return null; } },
+    save: (k, d) => { fs.mkdirSync(CACHE, { recursive: true }); fs.writeFileSync(file(k), JSON.stringify(d)); },
+  };
+  const repo = env('ANALISE_CACHE_REPO'), token = env('ANALISE_CACHE_TOKEN');
+  if (repo && token) cloud = withCloud(local, { repo, token });
+  const { load, save } = cloud || local;
   return { ...makeClient({ get, load, save }), quota: () => remaining };
 }
 
@@ -79,6 +88,11 @@ async function main() {
 
   const out = await buildDossier(api, { fx, team, teams, fixtures, banca: o.banca, national: !!team.national, onProgress: log });
   process.stdout.write(JSON.stringify(out) + '\n');
+  if (cloud) {
+    await cloud.flush();
+    const st = cloud.status();
+    log(`nuvem ${st.repo}: ${st.down} baixados, ${st.up} enviados${st.error ? ` · erro: ${st.error}` : ''}`);
+  }
 }
 
 main().catch(e => fail(e.message));

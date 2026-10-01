@@ -29,7 +29,9 @@ const startAction = () => { statsAt = api.stats(); };
 function showQuota() {
   const s = api.stats(), used = s.api - statsAt.api, hits = s.cache - statsAt.cache;
   $('#quota').textContent = [api.remaining != null ? `${api.remaining} requisições restantes hoje` : '',
-    used || hits ? `esta ação: ${used} na API, ${hits} do cache` : ''].filter(Boolean).join(' · ');
+    used || hits ? `esta ação: ${used} na API, ${hits} do cache` : '',
+    api.cloudStatus()?.ok ? '☁️ nuvem' : ''].filter(Boolean).join(' · ');
+  showCloud();
 }
 
 // ---- chave ----
@@ -41,6 +43,38 @@ $('#btnSaveKey').onclick = () => {
   msg('');
 };
 if (!api.getKey()) $('#keyBox').hidden = false;
+
+// ---- cache na nuvem (GitHub) ----
+function showCloud(text, err = false) {
+  const s = api.cloudStatus(), el = $('#cloudInfo');
+  el.classList.toggle('err', err || s?.ok === false);
+  $('#btnPushCloud').hidden = !s?.ok;
+  el.textContent = text || (!s ? 'Nuvem desligada: o cache fica só neste navegador.'
+    : s.ok === false ? `Nuvem com erro: ${s.error}`
+      : s.ok ? `Nuvem conectada (${s.repo}): ${s.files} arquivos · nesta sessão ${s.down} baixados, ${s.up} enviados${s.error ? ` · último erro: ${s.error}` : ''}`
+        : `Nuvem: ${s.repo} (conectando…)`);
+}
+$('#ghRepo').value = api.getCloud()?.repo || '';
+$('#btnSaveCloud').onclick = async () => {
+  const repo = $('#ghRepo').value.trim(), token = $('#ghToken').value.trim() || api.getCloud()?.token;
+  if (!repo) { api.setCloud(null); return showCloud(); }
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return showCloud('Repositório no formato dono/nome.', true);
+  if (!token) return showCloud('Cole o token do GitHub.', true);
+  api.setCloud({ repo, token });
+  $('#ghToken').value = '';
+  showCloud('Conectando…');
+  try { await api.checkCloud(); showCloud(); } catch (e) { api.setCloud(null); showCloud(`Não conectou: ${e.message}`, true); }
+};
+$('#btnPushCloud').onclick = async () => {
+  $('#btnPushCloud').disabled = true;
+  try {
+    const n = await api.pushAllToCloud((d, t) => showCloud(`Enviando o cache deste navegador: ${d}/${t}…`));
+    showCloud(); $('#cloudInfo').textContent += ` · ${n} arquivos deste navegador conferidos`;
+  } catch (e) { showCloud(e.message, true); }
+  $('#btnPushCloud').disabled = false;
+};
+if (api.getCloud()) api.checkCloud().then(() => showCloud(), () => showCloud());
+else showCloud();
 
 // ---- time -> próximos jogos ----
 async function search(fromApi = false) {

@@ -3,7 +3,8 @@
 
 import * as demo from './demo.js';
 import { makeClient } from './client.js';
-import { load, save } from './store.js';
+import * as store from './store.js';
+import { withCloud } from './cloud.js';
 
 const BASE = 'https://v3.football.api-sports.io';
 const KEY_STORE = 'af:key';
@@ -25,6 +26,25 @@ async function call(path, params) {
   if (errs.length) throw new Error(errs.join(' · '));
   return json.response;
 }
+
+// ---- cache compartilhado no GitHub (repositório privado) ----
+// Configuração só neste navegador. Chave fora do prefixo "af:" para não ir para o IndexedDB.
+const CLOUD_STORE = 'afGithub';
+let cloud = null;
+export const getCloud = () => { try { return JSON.parse(localStorage.getItem(CLOUD_STORE)) || null; } catch { return null; } };
+export function setCloud(cfg) {
+  if (cfg?.repo && cfg?.token) localStorage.setItem(CLOUD_STORE, JSON.stringify({ repo: cfg.repo.trim(), token: cfg.token.trim() }));
+  else localStorage.removeItem(CLOUD_STORE);
+  const c = getCloud();
+  cloud = c ? withCloud(store, c) : null;
+  return cloud;
+}
+setCloud(getCloud());
+export const cloudStatus = () => cloud?.status() || null;
+export const checkCloud = () => (cloud ? cloud.check() : Promise.reject(new Error('nuvem não configurada')));
+export const pushAllToCloud = async onProgress => (cloud ? cloud.pushAll(await store.keys(), onProgress) : 0);
+const load = k => (cloud ? cloud.load(k) : store.load(k));
+const save = (k, v) => (cloud ? cloud.save(k, v) : store.save(k, v));
 
 const client = makeClient({ get: call, load, save });
 const pick = (name, ...args) => (isDemo() ? Promise.resolve(demo[name](...args)) : client[name](...args));

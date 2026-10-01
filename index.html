@@ -19,6 +19,14 @@
     <input id="keyInput" type="password" autocomplete="off" placeholder="x-apisports-key">
     <button id="btnSaveKey">Salvar</button>
   </div>
+  <label for="ghRepo" class="gap">Cache na nuvem: o histórico das ligas no GitHub, para todos os seus dispositivos (repositório <b>privado</b>; o token fica só neste navegador)</label>
+  <div class="row">
+    <input id="ghRepo" type="text" autocomplete="off" placeholder="dono/repositório, ex.: jefersonuk/analise-cache">
+    <input id="ghToken" type="password" autocomplete="off" placeholder="token do GitHub (só esse repositório, Contents: leitura e escrita)">
+    <button id="btnSaveCloud">Conectar</button>
+    <button id="btnPushCloud" class="ghost" hidden>Enviar o cache deste navegador</button>
+  </div>
+  <p id="cloudInfo" class="muted"></p>
 </section>
 
 <section class="card">
