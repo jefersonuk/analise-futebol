@@ -7,6 +7,7 @@ import { bindTooltips, pickDashboard, renderDashboard } from './dashboard.js';
 import { FOCUS, ODDS_STALE_MIN, buildDossier, loadLeague, resolveBase, side } from './dossier.js';
 import { alternatives, makePricer, nearest, parseLine, renderMyLine, verdict } from './myline.js';
 import { initScan } from './scanview.js';
+import { bindSpecialist, briefGame } from './brief.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -495,3 +496,4 @@ async function openFull(fx) {
   $('#btnRun').click();
 }
 initScan({ api, openEntry, openFull, banca: BANCA });
+bindSpecialist($('#btnSpec'), () => state.dossier && briefGame(state.dossier));

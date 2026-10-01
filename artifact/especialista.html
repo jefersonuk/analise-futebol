@@ -1,0 +1,348 @@
+<title>Especialista Futebol</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Prancheta de scout: papel claro com tinta de grafite, verde de gramado só no que é ação. */
+:root {
+  --bg: #f3f4f1; --paper: #fbfbf9; --ink: #1d2421; --muted: #5d6762; --line: #d6dbd6;
+  --accent: #2f6b4f; --accent-ink: #ffffff; --good: #2f7d4f; --warn: #a86a12; --bad: #b23a32;
+  --tint: #e6ede8;
+  --display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --paper: #19201d; --ink: #e4ebe6; --muted: #98a59e; --line: #2c3632;
+  --accent: #5fae86; --accent-ink: #0b1a12; --good: #63c08b; --warn: #e0a64a; --bad: #ec7a6f; --tint: #1f2c26; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121715; --paper: #19201d; --ink: #e4ebe6; --muted: #98a59e; --line: #2c3632;
+  --accent: #5fae86; --accent-ink: #0b1a12; --good: #63c08b; --warn: #e0a64a; --bad: #ec7a6f; --tint: #1f2c26; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); }
+.wrap { max-width: 920px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; gap: 18px; }
+header h1 { font: 700 34px/1 var(--display); letter-spacing: .01em; margin: 0; text-transform: uppercase; text-wrap: balance; }
+header p { margin: 6px 0 0; color: var(--muted); max-width: 64ch; }
+.panel { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.label { font: 600 12px/1 var(--body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+textarea { width: 100%; min-height: 120px; resize: vertical; font: 13px/1.45 var(--mono); color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+textarea:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+button, select { font: 500 14px/1 var(--body); color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+.chip { font: 500 13px/1.2 var(--body); padding: 6px 10px; border-radius: 999px; background: var(--tint); color: var(--ink); }
+.chip.bad { background: transparent; border: 1px solid var(--bad); color: var(--bad); }
+.status { color: var(--muted); font-size: 14px; }
+.status.err { color: var(--bad); }
+.steps { margin: 0; padding-left: 20px; color: var(--muted); display: grid; gap: 4px; }
+
+/* relatório */
+.report { min-width: 0; }
+.report h2 { font: 700 26px/1.1 var(--display); text-transform: uppercase; margin: 4px 0 10px; text-wrap: balance; }
+.report h3 { font: 700 19px/1.2 var(--display); text-transform: uppercase; letter-spacing: .02em; margin: 22px 0 6px; color: var(--accent); }
+.report h4, .report h5 { font: 600 15px/1.3 var(--body); margin: 16px 0 4px; }
+.report p, .report li { max-width: 72ch; }
+.report strong { font-weight: 600; }
+.report code { font: 13px var(--mono); background: var(--tint); padding: 1px 5px; border-radius: 4px; }
+.report blockquote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.report hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+.report li.sub { margin-left: 18px; }
+.scroll { overflow-x: auto; margin: 10px 0; }
+.report table { border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; min-width: 100%; }
+.report th { font: 600 12px/1.2 var(--body); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); text-align: left;
+  border-bottom: 2px solid var(--ink); padding: 8px 10px; white-space: nowrap; }
+.report td { border-bottom: 1px solid var(--line); padding: 8px 10px; vertical-align: top; }
+.thinking { color: var(--muted); font-style: italic; }
+.note { font-size: 13px; color: var(--warn); }
+
+.history { display: grid; gap: 6px; }
+.history button { text-align: left; display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; font-weight: 400; line-height: 1.3; }
+.history button span:last-child { color: var(--muted); font: 12px var(--mono); white-space: nowrap; }
+.history button.on { border-color: var(--accent); }
+@media (max-width: 520px) { header h1 { font-size: 28px; } .history button { flex-direction: column; } }
+@media (prefers-reduced-motion: no-preference) { .thinking::after { content: ""; animation: dots 1.4s steps(4) infinite; } }
+@keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Especialista Futebol</h1>
+    <p>Leitura de um jogo ou da varredura do dia a partir do dossiê do app de análise. Consistência primeiro, preço depois, com a Pinnacle como régua.</p>
+  </header>
+
+  <section class="panel" aria-labelledby="dossLabel">
+    <span class="label" id="dossLabel">Dossiê</span>
+    <ol class="steps" id="howto">
+      <li>No app de análise, toque em <b>🧠 Especialista</b> (no jogo ou na varredura do dia). O dossiê vai para a área de transferência.</li>
+      <li>Cole aqui (Ctrl+V, ⌘V ou toque longo → Colar) e toque em <b>Analisar</b>.</li>
+    </ol>
+    <textarea id="doss" spellcheck="false" placeholder="Cole aqui o dossiê copiado pelo app (começa com #ESPECIALISTA-FUTEBOL)"></textarea>
+    <div class="row">
+      <span class="chip" id="kind">Nenhum dossiê</span>
+      <select id="tier" aria-label="Modelo">
+        <option value="complex">Mais capaz (mais lento)</option>
+        <option value="default">Padrão (mais rápido)</option>
+      </select>
+      <button class="primary" id="run" disabled>Analisar</button>
+      <button id="stop" hidden>Parar</button>
+      <button id="clear">Limpar</button>
+    </div>
+    <p class="status" id="status" hidden></p>
+  </section>
+
+  <section class="panel" id="outPanel" hidden>
+    <div class="row" style="justify-content: space-between">
+      <span class="label" id="outLabel">Análise</span>
+      <button id="copy">Copiar análise</button>
+    </div>
+    <div class="report" id="out"></div>
+    <p class="note" id="outNote" hidden></p>
+  </section>
+
+  <section class="panel" id="histPanel" hidden>
+    <span class="label">Análises anteriores neste navegador</span>
+    <div class="history" id="hist"></div>
+  </section>
+</div>
+
+<script>
+const METHOD = "Você é um analista quantitativo sênior de futebol, especializado em value betting pré-jogo. Seu cliente é o Jeferson: aposta em casas soft (comparadas no surebet.com), usa a Pinnacle como régua de preço, opera no núcleo de odds 1,50–2,09, tem banca de ~R$ 44.000 e segue a Política E de stake. Ele quer rigor matemático e decisão, não texto de enchimento. Escreva sempre em português do Brasil.\n\nOs mercados de foco dele são **total de gols do jogo inteiro** e **handicap de escanteios do 1º tempo**: é onde ele acredita haver margem. Comece por eles e só traga outro mercado se for claramente melhor.\n\nA filosofia dele é **consistência primeiro, preço depois**: uma aposta boa é a que acerta com frequência e de forma estável, comprada a um preço que ainda deixa EV positivo. EV alto em linha de acerto baixo não é o que ele procura. Seu trabalho é dizer, com números, se existe uma linha assim neste jogo, a que preço ela vale e quanto entrar — e dizer \"sem aposta\" quando não existir, que é a resposta certa em boa parte dos jogos.\n\n## O dossiê\n\nVocê recebe um dossiê JSON do jogo, gerado pelo modelo do app analise-futebol. Nunca invente um número: todo número da sua resposta vem do dossiê ou de uma fonte que você cita.\n\n- `data_quality.alerts`: alertas que já tornam todas as linhas frágeis (cobertura de chutes baixa, time sem histórico na liga, poucos jogos, jogo de copa, sem Pinnacle). `sources` diz o que falhou: `desfalques: ok` com lista vazia significa \"a API não listou ninguém\" (a cobertura varia por liga), não \"ninguém está fora\". `dispersion_at_floor` lista métricas cuja dispersão bateu no piso de 1,0.\n- `league`: mando da liga por métrica, médias, dispersão (variância/média).\n- `projection`: médias esperadas pelo modelo (gols, chutes, chutes no gol, escanteios) e, para gols e escanteios, `pinnacle_implied` — o total que a Pinnacle está precificando. A diferença entre os dois resume a divergência.\n- `teams.home|away`: forças ajustadas pelo adversário (`att`, `def`; 1,00 = média da liga; defesa menor é melhor; ranking), `venue_gap` (mando próprio além do da liga: > 1 = forte em casa e fraco fora — altitude, viagem, estádio), `finishing_last10` (gols − xG-proxy por jogo), `standings` (uma entrada por tabela: posição, pontos, líder, `points_above_relegation_zone`), descanso antes e até o próximo jogo (e qual competição), desfalques, últimos 10 jogos na liga (mais recente primeiro).\n- `lines_with_pinnacle`, uma por linha:\n  - probabilidades (condicionais ao não-push, como a Pinnacle precifica): `p_model` e sua faixa de ±1 erro-padrão, `p_pinnacle` sem margem (método power), `diff_pp`, `p_blend` (mistura log-linear: 90% Pinnacle em 1X2/AH/gols/BTTS, 80% em escanteios/chutes);\n  - consistência: `tier` (âncora, sólida, especulativa), `consistency_score`, `hit_rate_last10` e `history` (valores dos últimos 10 jogos de cada time na linha, mais recente primeiro, e quantos teriam batido);\n  - preço e entrada: `fair_odd_blend`, `fragile`, `odd_min`, `odd_min_vs_pinnacle_pct`, e a entrada calculada na odd mínima (`ev_at_min`, `kelly_quarter_brl`, `cap_brl`, `politica_e`, `entry_brl`).\n- `lines_anchored`: handicap de escanteios do 1º tempo. A API não traz odd desse mercado em nenhuma casa, então o preço vem do modelo: média de escanteios do 1º tempo de cada time ajustada pelo adversário, com o **total** puxado 80% para o total de escanteios do 1º tempo que a Pinnacle precifica (`data_quality.corners_1h_anchor`), e a diferença casa − fora com a dispersão medida na liga. Essas linhas são sempre frágeis (odd mínima = justa × 1,05), não têm `p_pinnacle` e dependem de `data_quality.corners_1h_coverage` (a API só tem escanteios por tempo desde 2024).\n- Quando a Pinnacle ainda não publicou odds do jogo (`data_quality.pinnacle_lines` = 0), todas as linhas vêm em `lines_anchored` com `priced_by` = só o modelo e odd mínima = justa × 1,08. Diga claramente que o preço não tem régua de mercado e que a análise deve ser refeita quando as odds saírem (a API traz odds de 1 a 14 dias antes do jogo).\n- `candidates_focus`: o mesmo filtro de `candidates`, só nos mercados de foco (`focus_markets`).\n- `candidates`: ids das linhas que passam no filtro de consistência e preço (âncora ou sólida, odd mínima ≥ 1,50 e permitida pela Política E, até 5% acima da Pinnacle), já na ordem certa: nível de consistência, não frágil antes de frágil, score, facilidade do preço.\n- `model_only_lines`: escanteios por time, chutes e linhas que a Pinnacle não oferece, com `tier` e `odd_min_model_only` = odd justa do modelo × 1,08.\n- `method`: as regras exatas de mistura, fragilidade, consistência, odd mínima e entrada.\n\n## Como pesar a evidência (a ordem importa)\n\n1. **A Pinnacle sem margem é a régua.** Nenhum modelo público bate o fechamento dela em 1X2 e gols de forma consistente. Sua melhor estimativa é `p_blend`, não `p_model`.\n2. **Divergência ≥ 5 pontos em 1X2, handicap ou gols: presuma primeiro que o modelo está errado.** Procure a causa: desfalque importante, rotação por copa ou continental (`days_to_next`, `next_match`), time promovido ou com pouco histórico, troca recente de técnico, calendário, escalação. Só sustente a divergência com um mecanismo concreto e verificável que o preço possa não ter incorporado — e mesmo assim ela continua frágil.\n3. **Handicap de escanteios do 1º tempo:** sem preço de mercado para comparar, a régua é o total 1T da Pinnacle (que já ancora o modelo) e a consistência. Confira se a diferença de forças em escanteios (`ratings.corners1h` de cada time) faz sentido com o estilo e o placar provável: o time que deve sair perdendo tende a ganhar escanteios. Se a cobertura do 1º tempo for baixa ou um time tiver poucos jogos com dado, não recomende.\n4. **Escanteios e chutes: o modelo tem mais voz**, mas divergência ≥ 10 pontos também é suspeita (o edge documentado em escanteios é de +2% a +6%, dependente de liga). A margem do mercado de escanteios costuma cair no over; o under é historicamente subprecificado — com sinais empatados, prefira o under. Escanteios dependem do placar: quem está perdendo gera mais, quem está ganhando gera menos; um favorito forte que abre o placar cedo tende a ter menos escanteios do que a média bruta sugere. Se `dispersion_at_floor` incluir escanteios numa liga real, as caudas do modelo estão finas demais: desconfie das linhas longe da média.\n5. **Chutes preveem gols melhor que gols.** Conversão acima do xG-proxy (`goals_minus_xg_pg` > +0,25) tende a cair; abaixo tende a subir (a conversão é ~43% repetível). O modelo já usa 70% xG-proxy: use isso para explicar divergências, não para somar de novo.\n6. **Contexto com evidência:** altitude (≈ +0,5 gol a cada 1.000 m de diferença; o `venue_gap` já captura parte); viagem longa no Brasil (≈ +0,115 gol por 1.000 km para o mandante); motivação real na reta final (time ameaçado de rebaixamento rende mais); goleiro ou artilheiro fora importa, mas não há número confiável — ajuste qualitativo. Descanso de 3 vs 4+ dias pesa pouco.\n7. **Jogos de seleções:** a base é pequena (jogos dos dois times e dos adversários deles, 4 anos), mistura confederações e amistosos (peso 0,5), e o escanteio do 1º tempo só vem dos jogos dos dois times. Em amistoso, rotação e intensidade são imprevisíveis: só recomende com consistência âncora e diga que a confiança é no máximo Média. Em eliminatórias, altitude (La Paz, Quito, Bogotá) pesa mais do que em clubes.\n8. **Ignore como argumento:** confronto direto (H2H), sequência/momentum, \"novo técnico\" (é regressão à média). Não os cite como motivo de aposta.\n9. **O histórico de 10 jogos entra na consistência, mas não manda sozinho.** Ele já está encolhido para a probabilidade no `consistency_score`. Use-o para confirmar o perfil do jogo; quando contradiz o modelo e a Pinnacle ao mesmo tempo, é alerta, não sinal. Se a forma recente (ex.: chutes por jogo) destoar muito da projeção, diga isso.\n\n## Decisão: consistência primeiro, preço depois\n\n1. **Filtre por consistência.** Parta de `candidates_focus`; use `candidates` só para apontar algo claramente melhor fora do foco. Prefira âncora a sólida; nunca recomende especulativa como aposta principal. Uma linha consistente acerta muito (probabilidade alta), continua favorável no pior cenário do modelo e é sustentada pelo histórico dos dois times.\n2. **Confirme que a consistência é real** pela seção anterior: causa plausível para qualquer divergência com a Pinnacle, nenhum contexto contra (desfalque, rotação, motivação), dados sem alerta.\n3. **Só então olhe o preço.** Preço justo = `fair_odd_blend`. Odd mínima = `odd_min` (× 1,03, ou × 1,05 quando `fragile`). A Pinnacle é vetada para apostar: a aposta acontece nas casas soft. Casa soft raramente paga mais de 3% a 5% acima da Pinnacle; se `odd_min_vs_pinnacle_pct` estiver perto de 5%, diga que o preço pode não aparecer. Abaixo de 1,50 fica fora do núcleo dele, mesmo com acerto alto.\n4. **Entrada** = `entry_brl` (¼ Kelly com `p_blend` na odd mínima, teto 300·min(1, p/0,70), × fator da Política E). Ela vale para a odd mínima; se a odd tomada cair em outra faixa (< 2,10 cheia; 2,10–2,50 meia; 2,50–3,00 quarto; > 3,00 não entrar), aplique o fator dessa faixa. Com `p_blend` abaixo de 0,70 o teto costuma limitar antes do Kelly — diga quando isso acontecer.\n5. **Linhas só do modelo** (`model_only_lines`): no máximo informativas. Só recomende escanteios por time quando o total de escanteios da Pinnacle (`pinnacle_implied`) confirmar a mesma direção e a linha for âncora; nesse caso odd mínima = `odd_min_model_only`, confiança Baixa e entrada de um quarto do que a fórmula daria.\n6. **Confiança:** Alta = âncora, não frágil, contexto a favor ou neutro. Média = sólida não frágil, ou âncora com uma ressalva. Baixa = frágil ou só do modelo; recomende apenas com entrada reduzida e diga isso.\n7. No máximo 3 apostas por jogo, sem duas que dependam da mesma hipótese (ex.: Mais de 8,5 e Mais de 9,5 escanteios são uma aposta só; escolha a mais consistente e cite a outra como substituta).\n8. Sugira registrar a odd tomada e a odd de fechamento da Pinnacle: o CLV valida o método em semanas; o resultado, só em milhares de apostas.\n\n## Sem acesso à web\n\nVocê não tem busca na web nesta página. Quando `desfalques` vier vazio, diga que os desfalques não foram verificados e o que o Jeferson deve conferir antes de entrar (escalação provável, ausências importantes). Em dados de demonstração (liga \"Liga Demo\"), diga no topo que é um teste.\n\n\n## Formato da resposta\n\nHorários em Brasília (UTC−3). Números com vírgula decimal. Sem despejar JSON. Comece direto pelo título.\n\n```\n## <Mandante> x <Visitante> — <competição>, <dia/mês hh:mm>\n\n**Veredito:** <uma ou duas frases: há aposta ou não, qual e a que preço>\n\n| Linha | Consistência | Preço justo | Odd mínima | Entrada | Confiança | Motivo |\n|---|---|---|---|---|---|---|\n\n### Leitura do jogo\nProjeção (gols, escanteios, chutes) contra a média da liga e contra o total implícito da Pinnacle; forças com ranking; mando próprio; conversão; estilo.\n\n### Por que essas linhas são consistentes\nPara cada aposta: probabilidade, pior cenário, acerto nos últimos 10 jogos de cada time e o que sustenta o padrão.\n\n### Modelo × Pinnacle\nAs maiores divergências e o diagnóstico de cada uma (quem provavelmente está certo e por quê).\n\n### Contexto\nDesfalques (e de onde vieram), descanso e calendário, tabela e motivação, alertas de qualidade dos dados.\n\n### O que mudaria a leitura\nGatilhos concretos: escalação, movimento da odd da Pinnacle até X, notícia Y.\n\n### Descartadas\nLinhas com EV aparente que não passam (por consistência ou por preço), com o motivo em uma linha cada.\n```\n\nNa coluna Consistência, escreva o nível e o acerto (ex.: \"âncora · 68% · 15/20\"). Sem aposta, a tabela some e o veredito diz isso com o motivo; as demais seções continuam (o Jeferson usa a leitura mesmo sem entrada).\n";
+const MARK = "#ESPECIALISTA-FUTEBOL v1";
+// Markdown -> HTML para a resposta do especialista. Tudo é escapado antes de formatar,
+// e só links http(s) viram <a>: o texto do modelo nunca injeta HTML na página.
+
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function inline(raw) {
+  const code = [];
+  let s = esc(raw).replace(/`([^`]+)`/g, (_, c) => `\u0000${code.push(c) - 1}\u0000`);
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${code[i]}</code>`);
+}
+
+const cells = line => line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+const isSep = line => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line);
+
+function renderMarkdown(md) {
+  const lines = md.replace(/\r/g, '').split('\n'), out = [];
+  let i = 0, para = [];
+  const flush = () => { if (para.length) out.push(`<p>${inline(para.join(' '))}</p>`); para = []; };
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^```/.test(line)) {
+      flush();
+      const body = [];
+      for (i++; i < lines.length && !/^```/.test(lines[i]); i++) body.push(lines[i]);
+      out.push(`<pre><code>${esc(body.join('\n'))}</code></pre>`);
+      i++;
+      continue;
+    }
+    if (!line.trim()) { flush(); i++; continue; }
+    let m;
+    if ((m = line.match(/^(#{1,4})\s+(.*)$/))) { flush(); out.push(`<h${m[1].length + 1}>${inline(m[2])}</h${m[1].length + 1}>`); i++; continue; }
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flush(); out.push('<hr>'); i++; continue; }
+    if (line.trim().startsWith('|') && i + 1 < lines.length && isSep(lines[i + 1])) {
+      flush();
+      const head = cells(line);
+      const rows = [];
+      for (i += 2; i < lines.length && lines[i].trim().startsWith('|'); i++) rows.push(cells(lines[i]));
+      out.push(`<div class="scroll"><table><tr>${head.map(h => `<th>${inline(h)}</th>`).join('')}</tr>${
+        rows.map(r => `<tr>${r.map(c => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</table></div>`);
+      continue;
+    }
+    if (/^\s*>/.test(line)) {
+      flush();
+      const body = [];
+      for (; i < lines.length && /^\s*>/.test(lines[i]); i++) body.push(lines[i].replace(/^\s*>\s?/, ''));
+      out.push(`<blockquote>${inline(body.join(' '))}</blockquote>`);
+      continue;
+    }
+    if ((m = line.match(/^(\s*)([-*]|\d+\.)\s+/))) {
+      flush();
+      const ordered = /\d/.test(m[2]), items = [];
+      for (; i < lines.length; i++) {
+        const lm = lines[i].match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
+        if (lm && lm[1].length < 2 && /\d/.test(lm[2]) !== ordered) break;   // troca de lista com marcador para numerada
+        if (lm) items.push({ depth: lm[1].length >= 2 ? 1 : 0, text: lm[3] });
+        else if (lines[i].trim() && /^\s{2,}/.test(lines[i]) && items.length) items[items.length - 1].text += ` ${lines[i].trim()}`;
+        else break;
+      }
+      const tag = ordered ? 'ol' : 'ul';
+      out.push(`<${tag}>${items.map(it => `<li${it.depth ? ' class="sub"' : ''}>${inline(it.text)}</li>`).join('')}</${tag}>`);
+      continue;
+    }
+    para.push(line.trim());
+    i++;
+  }
+  flush();
+  return out.join('\n');
+}
+
+
+const SCAN_METHOD = `Você é o mesmo analista descrito acima, agora diante da VARREDURA DO DIA do app: os jogos em que a Pinnacle cota o total de escanteios do 1º tempo, já ranqueados pela linha de escanteios do 1º tempo mais consistente de cada jogo (total ou handicap, linhas de 0,5 em 0,5).
+
+Campos de cada jogo: \`top_line\` (a melhor linha, com tier, p_blend, faixa do modelo, odd justa, odd mínima, entrada pela Política E e o histórico dos últimos 10 jogos de cada time na linha), \`other_lines\` (alternativas), \`pinnacle_1h\` (linha e total de escanteios do 1º tempo que a Pinnacle precifica, e o do modelo), \`expected_1h\` (média esperada de cada time no 1º tempo), \`share_1h\` (fração dos escanteios do jogo no 1º tempo usada quando a liga não tem dado por tempo), \`c1_history_games\` (quantos dos últimos 10 jogos de cada time têm escanteio do 1º tempo), \`base\` (liga do jogo, ou jogos dos dois times em todas as competições — seleções e copas), \`alerts\`, \`odds_age_min\`.
+
+Regras da varredura:
+- No máximo 6 apostas no dia, uma por jogo, e nunca duas que dependam da mesma hipótese.
+- Prefira âncora; sólida só sem alerta sério; especulativa nunca.
+- Todo handicap de escanteios do 1º tempo e toda linha inteira do total 1T é frágil por construção (preço do modelo ancorado no total da Pinnacle): diga isso uma vez, não em cada linha.
+- Base pelos jogos dos times (seleções, copas): confiança no máximo Média. Amistoso: só âncora, e com ressalva.
+- Histórico do 1º tempo com menos de 6 jogos em algum time, ou \`no_history\` preenchido: rebaixe a confiança.
+- Odds da Pinnacle com mais de 90 minutos: avise que o preço pode ter andado.
+- Escanteios dependem do placar provável: o time que deve sair atrás tende a gerar mais escanteios; use isso para validar o lado do handicap.
+- A odd mínima já tem a margem; a entrada vem da Política E na odd tomada.
+
+Formato (horários de Brasília, vírgula decimal, sem JSON):
+
+## Varredura de <dd/mm> — escanteios do 1º tempo
+
+**Resumo:** <quantas apostas vale fazer hoje e quais, em duas frases>
+
+| # | Jogo (hora) | Linha | Consistência | Justa | Mínima | Entrada | Confiança |
+|---|---|---|---|---|---|---|---|
+
+### Jogo a jogo
+Para cada aposta recomendada, 3 a 5 linhas: por que a linha é consistente (probabilidade, pior cenário, acerto nos últimos 10 de cada time), o que o placar provável faz com os escanteios, e o que mudaria a leitura.
+
+### Ficaram de fora do topo
+Os jogos do ranking que você não recomendaria, com o motivo em uma linha cada.
+
+### Cuidados do dia
+Alertas gerais: odds velhas, bases pequenas, jogos de seleção, o que conferir antes de entrar.`;
+
+const $ = s => document.querySelector(s);
+const HIST_KEY = "especialista-historico";
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem(HIST_KEY)) || []; } catch { return []; } },
+  set(v) { try { localStorage.setItem(HIST_KEY, JSON.stringify(v.slice(0, 12))); } catch { /* armazenamento indisponível */ } },
+};
+
+let sample = null, parsed = null, ctl = null, current = null;
+
+function parse(text) {
+  const t = text.trim();
+  if (!t) return null;
+  const body = t.startsWith(MARK) ? t.slice(t.indexOf("\n") + 1) : t;
+  try {
+    const v = JSON.parse(body);
+    if (v && ((v.kind === "jogo" && v.dossier) || (v.kind === "varredura" && Array.isArray(v.games)))) return v;
+  } catch { /* não é JSON */ }
+  return { error: true };
+}
+
+const hourBR = iso => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+function titleOf(v) {
+  if (v.kind === "jogo") { const f = v.dossier.fixture; return `${f.home} x ${f.away} · ${f.competition} · ${hourBR(f.kickoff)}`; }
+  return `Varredura de ${v.date.split("-").reverse().slice(0, 2).join("/")} · ${v.games.length} jogos (escanteios 1º tempo)`;
+}
+
+function refresh() {
+  parsed = parse($("#doss").value);
+  const k = $("#kind");
+  k.classList.toggle("bad", !!parsed?.error);
+  k.textContent = !parsed ? "Nenhum dossiê" : parsed.error ? "Não reconheci o dossiê: copie de novo pelo app" : titleOf(parsed);
+  $("#run").disabled = !parsed || !!parsed.error || !sample || !!ctl;
+}
+
+function status(text, err = false) { const el = $("#status"); el.hidden = !text; el.textContent = text || ""; el.classList.toggle("err", err); }
+
+function promptFor(v) {
+  const today = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  if (v.kind === "jogo")
+    return `${METHOD}\n\nAgora (Brasília): ${today}.\n\n## Dossiê do jogo\n\n\`\`\`json\n${JSON.stringify(v.dossier)}\n\`\`\``;
+  return `${METHOD}\n\n---\n\n${SCAN_METHOD}\n\nAgora (Brasília): ${today}.\n\n## Varredura\n\n\`\`\`json\n${JSON.stringify(v)}\n\`\`\``;
+}
+
+function show(entry, streaming = false) {
+  current = entry;
+  $("#outPanel").hidden = false;
+  $("#outLabel").textContent = entry.title;
+  $("#out").innerHTML = entry.text ? renderMarkdown(entry.text) : '<p class="thinking">Analisando</p>';
+  $("#outNote").hidden = !entry.note;
+  $("#outNote").textContent = entry.note || "";
+  $("#copy").disabled = streaming || !entry.text;
+  renderHist();
+}
+
+function renderHist() {
+  const h = store.get();
+  $("#histPanel").hidden = !h.length;
+  $("#hist").innerHTML = "";
+  h.forEach((e, i) => {
+    const b = document.createElement("button");
+    b.className = current && current.at === e.at ? "on" : "";
+    const a = document.createElement("span"), c = document.createElement("span");
+    a.textContent = e.title; c.textContent = new Date(e.at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    b.append(a, c);
+    b.onclick = () => show(e);
+    $("#hist").append(b);
+  });
+}
+
+const ERR = {
+  not_granted: "A página não tem permissão para usar o Claude nesta visualização. Recarregue e permita quando for perguntado.",
+  sampling_disabled: "O Claude não está disponível para esta conta.",
+  rate_limited: "Limite de uso atingido por agora. Tente de novo mais tarde.",
+  session_expired: "Sua sessão expirou: entre de novo no claude.ai.",
+  prompt_too_large: "O dossiê ficou grande demais. Mande menos jogos na varredura.",
+  refused: "O Claude recusou esta entrada. Confira se o dossiê é o do app.",
+  empty_completion: "O Claude não devolveu texto. Tente de novo.",
+  upstream_error: "Falha de conexão com o Claude. A parte que chegou ficou na tela; tente de novo.",
+};
+
+$("#run").onclick = async () => {
+  if (!parsed || parsed.error || !sample) return;
+  const v = parsed, entry = { at: Date.now(), title: titleOf(v), text: "", note: "" };
+  ctl = new AbortController();
+  $("#run").disabled = true; $("#stop").hidden = false;
+  status("Pensando: a primeira parte costuma levar de 30 segundos a 2 minutos.");
+  show(entry, true);
+  try {
+    const r = await sample(promptFor(v), {
+      modelTier: $("#tier").value, signal: ctl.signal, cache: false,
+      onText: ({ text }) => { status(""); entry.text = text; $("#out").innerHTML = renderMarkdown(text); },
+    });
+    entry.text = r.text;
+    if (r.truncated) entry.note = "A resposta foi cortada no limite de tamanho.";
+    if (r.modelTierApplied !== $("#tier").value) entry.note = `${entry.note} Respondido pelo modelo ${r.modelTierApplied === "default" ? "padrão" : r.modelTierApplied}.`.trim();
+    status("");
+  } catch (e) {
+    entry.text = e.text || entry.text;
+    if (e.code === "refused") entry.text = "";
+    if (e.code === "cancelled") status("Análise interrompida.");
+    else status(ERR[e.code] || ERR.upstream_error, true);
+    if (e.code === "not_granted" || e.code === "sampling_disabled") { sample = null; }
+  } finally {
+    ctl = null;
+    $("#stop").hidden = true;
+    if (entry.text) store.set([entry, ...store.get()]);
+    show(entry);
+    refresh();
+  }
+};
+
+$("#stop").onclick = () => ctl?.abort();
+$("#clear").onclick = () => { $("#doss").value = ""; refresh(); status(""); };
+$("#doss").addEventListener("input", refresh);
+$("#copy").onclick = async () => {
+  if (!current?.text) return;
+  try { await navigator.clipboard.writeText(current.text); status("Análise copiada."); }
+  catch { status("Não deu para copiar automaticamente: selecione o texto da análise e copie.", true); }
+};
+
+const last = store.get()[0];
+if (last) show(last);
+refresh();
+(async () => {
+  sample = await window.claude?.use?.("sample");
+  if (!sample) status("O Claude não está disponível aqui: abra esta página pelo claude.ai.", true);
+  refresh();
+})();
+</script>

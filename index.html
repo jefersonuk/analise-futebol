@@ -50,6 +50,7 @@
     <select id="scanDate"></select>
     <label for="scanBudget">Limite de requisições</label>
     <input id="scanBudget" type="number" min="50" step="50" inputmode="numeric">
+    <button id="scanSpec" class="ghost" hidden title="Copia a varredura e abre o especialista no claude.ai">🧠 Especialista</button>
     <button id="scanRun" class="primary">Varrer jogos</button>
   </div>
   <p id="scanMsg" class="msg" hidden></p>
@@ -58,7 +59,10 @@
 
 <main id="out" hidden>
   <section class="card">
-    <h2 id="title"></h2>
+    <div class="row head">
+      <h2 id="title"></h2>
+      <button id="btnSpec" class="ghost" title="Copia o dossiê e abre o especialista no claude.ai">🧠 Especialista</button>
+    </div>
     <p id="basis" class="muted"></p>
   </section>
   <section id="expect" class="cards"></section>

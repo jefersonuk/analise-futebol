@@ -4,6 +4,7 @@
 import { SCAN_MARKETS, rankGames, scanDay } from './scanner.js';
 import { bindTooltips, renderDashboard } from './dashboard.js';
 import { load, save } from './store.js';
+import { bindSpecialist, briefScan } from './brief.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -42,6 +43,7 @@ export function initScan({ api, openEntry, openFull, banca }) {
 
   function render() {
     const out = $('#scanOut');
+    $('#scanSpec').hidden = !scan?.games.length;
     if (!scan) { out.innerHTML = ''; return; }
     ranked = rankGames(scan.games, { market });
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -103,5 +105,6 @@ export function initScan({ api, openEntry, openFull, banca }) {
     }
   });
 
+  bindSpecialist($('#scanSpec'), () => scan && briefScan(scan, ranked));
   showSaved();
 }
