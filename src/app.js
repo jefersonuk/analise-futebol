@@ -305,7 +305,9 @@ function openEntry(id) {
   $('#enStake').value = app.stake ?? line.entry_brl;
   $('#enMsg').hidden = true;
   $('#enSend').disabled = false;
-  if (!app.found) showEntryMsg('Não encontrei os dados do app de apostas neste navegador: abra-o uma vez aqui para listar suas casas.', true);
+  if (!app.found || app.houses.length < 3) showEntryMsg('Este navegador ainda não tem as suas casas do app de apostas. '
+    + `<a href="${BETS_URL}" target="apostas">Abra o app de apostas aqui</a> e espere ele sincronizar com a nuvem; depois reabra este formulário. `
+    + 'Se registrar agora, a aposta fica aguardando no app de apostas até a casa existir lá.', true);
   entry.stakeHint = app.stake;
   checkEntry();
   $('#entryDlg').showModal();
