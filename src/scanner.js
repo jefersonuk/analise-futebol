@@ -20,10 +20,14 @@ const LEAGUE_COST = 70, TEAM_COST = 10, MIN_GAMES = 8;
 const r2 = x => Math.round(x * 100) / 100;
 
 const playable = l => l.odd_min >= 1.5 && politicaE(l.odd_min).factor > 0;
+// Linha asiática: inteira (devolve no empate da linha) ou de quarto (meia devolução); fora as meias-linhas.
+export const isAsian = id => { const v = Math.abs(parseFloat(id.match(/-?[\d.]+$/)?.[0])); return Number.isFinite(v) && v % 1 !== 0.5; };
 
-// Melhor linha de um mercado num jogo: candidata (âncora/sólida) primeiro; senão a mais consistente jogável.
-function bestOf(lines, market) {
-  const pool = lines.filter(l => l.market === market && playable(l)).sort(byConsistency);
+// Melhor linha de um jogo: candidata (âncora/sólida) primeiro; senão a mais consistente jogável.
+// market: um mercado ou null (os dois); asian: só linhas asiáticas.
+export function bestLine(lines, { market = null, asian = false } = {}) {
+  const pool = lines.filter(l => (market ? l.market === market : SCAN_MARKETS.includes(l.market))
+    && (!asian || isAsian(l.id)) && playable(l)).sort(byConsistency);
   return pool.find(isCandidate) || pool[0] || null;
 }
 
@@ -39,7 +43,7 @@ function analyze(fx, matches, oddsP, banca) {
   const alerts = ageMin > 90 ? [`odds da Pinnacle com ${ageMin} min`] : [];
   const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => SCAN_MARKETS.includes(l.market) });
   const lines = priced.concat(anchored);
-  const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestOf(lines, m)]));
+  const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
   const a = res.anchors;
   return {
     fx, teams, lines, best, alerts, odds_age_min: ageMin,
@@ -50,10 +54,10 @@ function analyze(fx, matches, oddsP, banca) {
   };
 }
 
-// Ordem dos jogos para um mercado (ou o melhor dos dois): candidatas primeiro, depois consistência.
-export function rankGames(games, market = null) {
-  const pick = g => (market ? g.best[market] : SCAN_MARKETS.map(m => g.best[m]).filter(Boolean).sort(byConsistency)[0]) || null;
-  return games.map(g => ({ g, line: pick(g) })).filter(x => x.line)
+// Ordem dos jogos: a melhor linha de cada um (no mercado e tipo de linha pedidos), candidatas primeiro,
+// depois consistência.
+export function rankGames(games, opts = {}) {
+  return games.map(g => ({ g, line: bestLine(g.lines, opts) })).filter(x => x.line)
     .sort((a, b) => isCandidate(b.line) - isCandidate(a.line) || byConsistency(a.line, b.line));
 }
 

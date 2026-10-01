@@ -16,7 +16,9 @@ const odd2 = x => x.toFixed(2).replace('.', ',');
 // "Ninguém vai conseguir 9 escanteios", "2 primeiro a vai conseguir 5 escanteios", "Acima 2.5",
 // "escanteios 2º o time") e o do app ("Mais de 2,5", "Casa −0,5"). Devolve { id } ou { error }.
 const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[º°ª]/g, 'o')
-  .replace(/[−–]/g, '-').replace(/(\d),(\d)/g, '$1.$2').replace(/\s+/g, ' ').trim();
+  .replace(/[−–]/g, '-').replace(/(\d),(\d)/g, '$1.$2').replace(/\s+/g, ' ').trim()
+  // linha asiática escrita em duas metades ("4.0, 4.5", "-0.5/-1") vira o quarto (4.25, -0.75)
+  .replace(/([-+]?\d+(?:\.\d+)?)\s*[,/]\s*([-+]?\d+(?:\.\d+)?)/g, (m, a, b) => (Math.abs(a - b) === 0.5 ? String((+a + +b) / 2) : m));
 const NUM = '([-+]?\\d+(?:\\.\\d+)?)';
 
 export function parseLine(text) {
@@ -163,6 +165,7 @@ export function alternatives(price, chosen, dossier) {
   const s = side(chosen.id), t = thr(chosen.id);
   if (!Number.isNaN(t) && s !== '1X2' && !/^c1?x$/.test(s)) {
     price.ids.filter(id => side(id) === s && Math.abs(thr(id) - t) <= 1.5).map(price).filter(playable)
+      .sort((a, b) => Math.abs(thr(a.id) - t) - Math.abs(thr(b.id) - t)).slice(0, 6)
       .sort((a, b) => thr(a.id) - thr(b.id))
       .forEach(l => add(l, 'escada', l.p_blend > chosen.p_blend ? `mais segura: ${diff(l)}, odd menor` : `paga mais: ${diff(l)}`));
   }
