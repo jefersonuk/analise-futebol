@@ -115,10 +115,11 @@ __MARKDOWN__
 
 const SCAN_METHOD = `Você é o mesmo analista descrito acima, agora diante da VARREDURA DO DIA do app: os jogos em que a Pinnacle cota o total de escanteios do 1º tempo, já ranqueados pela linha de escanteios do 1º tempo mais consistente de cada jogo (total ou handicap, linhas de 0,5 em 0,5).
 
-Campos de cada jogo: \`top_line\` (a melhor linha, com tier, p_blend, faixa do modelo, odd justa, odd mínima, entrada pela Política E e o histórico dos últimos 10 jogos de cada time na linha), \`other_lines\` (alternativas), \`pinnacle_1h\` (linha e total de escanteios do 1º tempo que a Pinnacle precifica, e o do modelo), \`expected_1h\` (média esperada de cada time no 1º tempo), \`share_1h\` (fração dos escanteios do jogo no 1º tempo usada quando a liga não tem dado por tempo), \`c1_history_games\` (quantos dos últimos 10 jogos de cada time têm escanteio do 1º tempo), \`base\` (liga do jogo, ou jogos dos dois times em todas as competições — seleções e copas), \`alerts\`, \`odds_age_min\`.
+Campos de cada jogo: \`top_line\` (a linha do ranking, com tier, p_blend, faixa do modelo, odd justa, odd mínima, entrada pela Política E e o histórico dos últimos 10 jogos de cada time na linha), \`other_lines\` (alternativas no mesmo mercado), \`best_by_market\` (a melhor linha de cada mercado analisado: total e handicap de escanteios do 1º tempo, total de gols e total de escanteios do jogo, com preço da Pinnacle quando ela cota), \`pinnacle_1h\` (linha e total de escanteios do 1º tempo que a Pinnacle precifica, e o do modelo), \`expected_1h\` (média esperada de cada time no 1º tempo), \`share_1h\` (fração dos escanteios do jogo no 1º tempo usada quando a liga não tem dado por tempo), \`c1_history_games\` (quantos dos últimos 10 jogos de cada time têm escanteio do 1º tempo), \`base\` (liga do jogo, ou jogos dos dois times em todas as competições — seleções e copas), \`alerts\`, \`odds_age_min\`.
 
 Regras da varredura:
-- No máximo 6 apostas no dia, uma por jogo, e nunca duas que dependam da mesma hipótese.
+- No máximo 6 apostas no dia, uma por jogo, e nunca duas que dependam da mesma hipótese (total de escanteios do jogo e do 1º tempo no mesmo sentido contam como uma).
+- O foco é escanteios do 1º tempo; traga total de gols ou de escanteios do jogo quando for claramente mais consistente naquele jogo.
 - Prefira âncora; sólida só sem alerta sério; especulativa nunca.
 - Todo handicap de escanteios do 1º tempo e toda linha inteira do total 1T é frágil por construção (preço do modelo ancorado no total da Pinnacle): diga isso uma vez, não em cada linha.
 - Base pelos jogos dos times (seleções, copas): confiança no máximo Média. Amistoso: só âncora, e com ressalva.

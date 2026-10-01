@@ -15,7 +15,9 @@ import { collect } from './odds.js';
 import { recentGames } from './insights.js';
 import { FRIENDLIES, byConsistency, isCandidate, priceLines, seasonsFor } from './dossier.js';
 
-export const SCAN_MARKETS = ['Total escanteios 1T', 'Handicap escanteios 1T'];
+export const SCAN_MARKETS = ['Total escanteios 1T', 'Handicap escanteios 1T'];   // o ranking padrão
+export const EXTRA_MARKETS = ['Total de gols', 'Total de escanteios'];           // colunas e filtros extras
+const ALL_MARKETS = SCAN_MARKETS.concat(EXTRA_MARKETS);
 const LEAGUE_COST = 70, TEAM_COST = 10, MIN_GAMES = 8;
 const DAY = 864e5;
 // Liga sem histórico suficiente dos times (seleções, copas, base, feminino, 2ª fase): a base passa a ser
@@ -59,9 +61,9 @@ function analyze(fx, matches, oddsP, banca, teamBase = false) {
   const ageMin = oddsP.updatedAt ? Math.round((Date.now() - Date.parse(oddsP.updatedAt)) / 60e3) : null;
   const alerts = ageMin > 90 ? [`odds da Pinnacle com ${ageMin} min`] : [];
   if (teamBase) alerts.push('base: jogos dos dois times em todas as competições (amostra menor que a de uma liga)');
-  const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => SCAN_MARKETS.includes(l.market) });
+  const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => ALL_MARKETS.includes(l.market) });
   const lines = priced.concat(anchored);
-  const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
+  const best = Object.fromEntries(ALL_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
   const a = res.anchors;
   return {
     fx, teams, lines, best, alerts, odds_age_min: ageMin, team_base: teamBase,
@@ -88,6 +90,17 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
   onProgress(`${fixtures.length} jogos ainda por começar. Buscando quais têm escanteios do 1º tempo na Pinnacle…`);
   const odds = new Map((await api.dayOdds(date, 77)).map(o => [o.fixture, o]));
   const pool = fixtures.filter(f => odds.has(f.id));
+  // Odds completas da Pinnacle do jogo (gols e escanteios do jogo além do 1º tempo): 1 requisição por jogo
+  // analisado; fora do orçamento, segue só com o mercado do 1º tempo.
+  const full = new Map();
+  const oddsOf = async fx => {
+    if (!full.has(fx.id)) {
+      let p = null;
+      if (used() + 1 <= budget) { try { p = await api.fixtureOdds(fx.id); } catch { /* fica com o 1º tempo */ } }
+      full.set(fx.id, p?.bookmakers?.length ? p : { ...odds.get(fx.id), fetchedAt: Date.now() });
+    }
+    return full.get(fx.id);
+  };
   const leagues = new Map();
   for (const f of pool) {
     const k = f.league.id;
@@ -117,7 +130,7 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
     } catch (e) { skipped.push(...L.fixtures.map(f => ({ fx: f, why: `liga não carregou: ${e.message}` }))); continue; }
     base.set(L.lg.id, matches);
     for (const fx of L.fixtures) {
-      const a = analyze(fx, matches, { ...odds.get(fx.id), fetchedAt: Date.now() }, banca);
+      const a = analyze(fx, matches, await oddsOf(fx), banca);
       if (a.skip) skipped.push({ fx, why: a.skip }); else games.push(a);
     }
   }
@@ -139,7 +152,7 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
     catch (e) { group.forEach(s => { s.why = `base pelos times falhou: ${e.message}`; }); continue; }
     base.set(lg.id, matches);
     for (const s of group) {
-      const a = analyze(s.fx, matches, { ...odds.get(s.fx.id), fetchedAt: Date.now() }, banca, true);
+      const a = analyze(s.fx, matches, await oddsOf(s.fx), banca, true);
       if (a.skip) s.why = `${a.skip}, mesmo somando todas as competições (a API não tem estatística desses jogos)`;
       else { games.push(a); skipped.splice(skipped.indexOf(s), 1); }
     }
@@ -161,7 +174,7 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
         const withC1 = await api.attachHalfCorners(`tm${t.id}`, g.fx.league.season, last);
         for (const m of withC1) if (m.c1 && byId.has(m.id)) byId.get(m.id).c1 = m.c1;
       }
-      Object.assign(g, analyze(g.fx, matches, { ...odds.get(g.fx.id), fetchedAt: Date.now() }, banca, g.team_base));
+      Object.assign(g, analyze(g.fx, matches, await oddsOf(g.fx), banca, g.team_base));
     } catch (e) { g.no_history = `histórico do 1º tempo falhou: ${e.message}`; }
   }
 

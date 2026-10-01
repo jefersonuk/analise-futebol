@@ -1,7 +1,7 @@
 // Tela da varredura do dia (escanteios do 1º tempo): ranking, relatório de cada jogo com os gráficos dos
 // últimos 10 jogos de cada time na linha, entrada direta e atalho para a análise completa do jogo.
 
-import { SCAN_MARKETS, rankGames, scanDay } from './scanner.js';
+import { EXTRA_MARKETS, SCAN_MARKETS, bestLine, rankGames, scanDay } from './scanner.js';
 import { bindTooltips, renderDashboard } from './dashboard.js';
 import { load, save } from './store.js';
 import { bindSpecialist, briefScan } from './brief.js';
@@ -47,7 +47,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     if (!scan) { out.innerHTML = ''; return; }
     ranked = rankGames(scan.games, { market });
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const chips = [['Melhor dos dois', null], ...SCAN_MARKETS.map(m => [m.replace('escanteios ', ''), m])]
+    const chips = [['Escanteios 1T', null], ...SCAN_MARKETS.map(m => [m.replace('escanteios ', ''), m]), ...EXTRA_MARKETS.map(m => [m, m])]
       .map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
     const rows = ranked.map(({ g, line }, i) => {
       const h = line.history || {};
@@ -56,7 +56,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         <td class="muted">${esc(g.fx.league.name)}</td><td>${esc(line.market.replace('escanteios ', ''))}: <b>${esc(line.line)}</b></td>
         <td><span class="tag ${line.tier === 'âncora' ? 'ok' : line.tier === 'sólida' ? 'mid' : 'no'}">${line.tier}</span></td>
         <td>${pct(line.p_blend)}</td><td class="muted">${hist}</td><td>${n2(line.fair_odd_blend)}</td><td><b>${n2(line.odd_min)}</b></td>
-        <td class="muted">${line.pinnacle_odd ? n2(line.pinnacle_odd) : '—'}</td></tr>`;
+        <td class="muted">${line.pinnacle_odd ? n2(line.pinnacle_odd) : '—'}</td>
+        ${EXTRA_MARKETS.map(m => `<td class="extra">${mini(bestLine(g.lines, { market: m }))}</td>`).join('')}</tr>`;
     }).join('');
     const cards = ranked.map(({ g, line }, i) => card(g, line, i)).join('');
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
@@ -65,10 +66,15 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>
       <div class="chips" id="scanChips">${chips}</div>
       ${ranked.length ? `<div class="scroll"><table class="scanrank"><tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Linha</th><th>Nível</th>
-        <th>Acerta</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th></tr>${rows}</table></div>` : '<p class="muted">Nenhum jogo com linha jogável (odd mínima 1,50–3,00).</p>'}
+        <th>Acerta</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th>
+        <th>Total de gols</th><th>Total de escanteios</th></tr>${rows}</table></div>` : '<p class="muted">Nenhum jogo com linha jogável (odd mínima 1,50–3,00).</p>'}
       ${skipped}${cards}`;
     bindTooltips(out);
   }
+
+  // Melhor linha de um mercado extra, compacta, para as colunas de gols e escanteios do jogo.
+  const mini = l => (!l ? '<span class="muted">—</span>'
+    : `<b>${esc(l.line)}</b> <span class="tag ${l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no'}">${pct(l.p_blend)}</span> <span class="muted">mín ${n2(l.odd_min)}</span>`);
 
   function card(g, line, i) {
     const p = g.pinnacle_1h, e = g.expected_1h;
@@ -79,15 +85,19 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       `histórico do 1º tempo: ${g.c1_known[0]} e ${g.c1_known[1]} dos últimos 10 jogos`,
       g.no_history || '', ...g.alerts,
     ].filter(Boolean);
-    const others = g.lines.filter(l => l.id !== line.id && l.odd_min >= 1.5 && l.odd_min <= 3)
+    const family = l => (SCAN_MARKETS.includes(line.market) ? SCAN_MARKETS.includes(l.market) : l.market === line.market);
+    const others = g.lines.filter(l => l.id !== line.id && family(l) && l.odd_min >= 1.5 && l.odd_min <= 3)
       .sort((a, b) => b.consistency_score - a.consistency_score).slice(0, 4)
       .map(l => `<span class="other">${esc(l.market.replace('escanteios ', ''))}: <b>${esc(l.line)}</b> ${pct(l.p_blend)} · mín ${n2(l.odd_min)}</span>`).join('');
+    const extras = EXTRA_MARKETS.map(m => [m, bestLine(g.lines, { market: m })]).filter(([, l]) => l && l.id !== line.id)
+      .map(([m, l]) => `<span class="other">${esc(m)}: ${mini(l)}</span>`).join('');
     return `<article class="scancard" id="scan-${i}" data-g="${i}">
       <div class="row head"><h3>${i + 1}. ${esc(g.fx.home.name)} x ${esc(g.fx.away.name)} <span class="muted">${hour(g.fx.t)} · ${esc(g.fx.league.name)}</span></h3>
         <button class="ghost" data-full="${i}">Análise completa ↗</button></div>
       <p class="muted facts">${facts.join(' · ')}</p>
       ${renderDashboard([line], g.teams)}
-      ${others ? `<div class="others"><span class="muted">Outras linhas do 1º tempo:</span>${others}</div>` : ''}
+      ${others ? `<div class="others"><span class="muted">Outras linhas:</span>${others}</div>` : ''}
+      ${extras ? `<div class="others"><span class="muted">Jogo inteiro:</span>${extras}</div>` : ''}
     </article>`;
   }
 

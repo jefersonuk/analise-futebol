@@ -33,7 +33,8 @@ export function briefGame(d) {
   };
 }
 
-// A varredura do dia: cada jogo com a melhor linha de cada mercado e as alternativas do 1º tempo.
+// A varredura do dia: cada jogo com a linha do ranking, as alternativas e a melhor linha de gols e de
+// escanteios do jogo inteiro.
 export function briefScan(scan, ranked) {
   return {
     kind: 'varredura',
@@ -45,7 +46,8 @@ export function briefScan(scan, ranked) {
       alerts: g.alerts, odds_age_min: g.odds_age_min, pinnacle_1h: g.pinnacle_1h, expected_1h: g.expected_1h,
       share_1h: g.share_1h, c1_history_games: g.c1_known, no_history: g.no_history || null,
       top_line: slim(line),
-      other_lines: g.lines.filter(l => l.id !== line.id && l.odd_min >= 1.4 && l.odd_min <= 3).sort(byScore).slice(0, 4).map(slim),
+      other_lines: g.lines.filter(l => l.id !== line.id && l.market === line.market && l.odd_min >= 1.4 && l.odd_min <= 3).sort(byScore).slice(0, 3).map(slim),
+      best_by_market: Object.fromEntries(Object.entries(g.best || {}).filter(([, l]) => l && l.id !== line.id).map(([m, l]) => [m, slim(l)])),
     })),
     skipped: scan.skipped.map(s => `${s.fx.home.name} x ${s.fx.away.name} (${s.fx.league.name}): ${s.why}`),
   };

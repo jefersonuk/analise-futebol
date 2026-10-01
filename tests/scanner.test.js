@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
-import { SCAN_MARKETS, rankGames, scanDay } from '../src/scanner.js';
+import { EXTRA_MARKETS, SCAN_MARKETS, rankGames, scanDay } from '../src/scanner.js';
 import { TIER_ORDER } from '../src/consistency.js';
 
 // Demo sem os escanteios do 1º tempo da liga (como na varredura real): só os dos times, sob demanda.
@@ -38,8 +38,13 @@ test('varredura: ranking pela linha de escanteios do 1º tempo mais consistente,
   assert.ok(scan.games[0].c1_known.every(n => n > 0));
   // ordem: nível de consistência nunca piora ao descer o ranking entre candidatas
   const ranked = rankGames(scan.games).map(x => x.line);
+  // total de gols e de escanteios do jogo também analisados, com preço da Pinnacle (odds completas do jogo)
+  for (const m of EXTRA_MARKETS) assert.ok(scan.games.some(g => g.best[m]), m);
+  assert.ok(scan.games.some(g => g.lines.some(l => l.market === 'Total de gols' && l.priced_by === 'pinnacle')));
+  assert.ok(rankGames(scan.games, { market: 'Total de gols' }).every(x => x.line.market === 'Total de gols'));
+  assert.ok(rankGames(scan.games).every(x => SCAN_MARKETS.includes(x.line.market)), 'ranking padrão segue no 1º tempo');
   // linhas do 1º tempo de 0,5 em 0,5 (meias e inteiras), sem quartos
-  assert.ok(scan.games.every(g => g.lines.every(l => Math.abs(parseFloat(l.id.match(/-?[\d.]+$/)[0]) * 2 % 1) < 1e-9)));
+  assert.ok(scan.games.every(g => g.lines.filter(l => SCAN_MARKETS.includes(l.market)).every(l => Math.abs(parseFloat(l.id.match(/-?[\d.]+$/)[0]) * 2 % 1) < 1e-9)));
   assert.ok(scan.games[0].lines.some(l => /^c1(O|U)\d+$/.test(l.id)), 'linha inteira do total 1T');
   for (let i = 1; i < ranked.length; i++) assert.ok(TIER_ORDER[ranked[i - 1].tier] <= TIER_ORDER[ranked[i].tier] || ranked[i - 1].tier === 'âncora');
 });
