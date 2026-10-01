@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { history } from '../src/dashboard.js';
+import { consistency } from '../src/consistency.js';
 
 // recentGames devolve do mais recente para o mais antigo; o gráfico inverte (antigo à esquerda).
 const g = (gf, ga, cf, ca, home = true) => ({ t: 0, home, opp: 'Rival', gf, ga, corners: [cf, ca], shots: [10, 8], sot: [4, 3] });
@@ -33,4 +34,15 @@ test('escanteios por time: do próprio time ou cedidos pelo adversário', () => 
   assert.match(ced.what, /cedidos pelo Fora/);
   assert.deepEqual(own.bars.map(b => b.v).reverse(), [7, 4, 3, 6]);
   assert.deepEqual(ced.bars.map(b => b.v).reverse(), [2, 5, 6, 3]);
+});
+
+
+test('consistência: acerto alto e estável vira âncora; histórico contra derruba para especulativa', () => {
+  assert.equal(consistency({ p: 0.64, pLow: 0.55, hits: [{ wins: 7, n: 10 }, { wins: 6, n: 10 }] }).tier, 'âncora');
+  assert.equal(consistency({ p: 0.64, pLow: 0.55, hits: [{ wins: 7, n: 10 }, { wins: 4, n: 10 }] }).tier, 'sólida');
+  assert.equal(consistency({ p: 0.6, pLow: 0.5, hits: [{ wins: 4, n: 10 }, { wins: 4, n: 10 }] }).tier, 'especulativa');
+  assert.equal(consistency({ p: 0.45, pLow: 0.35, hits: [{ wins: 9, n: 10 }, { wins: 9, n: 10 }] }).tier, 'especulativa');
+  const a = consistency({ p: 0.62, pLow: 0.52, hits: [{ wins: 8, n: 10 }, { wins: 8, n: 10 }] });
+  const b = consistency({ p: 0.62, pLow: 0.52, hits: [{ wins: 5, n: 10 }, { wins: 5, n: 10 }] });
+  assert.ok(a.score > b.score);
 });

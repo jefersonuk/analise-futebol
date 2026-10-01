@@ -89,25 +89,64 @@ function chart(h) {
   </svg>`;
 }
 
-// top: [{ line, odd, e, pinn, pol }]; teams: [{ id, name, role, games }]
-export function renderDashboard(top, teams) {
-  if (!top.length) return '<p class="muted">Nenhuma linha com EV positivo. Puxe as odds da Pinnacle ou digite odds na tabela.</p>';
+const pct = x => `${Math.round(x * 100)}%`;
+const odd2 = x => x.toFixed(2).replace('.', ',');
+const TIERS = { 'âncora': 0, 'sólida': 1, 'especulativa': 2 };
+
+// Por que uma linha que entrou só para completar o painel não passou no filtro de candidatas.
+function outsideReason(l) {
+  if (l.tier === 'especulativa') {
+    if (l.hit_rate_last10 != null && l.hit_rate_last10 < 0.5) return 'histórico contra';
+    if (l.p_model_range[0] < 0.42) return 'pior cenário do modelo fraco';
+    return 'acerto baixo';
+  }
+  if (l.odd_min < 1.5) return 'odd abaixo de 1,50';
+  if (l.politica_e === 'não entrar') return 'odd acima de 3,00';
+  if (l.odd_min_vs_pinnacle_pct > 5) return 'preço difícil de achar';
+  return 'fora do filtro';
+}
+
+// As n linhas do painel: primeiro as candidatas do dossiê (consistência primeiro, preço depois);
+// se faltarem, completa com as mais consistentes restantes, uma por hipótese, marcando o motivo.
+export function pickDashboard(dossier, n = 5, hypothesis = id => id) {
+  const byId = new Map(dossier.lines_with_pinnacle.map(l => [l.id, l]));
+  const out = dossier.candidates.map(id => byId.get(id)).filter(Boolean).slice(0, n);
+  const seen = new Set(out.map(l => hypothesis(l.id)));
+  const rest = dossier.lines_with_pinnacle.filter(l => !seen.has(hypothesis(l.id)) && l.odd_min >= 1.2)
+    .sort((a, b) => (a.odd_min < 1.5) - (b.odd_min < 1.5) || TIERS[a.tier] - TIERS[b.tier] || b.consistency_score - a.consistency_score);
+  for (const l of rest) {
+    if (out.length >= n) break;
+    if (seen.has(hypothesis(l.id))) continue;
+    seen.add(hypothesis(l.id));
+    out.push({ ...l, outside: outsideReason(l) });
+  }
+  return out;
+}
+
+// lines: linhas do dossiê (pickDashboard); teams: [{ name, role, games }]
+export function renderDashboard(lines, teams) {
+  if (!lines.length) return '<p class="muted">Sem odds da Pinnacle para este jogo: o painel precisa da régua de preço.</p>';
   const legend = `<div class="legend"><span><i class="good"></i>venceria</span><span><i class="push"></i>devolveria</span>
     <span><i class="critical"></i>perderia</span><span class="muted">* = jogo fora de casa · passe o mouse nas barras</span></div>`;
-  return legend + top.map(({ line, odd, e, pinn, pol }) => {
+  return legend + lines.map(l => {
     const charts = teams.map(t => {
-      const h = history(line.id, t.role, t.name, t.games);
+      const h = history(l.id, t.role, t.name, t.games);
       if (!h || !h.bars.length) return `<div class="histbox"><b>${esc(t.name)}</b><p class="muted">sem dados para esta linha</p></div>`;
       return `<div class="histbox"><div class="histhead"><b>${esc(t.name)}</b>
         <span>${numBR(h.wins)}/${h.bars.length} ${h.bars.length > 1 ? 'venceriam' : 'venceria'}</span></div>
         <small class="muted">${esc(h.what)}</small>${chart(h)}</div>`;
     }).join('');
+    const tierCls = l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no';
     return `<article class="dash">
-      <header><div><small class="muted">${esc(line.market)}</small><h3>${esc(line.label)}</h3></div>
-        <div class="kpis"><span>@ ${odd.toFixed(2).replace('.', ',')}</span>
-        <span class="pos">EV ${(e.mid * 100).toFixed(1)}%</span>
-        <span class="muted">modelo ${(line.pWin * 100).toFixed(1)}%${pinn != null ? ` · Pinnacle ${(pinn * 100).toFixed(1)}%` : ''}</span>
-        <span class="tag ${e.low > 0 ? 'ok' : ''}">${e.low > 0 ? 'robusto' : 'frágil'} · ${pol.label}</span></div></header>
+      <header><div><small class="muted">${esc(l.market)}</small><h3>${esc(l.line)}</h3></div>
+        <div class="kpis">
+          <span class="tag ${tierCls}">${l.tier} · acerta ${pct(l.p_blend)}${l.hit_rate_last10 != null ? ` · últimos 10: ${pct(l.hit_rate_last10)}` : ''}</span>
+          <span>justa ${odd2(l.fair_odd_blend)}</span>
+          <span><b>mínima ${odd2(l.odd_min)}</b> <span class="muted">(Pinnacle ${odd2(l.pinnacle_odd)})</span></span>
+          <span>${l.entry_brl ? `entrada R$ ${l.entry_brl} · ${l.politica_e}` : `sem entrada · ${l.politica_e}`}</span>
+          ${l.fragile ? '<span class="tag">frágil</span>' : ''}
+          ${l.outside ? `<span class="tag no">${esc(l.outside)}</span>` : ''}
+        </div></header>
       <div class="teams">${charts}</div></article>`;
   }).join('');
 }

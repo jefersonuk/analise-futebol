@@ -41,6 +41,9 @@ td input { width: 72px; padding: 5px 7px; text-align: right; }
 .tag { font-size: 12px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); }
 .tag.ok { border-color: var(--accent); color: var(--accent); }
 .tag.no { border-color: var(--bad); color: var(--bad); }
+.tag.mid { border-color: var(--warn); color: var(--warn); }
+.oddsbar { margin: 0 0 10px; font-size: 13px; }
+.oddsbar.stale { color: var(--warn); }
 #teamInput { flex: 1; min-width: 0; }
 .row.head { margin: 0 0 10px; justify-content: space-between; }
 .row.head h2 { margin: 0; }

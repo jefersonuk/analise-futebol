@@ -87,7 +87,7 @@ test('shrinkage: time com um só jogo fica perto da média', () => {
 });
 
 test('análise completa na liga demo: 1X2 soma 1, totais complementares, dispersão limitada', () => {
-  const matches = leagueMatches(2025).concat(leagueMatches(2024));
+  const matches = leagueMatches(1, 2025).concat(leagueMatches(1, 2024));
   const res = analyzeMatch(matches, 9001, 9002, Date.UTC(2026, 0, 10));
   const p = id => res.lines.find(l => l.id === id);
   near(sum(scoreMatrix(res.pred.goals.h, res.pred.goals.a).diff), 1);
@@ -99,7 +99,7 @@ test('análise completa na liga demo: 1X2 soma 1, totais complementares, dispers
 });
 
 test('toda linha tem os 4 cenários de incerteza, mesmo com média perto de x,5', () => {
-  const matches = leagueMatches(2025).concat(leagueMatches(2024));
+  const matches = leagueMatches(1, 2025).concat(leagueMatches(1, 2024));
   for (let a = 9002; a <= 9020; a++) {
     const res = analyzeMatch(matches, 9001, a, Date.UTC(2026, 0, 10));
     for (const l of res.lines) assert.ok(l.sc.length === 4 && l.sc.every(Boolean), l.id);

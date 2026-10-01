@@ -1,0 +1,236 @@
+// Dossiê de um jogo para o especialista: o mesmo modelo do app + Pinnacle sem margem, desfalques,
+// classificação, descanso, histórico e consistência de cada linha. Usado pelo app (navegador) e pelo
+// script do agente (scripts/analisar.mjs), para que os dois vejam exatamente os mesmos números.
+//
+// api: searchTeams, upcoming, leaguesOf, leagueMatches, fixtureOdds, injuries, standings, lastPlayed, quota
+
+import { METRICS, analyzeMatch, dist, ev, fairOdd, politicaE } from './model.js';
+import { rank } from './ratings.js';
+import { buildInsights, recentGames } from './insights.js';
+import { collect } from './odds.js';
+import { history } from './dashboard.js';
+import { ODD_FLOOR, TIER_ORDER, consistency } from './consistency.js';
+
+const DAY = 864e5;
+export const ODDS_STALE_MIN = 90;   // acima disso a odd da API provavelmente já andou
+// Peso do modelo na mistura log-linear com a Pinnacle (o resto é da Pinnacle). Valores iniciais
+// do relatório (0,05–0,15 em mercados líquidos; mais onde a Pinnacle é fraca); calibrar por CLV.
+const W_MODEL = { '1X2': 0.1, 'Handicap asiático': 0.1, 'Total de gols': 0.1, 'Ambas marcam': 0.1,
+  'Total de escanteios': 0.2, 'Escanteios por time': 0.2, 'Total de chutes': 0.2, 'Total de chutes no gol': 0.2 };
+
+// Uma linha por hipótese: Mais de 8,5 e Mais de 9,5 escanteios, ou Fora +0,5 e Fora +0,75, são a mesma
+// aposta em preços diferentes. Mantém a primeira (a melhor, pela ordenação) de cada mercado e lado.
+export const hypothesis = id => (/^[12X]$/.test(id) ? id : id.replace(/-?[\d.]+$/, ''));
+export function distinct() {
+  const seen = new Set();
+  return l => !seen.has(hypothesis(l.id)) && seen.add(hypothesis(l.id));
+}
+
+const r = (x, d = 3) => (x == null || Number.isNaN(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
+const cond = s => s.pWin / (s.pWin + s.pLose);   // probabilidade sem o push (como a Pinnacle precifica)
+
+// Mistura log-linear Pinnacle × modelo, normalizada no par de pernas complementares.
+function blend(pPin, pMod, w) {
+  const a = pPin ** (1 - w) * pMod ** w, b = (1 - pPin) ** (1 - w) * (1 - pMod) ** w;
+  return a / (a + b);
+}
+
+// fx: jogo (de upcoming). team: time buscado. fixtures: próximos jogos dele (evita chamada repetida).
+// matches/lg: jogos da liga já baixados pelo app (opcional). banca em R$.
+// oddsPayload: resultado de api.fixtureOdds já buscado pelo app (para a tabela e o dossiê usarem as mesmas odds).
+export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtures = [], banca = 44000, matches = null, lg = null, oddsPayload = null, onProgress }) {
+  const S = fx.league.season;
+  if (!lg) {
+    const [lh, la] = await Promise.all([api.leaguesOf(fx.home.id, S), api.leaguesOf(fx.away.id, S)]);
+    const common = lh.filter(l => la.some(x => x.id === l.id));
+    lg = common.find(l => l.id === fx.league.id) || common[0];
+  }
+  if (!lg) throw new Error('os dois times não disputam a mesma liga nesta temporada; confronto entre ligas não é suportado');
+
+  const seasons = [S, S - 1, S - 2].filter(s => s !== 2020);   // 2020/21 sem público distorce o mando
+  if (!matches) {
+    matches = [];
+    for (const s of seasons) {
+      try { matches = matches.concat(await api.leagueMatches(lg.id, s, (d, n) => onProgress?.(`Baixando ${lg.name} ${s}: ${d}/${n} jogos…`))); }
+      catch (e) { if (s === S) throw e; }
+    }
+  }
+  onProgress?.('Montando o dossiê (Pinnacle, desfalques, tabela, descanso)…');
+  const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t);
+  if (!res.lines.length) throw new Error('jogos insuficientes na liga para ajustar o modelo');
+
+  const other = team.id === fx.home.id ? fx.away : fx.home;   // o time que não foi buscado
+  const SOURCES = ['odds_pinnacle', 'desfalques', 'classificacao', 'ultimo_jogo_mandante', 'ultimo_jogo_visitante', 'proximos_do_outro_time'];
+  const settled = await Promise.allSettled([
+    oddsPayload ?? api.fixtureOdds(fx.id), api.injuries(fx.id), api.standings(lg.id, S),
+    api.lastPlayed(fx.home.id), api.lastPlayed(fx.away.id), api.upcoming(other.id),
+  ]);
+  const val = (i, d) => (settled[i].status === 'fulfilled' ? settled[i].value : d);
+  const sources = Object.fromEntries(SOURCES.map((n, i) =>
+    [n, settled[i].status === 'fulfilled' ? 'ok' : `falhou: ${settled[i].reason?.message}`]));
+  const oddsP = val(0, { updatedAt: null, fetchedAt: Date.now(), bookmakers: [] });
+  const { odds, fair } = collect(oddsP.bookmakers);
+  const oddsAgeMin = oddsP.updatedAt ? Math.round((oddsP.fetchedAt - Date.parse(oddsP.updatedAt)) / 60e3) : null;
+  const injuries = val(1, []), table = val(2, []);
+  const nextOf = { [team.id]: fixtures, [other.id]: val(5, []) };
+
+  // Alertas de qualidade: qualquer um deixa todas as linhas frágeis.
+  const alerts = [];
+  if (res.prep.coverage < 0.6) alerts.push(`só ${Math.round(res.prep.coverage * 100)}% dos jogos da liga têm estatística de chutes`);
+  if (!res.pred.goals.known) alerts.push('um dos times não tem histórico na liga (promovido ou de outra liga)');
+  for (const t of [fx.home, fx.away]) {
+    const w = res.fits.goals.games.get(t.id) || 0;
+    if (w < 8) alerts.push(`${t.name}: só ${w.toFixed(1)} jogos-equivalentes na liga`);
+  }
+  if (lg.id !== fx.league.id) alerts.push(`jogo de ${fx.league.name} medido pela liga ${lg.name} (rotação provável)`);
+  if (!odds.size) alerts.push('sem odds da Pinnacle: não há régua de preço');
+  else if (oddsAgeMin > ODDS_STALE_MIN) alerts.push(`odds da Pinnacle com ${oddsAgeMin} min de idade (a API atualiza a cada ~3 h): confira o preço atual antes de entrar`);
+
+  const names = { home: fx.home.name, away: fx.away.name };
+  const recent = { [fx.home.id]: recentGames(res.prep, fx.home.id), [fx.away.id]: recentGames(res.prep, fx.away.id) };
+
+  // ---- times ----
+  const teamOut = (t, role, last) => {
+    const games = recent[t.id], withXg = games.filter(g => g.xf != null);
+    const avg = f => (withXg.length ? r(withXg.reduce((s, g) => s + f(g), 0) / withXg.length, 2) : null);
+    const ratings = {};
+    for (const k of Object.keys(METRICS)) {
+      const f = res.fits[k];
+      if (!f) continue;
+      const ra = rank(f, t.id, 'att'), rd = rank(f, t.id, 'def');
+      ratings[k] = { att: r(ra?.value), att_rank: ra && `${ra.pos}/${ra.of}`, def: r(rd?.value), def_rank: rd && `${rd.pos}/${rd.of}`,
+        venue_gap: r(f.gap.get(t.id)) };
+    }
+    const next = (nextOf[t.id] || []).find(f => f.t > fx.t);
+    // uma entrada por tabela em que o time aparece (ex.: Apertura, Clausura, Acumulado)
+    const st = table.filter(s => s.team === t.id).map(s => {
+      const grp = table.filter(x => x.group === s.group);
+      const rel = grp.filter(x => /releg|rebaix|descen/i.test(x.zone || '')).map(x => x.rank);
+      const relPts = rel.length ? grp.find(x => x.rank === Math.min(...rel))?.points : null;
+      return { ...s, teams_in_table: grp.length, leader_points: Math.max(...grp.map(x => x.points)),
+        points_above_relegation_zone: relPts != null ? s.points - relPts : null };
+    });
+    return {
+      name: t.name, id: t.id, role, ratings,
+      games_weighted: r(res.fits.goals.games.get(t.id) || 0, 1),
+      finishing_last10: { n: withXg.length, goals_minus_xg_pg: avg(g => g.gf - g.xf), conceded_minus_xga_pg: avg(g => g.ga - g.xa) },
+      standings: st,
+      rest_days_before: last ? r((fx.t - last.t) / DAY, 1) : null,
+      last_match: last && `${last.league.name}: ${last.home.name} x ${last.away.name}`,
+      days_to_next: next ? r((next.t - fx.t) / DAY, 1) : null,
+      next_match: next && `${next.league.name}: ${next.home.name} x ${next.away.name}`,
+      injuries: injuries.filter(i => i.team === t.id).map(i => `${i.player} (${i.type}: ${i.reason})`),
+      recent_league_games: games.map(g => [
+        new Date(g.t).toISOString().slice(0, 10), g.home ? 'C' : 'F', g.opp, `${g.gf}-${g.ga}`,
+        g.xf != null ? `xG ${g.xf.toFixed(1)}-${g.xa.toFixed(1)}` : 'xG —',
+        g.corners ? `esc ${g.corners[0]}-${g.corners[1]}` : 'esc —', g.shots ? `chutes ${g.shots[0]}-${g.shots[1]}` : 'chutes —',
+      ].join(' ')),
+    };
+  };
+
+  // ---- linhas ----
+  const hist = l => {
+    const one = (role, t) => {
+      const h = history(l.id, role, t.name, recent[t.id]);
+      return h && { what: h.what, threshold: h.threshold, hits: `${h.wins}/${h.bars.length}`, wins: h.wins, n: h.bars.length,
+        values_newest_first: h.bars.map(b => b.v).reverse() };
+    };
+    return { home: one('home', fx.home), away: one('away', fx.away) };
+  };
+  const g1x2 = ['1', 'X', '2'];
+  const x12 = g1x2.every(id => fair.has(id)) ? (() => {
+    const lines = g1x2.map(id => res.lines.find(l => l.id === id));
+    const raw = lines.map((l, i) => fair.get(g1x2[i]) ** 0.9 * cond(l) ** 0.1), z = raw.reduce((s, x) => s + x, 0);
+    return Object.fromEntries(g1x2.map((id, i) => [id, raw[i] / z]));
+  })() : {};
+
+  // Entrada pela fórmula do app, na odd mínima: ¼ Kelly, teto 300·min(1, p/0,70), fator da Política E.
+  const stake = (p, odd) => {
+    const evv = p * odd - 1, kelly = evv / (odd - 1), cap = 300 * Math.min(1, p / 0.7), pe = politicaE(odd);
+    const raw = Math.max(0, banca * kelly * 0.25);
+    return { ev_at_min: r(evv), kelly_quarter_brl: Math.round(raw), cap_brl: Math.round(cap), politica_e: pe.label,
+      entry_brl: Math.round(Math.min(raw, cap) * pe.factor) };
+  };
+
+  const priced = [], modelOnly = [];
+  for (const l of res.lines) {
+    const pm = cond(l), range = l.sc.map(cond), odd = odds.get(l.id), pp = fair.get(l.id);
+    const soft = /escanteios|chutes/i.test(l.market);
+    const base = { id: l.id, market: l.market, line: l.label, p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
+      fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0 };
+    if (odd && pp != null) {
+      const pb = x12[l.id] ?? blend(pp, pm, W_MODEL[l.market] ?? 0.1), e = ev(l, odd), diff = (pm - pp) * 100;
+      const fragile = alerts.length > 0 || Math.abs(diff) >= (soft ? 10 : 5);
+      const oddMin = (1 / pb) * (fragile ? 1.05 : 1.03);
+      const hi = hist(l), c = consistency({ p: pb, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
+      priced.push({ ...base, pinnacle_odd: odd, p_pinnacle: r(pp), diff_pp: r(diff, 1), p_blend: r(pb),
+        tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
+        fair_odd_blend: r(1 / pb, 2), fragile, odd_min: r(oddMin, 2),
+        odd_min_vs_pinnacle_pct: r((oddMin / odd - 1) * 100, 1), ...stake(pb, oddMin),
+        ev_model_at_pinnacle: r(e.mid), ev_model_worst: r(e.low), history: hi });
+    } else if (pm >= 0.35 && soft) {
+      const hi = hist(l), c = consistency({ p: pm, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
+      if (c.tier !== 'especulativa' || pm <= 0.65)
+        modelOnly.push({ ...base, tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
+          odd_min_model_only: r(fairOdd(l) * 1.08, 2), history: hi });
+    }
+  }
+  priced.sort((a, b) => Math.abs(b.diff_pp) - Math.abs(a.diff_pp));
+  // Candidatas — consistência primeiro, preço depois: só linhas âncora/sólida, com odd mínima dentro da
+  // faixa operada (≥ 1,50 e permitida pela Política E) e que uma casa soft consegue pagar (até ~5% acima da Pinnacle).
+  // Ordem: nível de consistência, não frágil antes de frágil, score de consistência, facilidade do preço.
+  const candidates = priced
+    .filter(l => l.tier !== 'especulativa' && l.odd_min >= ODD_FLOOR && l.politica_e !== 'não entrar' && l.odd_min_vs_pinnacle_pct <= 5)
+    .sort((a, b) => TIER_ORDER[a.tier] - TIER_ORDER[b.tier] || a.fragile - b.fragile
+      || b.consistency_score - a.consistency_score || a.odd_min_vs_pinnacle_pct - b.odd_min_vs_pinnacle_pct)
+    .filter(distinct()).slice(0, 8).map(l => l.id);
+
+  // Total implícito na Pinnacle: a média que reproduz a probabilidade sem margem da linha mais equilibrada.
+  const implied = (prefix, phi) => {
+    const c = [...fair].filter(([id]) => id.startsWith(`${prefix}O`)).map(([id, p]) => [parseFloat(id.slice(prefix.length + 1)), p])
+      .filter(([L]) => L % 1 === 0.5).sort((a, b) => Math.abs(a[1] - 0.5) - Math.abs(b[1] - 0.5))[0];
+    if (!c) return null;
+    let lo = 0.05, hi = 60;
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2, pmf = dist(mid, phi, Math.ceil(mid * 3 + 25));
+      const over = 1 - pmf.slice(0, Math.floor(c[0]) + 1).reduce((s, x) => s + x, 0);
+      if (over < c[1]) lo = mid; else hi = mid;
+    }
+    return { from_line: c[0], p_over_no_vig: r(c[1]), implied_total: r((lo + hi) / 2, 2) };
+  };
+  const impliedTotals = { goals: implied('g', 1), corners: implied('corners', res.phi.corners || 1) };
+
+  const out = {
+    generated_at: new Date().toISOString(),
+    fixture: { id: fx.id, kickoff: new Date(fx.t).toISOString(), competition: fx.league.name, country: fx.league.country,
+      model_league: lg.name, cup_note: lg.id !== fx.league.id ? `jogo de ${fx.league.name}; forças medidas em ${lg.name}` : null,
+      home: fx.home.name, away: fx.away.name, team_candidates: teams.slice(0, 5).map(t => `${t.id} ${t.name} (${t.country})`) },
+    data_quality: { alerts, sources, odds_updated_at: oddsP.updatedAt, odds_age_min: oddsAgeMin, league_matches_used: res.prep.rows.length, seasons, stats_coverage: r(res.prep.coverage, 2),
+      both_teams_known: res.pred.goals.known, pinnacle_lines: priced.length, api_requests_left: api.quota(),
+      dispersion_at_floor: Object.entries(res.phi).filter(([k, v]) => k !== 'goals' && v <= 1.0001).map(([k]) => k) },
+    league: { home_factor: Object.fromEntries(Object.entries(res.fits).filter(([, f]) => f).map(([k, f]) => [k, r(f.home)])),
+      avg_total: Object.fromEntries(Object.entries(res.fits).filter(([, f]) => f).map(([k, f]) => [k, r(f.avgH + f.avgA, 2)])),
+      dispersion_vmr: Object.fromEntries(Object.entries(res.phi).map(([k, v]) => [k, r(v)])), xg_proxy_scale: r(res.prep.scale) },
+    projection: Object.fromEntries(Object.entries(res.pred).filter(([, p]) => p).map(([k, p]) =>
+      [k, { home: r(p.h, 2), away: r(p.a, 2), total: r(p.h + p.a, 2), log_se_home: r(p.seH), log_se_away: r(p.seA),
+        pinnacle_implied: impliedTotals[k] ?? null }])),
+    teams: {
+      home: teamOut(fx.home, 'mandante', val(3, null)),
+      away: teamOut(fx.away, 'visitante', val(4, null)),
+    },
+    candidates,
+    lines_with_pinnacle: priced,
+    model_only_lines: modelOnly,
+    model_notes: buildInsights(res, fx.home.id, fx.away.id, names).map(i => i.text),
+    method: { blend_weight_model: W_MODEL, blend: 'log-linear p ∝ p_pinnacle^(1−w)·p_modelo^w, normalizado nas pernas complementares',
+      probabilities: 'condicionais ao não-push (como a Pinnacle precifica)',
+      fragile: 'algum alerta de qualidade, ou |diff_pp| ≥ 5 (1X2/AH/gols/BTTS) ou ≥ 10 (escanteios/chutes)',
+      odd_min: 'fair_odd_blend × 1,03 (× 1,05 se frágil); linhas só do modelo: fair_odd_model × 1,08',
+      entry: `¼ Kelly sobre banca de R$ ${banca} com p_blend na odd mínima, teto 300·min(1, p/0,70), × fator da Política E dessa odd`,
+      odds_cache: 'odds da Pinnacle com até 10 minutos de cache',
+      consistency: 'score = 0,5·p + 0,25·p_pior_cenário + 0,25·acerto_10_jogos_encolhido (10 jogos de peso para p); '
+        + 'âncora: p ≥ 0,60, pior cenário ≥ 0,50 e cada time ≥ 6/10; sólida: p ≥ 0,52, pior cenário ≥ 0,42 e acerto somado ≥ 50%; resto especulativa',
+      candidates: 'âncora/sólida, odd mínima ≥ 1,50 e permitida pela Política E, até 5% acima da Pinnacle; ordem: nível, não frágil, score, preço' },
+  };
+  return out;
+}

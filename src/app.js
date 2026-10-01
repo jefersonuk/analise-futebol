@@ -2,7 +2,8 @@ import * as api from './api.js';
 import { METRICS, analyzeMatch, ev, fairOdd, politicaE } from './model.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
-import { renderDashboard } from './dashboard.js';
+import { pickDashboard, renderDashboard } from './dashboard.js';
+import { ODDS_STALE_MIN, buildDossier, hypothesis } from './dossier.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -11,8 +12,10 @@ const num = (x, d = 2) => x.toFixed(d).replace('.', ',');
 const date = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 const hour = t => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const SEASONS_BACK = 2;   // temporada atual + 2 anteriores (o decaimento cuida do peso)
+const BANCA = 44000;
 
-const state = { fixtures: [], fixture: null, result: null, odds: new Map(), books: new Map(), pinn: new Map(), market: 'Todos' };
+const state = { fixtures: [], fixture: null, result: null, matches: [], dossier: null, oddsP: null,
+  odds: new Map(), books: new Map(), pinn: new Map(), market: 'Todos' };
 
 function msg(text, err = false) {
   const el = $('#msg');
@@ -96,33 +99,57 @@ $('#btnRun').onclick = async () => {
     }
     msg('Ajustando forças da liga…');
     state.fixture = { ...fx, base: lg, seasons, n: matches.length };
+    state.matches = matches;
     state.result = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t);
     state.odds.clear(); state.books.clear(); state.pinn.clear();
     state.market = 'Todos';
+    await refreshOdds();
     msg('');
     render();
   } catch (e) { msg(e.message, true); }
   $('#btnRun').disabled = false;
 };
 
-// Odds da Pinnacle em cada linha + probabilidade dela sem margem.
+// Busca as odds da Pinnacle agora (sem cache), preenche a tabela e refaz o dossiê com elas.
+async function refreshOdds() {
+  msg('Buscando odds da Pinnacle…');
+  state.oddsP = await api.fixtureOdds(state.fixture.id);
+  const { odds, fair } = collect(state.oddsP.bookmakers);
+  for (const [id, b] of state.books) if (b === 'Pinnacle') { state.odds.delete(id); state.books.delete(id); }
+  const ids = new Set(state.result.lines.map(l => l.id));
+  for (const [id, odd] of odds) if (ids.has(id) && state.books.get(id) !== 'manual') { state.odds.set(id, odd); state.books.set(id, 'Pinnacle'); }
+  state.pinn = fair;
+  msg('Montando o dossiê (desfalques, tabela, descanso)…');
+  state.dossier = await buildDossier(api.dossierApi, {
+    fx: state.fixture, team: { id: Number($('#teamSel').value) }, fixtures: state.fixtures,
+    matches: state.matches, lg: state.fixture.base, oddsPayload: state.oddsP, banca: BANCA,
+  });
+  showQuota();
+}
+
 $('#btnOdds').onclick = async () => {
   if (!state.result) return;
   $('#btnOdds').disabled = true;
-  msg('Buscando odds…');
   try {
-    const { odds, fair } = collect(await api.fixtureOdds(state.fixture.id));
-    showQuota();
-    const ids = new Set(state.result.lines.map(l => l.id));
-    let n = 0;
-    for (const [id, odd] of odds) if (ids.has(id)) { state.odds.set(id, odd); state.books.set(id, 'Pinnacle'); n++; }
-    state.pinn = fair;
-    msg(n ? '' : 'A API não tem odds da Pinnacle para as linhas deste jogo (ainda).', !n);
+    await refreshOdds();
+    msg('');
     renderLines();
     renderRank();
+    renderDash();
   } catch (e) { msg(e.message, true); }
   $('#btnOdds').disabled = false;
 };
+
+function renderOddsInfo() {
+  const p = state.oddsP, el = $('#oddsInfo');
+  if (!p || !p.bookmakers.length) { el.className = 'oddsbar stale'; el.textContent = 'A API não tem odds da Pinnacle para este jogo (ainda).'; return; }
+  const age = p.updatedAt ? Math.round((p.fetchedAt - Date.parse(p.updatedAt)) / 60e3) : null;
+  const when = p.updatedAt ? new Date(p.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '?';
+  el.className = `oddsbar${age > ODDS_STALE_MIN ? ' stale' : ''}`;
+  el.textContent = `Odds da Pinnacle: última atualização da API às ${when} (há ${age ?? '?'} min). `
+    + (age > ODDS_STALE_MIN ? 'Odd velha: confira o preço atual antes de entrar; as linhas ficam marcadas como frágeis. ' : '')
+    + 'A API atualiza as odds a cada ~3 h; você pode corrigir qualquer odd na tabela.';
+}
 
 function render() {
   const fx = state.fixture, r = state.result;
@@ -138,6 +165,7 @@ function render() {
   renderChips();
   renderLines();
   renderRank();
+  renderDash();
   renderGames();
 }
 
@@ -200,20 +228,19 @@ function pinnCell(l) {
   return `${pct(p)} <span class="${Math.abs(d) >= 0.05 ? (d > 0 ? 'pos' : 'neg') : 'muted'}">(${d >= 0 ? '+' : ''}${(d * 100).toFixed(1)})</span>`;
 }
 
-function renderDash(rows) {
+function renderDash() {
+  renderOddsInfo();
+  if (!state.dossier) { $('#dash').innerHTML = ''; return; }
   const { prep } = state.result, fx = state.fixture;
-  const top = rows.filter(r => r.e.mid > 0).slice(0, 5)
-    .map(r => ({ line: r.l, odd: r.odd, e: r.e, pinn: state.pinn.get(r.l.id), pol: politicaE(r.odd) }));
   const teams = [['home', fx.home], ['away', fx.away]]
     .map(([role, t]) => ({ role, name: t.name, games: recentGames(prep, t.id) }));
-  $('#dash').innerHTML = renderDashboard(top, teams);
+  $('#dash').innerHTML = renderDashboard(pickDashboard(state.dossier, 5, hypothesis), teams);
 }
 
 function renderRank() {
   const rows = state.result.lines.filter(l => state.odds.has(l.id))
     .map(l => ({ l, odd: state.odds.get(l.id), e: ev(l, state.odds.get(l.id)) }))
     .sort((a, b) => b.e.mid - a.e.mid);
-  renderDash(rows);
   if (!rows.length) { $('#rank').innerHTML = '<span class="muted">Nenhuma odd informada ainda.</span>'; return; }
   $('#rank').innerHTML = '<div class="scroll"><table>' + rows.map(({ l, odd, e }) => `<tr><td>${l.market}</td><td>${l.label}</td>
     <td>@ ${num(odd)}</td><td class="book">${esc(state.books.get(l.id) || '')}</td>

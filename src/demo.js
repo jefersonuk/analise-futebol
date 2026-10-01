@@ -1,5 +1,7 @@
 // Modo demonstração (chave "demo"): uma liga sintética de 20 times, sem gastar requisições.
 
+import { dist, scoreMatrix, settle } from './model.js';
+
 const NAMES = ['Aurora', 'Boreal', 'Cometa', 'Dínamo', 'Estrela', 'Fênix', 'Galáxia', 'Horizonte', 'Íris', 'Júpiter',
   'Kosmos', 'Lunar', 'Meteoro', 'Nebulosa', 'Órion', 'Pulsar', 'Quasar', 'Radiante', 'Solar', 'Titã'];
 const TEAMS = NAMES.map((n, i) => ({ id: 9001 + i, name: `${n} FC`, country: 'Demo' }));
@@ -47,16 +49,58 @@ export function searchTeams(q) {
   return hit.length ? hit : TEAMS.slice(0, 5);
 }
 
+const SEASON = () => new Date().getUTCFullYear();
+const idxOf = teamId => TEAMS.findIndex(t => t.id === teamId);
+const out = (g, season) => ({
+  id: g.id, t: g.t, league: { ...LEAGUE, season },
+  home: { id: TEAMS[g.h].id, name: TEAMS[g.h].name }, away: { id: TEAMS[g.a].id, name: TEAMS[g.a].name },
+});
+
 export function upcoming(teamId) {
-  const season = new Date().getUTCFullYear();
-  const idx = TEAMS.findIndex(t => t.id === teamId);
+  const season = SEASON(), idx = idxOf(teamId);
   let next = schedule(season).filter(g => (g.h === idx || g.a === idx) && g.t > Date.now()).slice(0, 5);
   if (!next.length) next = [{ h: idx, a: (idx + 1) % TEAMS.length, t: Date.now() + DAY, id: 0 }];
-  return next.map(g => ({
-    id: g.id, t: g.t, league: { ...LEAGUE, season },
-    home: { id: TEAMS[g.h].id, name: TEAMS[g.h].name }, away: { id: TEAMS[g.a].id, name: TEAMS[g.a].name },
-  }));
+  return next.map(g => out(g, season));
+}
+
+export function lastPlayed(teamId) {
+  const idx = idxOf(teamId), past = schedule(SEASON()).filter(g => (g.h === idx || g.a === idx) && g.t < Date.now());
+  return past.length ? out(past[past.length - 1], SEASON()) : null;
 }
 
 export const leaguesOf = () => [LEAGUE];
-export const leagueMatches = season => schedule(season).filter(g => g.t < Date.now()).map(play);
+export const leagueMatches = (leagueId, season) => schedule(season).filter(g => g.t < Date.now()).map(play);
+export const injuries = () => [];
+
+export function standings(leagueId, season) {
+  const tab = new Map(TEAMS.map(t => [t.id, { team: t.id, points: 0, played: 0, gd: 0 }]));
+  for (const m of leagueMatches(leagueId, season)) {
+    const h = tab.get(m.h), a = tab.get(m.a);
+    h.played++; a.played++; h.gd += m.hg - m.ag; a.gd += m.ag - m.hg;
+    if (m.hg > m.ag) h.points += 3; else if (m.hg < m.ag) a.points += 3; else { h.points++; a.points++; }
+  }
+  return [...tab.values()].sort((x, y) => y.points - x.points || y.gd - x.gd)
+    .map((s, i) => ({ ...s, rank: i + 1, form: null, group: LEAGUE.name, zone: i < 4 ? 'Libertadores' : i >= 16 ? 'Rebaixamento' : null }));
+}
+
+// "Pinnacle" da demo: precifica pelas forças verdadeiras (que o modelo não vê), com 2,5% de margem.
+export function fixtureOdds(fixtureId) {
+  const g = schedule(Math.floor(fixtureId / 1000)).find(x => x.id === fixtureId);
+  if (!g) return { updatedAt: null, fetchedAt: Date.now(), bookmakers: [] };
+  const H = LAT[g.h], A = LAT[g.a];
+  const { diff, tot } = scoreMatrix(1.1 * H.att * A.def, 0.9 * A.att * H.def, 0);
+  const odd = p => (1 / (p * 1.025)).toFixed(2);
+  const neg = e => e.map(([v, p]) => [-v, p]);
+  const eff = s => s.pWin / (s.pWin + s.pLose);
+  const pd = t => diff.reduce((s, [d, p]) => (t(d) ? s + p : s), 0);
+  const bets = [{ id: 1, values: [['Home', pd(d => d > 0)], ['Draw', pd(d => d === 0)], ['Away', pd(d => d < 0)]].map(([value, p]) => ({ value, odd: odd(p) })) }];
+  const ah = [], ou = [], co = [];
+  for (let h = -1.5; h <= 1.5; h += 0.25)
+    ah.push({ value: `Home ${h}`, odd: odd(eff(settle(diff, h))) }, { value: `Away ${h}`, odd: odd(eff(settle(neg(diff), -h))) });
+  for (const L of [1.5, 2.5, 3.5]) ou.push({ value: `Over ${L}`, odd: odd(eff(settle(tot, -L))) }, { value: `Under ${L}`, odd: odd(eff(settle(neg(tot), L))) });
+  const muC = 5 * 1.1 * H.cor + 5 * 0.9 * A.cor, pc = dist(muC, 1, 60).map((p, k) => [k, p]);
+  for (let L = Math.round(muC) - 1.5; L <= Math.round(muC) + 1.5; L++)
+    co.push({ value: `Over ${L}`, odd: odd(eff(settle(pc, -L))) }, { value: `Under ${L}`, odd: odd(eff(settle(neg(pc), L))) });
+  bets.push({ id: 4, values: ah }, { id: 5, values: ou }, { id: 45, values: co });
+  return { updatedAt: new Date(Date.now() - 40 * 60e3).toISOString(), fetchedAt: Date.now(), bookmakers: [{ id: 4, name: 'Pinnacle', bets }] };
+}
