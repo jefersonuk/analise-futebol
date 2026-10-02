@@ -9,7 +9,7 @@ import { rank } from './ratings.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { history } from './dashboard.js';
-import { ODD_FLOOR, TIER_ORDER, consistency } from './consistency.js';
+import { ODD_FLOOR, consistency, rankScore, rankTier, underOk } from './consistency.js';
 import { HALF_FROM } from './client.js';
 
 const DAY = 864e5;
@@ -245,12 +245,12 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
 }
 
 // Candidata (consistência primeiro, preço depois): âncora/sólida, odd mínima ≥ 1,50 e permitida pela
-// Política E, e que uma casa soft consegue pagar (até ~5% acima da Pinnacle).
+// Política E, que uma casa soft consegue pagar (até ~5% acima da Pinnacle), e under só se for âncora.
 export const isCandidate = l => l.tier !== 'especulativa' && l.odd_min >= ODD_FLOOR && l.politica_e !== 'não entrar'
-  && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5);
-// Ordem: nível, não frágil antes de frágil, score de consistência, facilidade do preço.
-export const byConsistency = (a, b) => TIER_ORDER[a.tier] - TIER_ORDER[b.tier] || a.fragile - b.fragile
-  || b.consistency_score - a.consistency_score || (a.odd_min_vs_pinnacle_pct ?? 99) - (b.odd_min_vs_pinnacle_pct ?? 99);
+  && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5) && underOk(l);
+// Ordem: nível (under um nível abaixo), não frágil antes de frágil, score (under com desconto), preço.
+export const byConsistency = (a, b) => rankTier(a) - rankTier(b) || a.fragile - b.fragile
+  || rankScore(b) - rankScore(a) || (a.odd_min_vs_pinnacle_pct ?? 99) - (b.odd_min_vs_pinnacle_pct ?? 99);
 
 // fx: jogo (de upcoming). team: time buscado. fixtures: próximos jogos dele (evita chamada repetida).
 // matches/lg: jogos da liga já baixados pelo app (opcional). banca em R$.
@@ -392,6 +392,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
       odd_min: 'fair_odd_blend × 1,03 (× 1,05 se frágil); linhas só do modelo: fair_odd_model × 1,08',
       entry: `¼ Kelly sobre banca de R$ ${banca} com p_blend na odd mínima, teto 300·min(1, p/0,70), × fator da Política E dessa odd`,
       odds_cache: 'odds da Pinnacle com até 10 minutos de cache',
+      over_first: 'preferência por over em gols e escanteios: under só é candidata se for âncora e, na ordem, conta um nível abaixo e com 0,05 a menos no score',
       consistency: 'score = 0,5·p + 0,25·p_pior_cenário + 0,25·acerto_10_jogos_encolhido (10 jogos de peso para p); '
         + 'âncora: p ≥ 0,60, pior cenário ≥ 0,50 e cada time ≥ 6/10; sólida: p ≥ 0,52, pior cenário ≥ 0,42 e acerto somado ≥ 50%; resto especulativa',
       candidates: 'âncora/sólida, odd mínima ≥ 1,50 e permitida pela Política E, até 5% acima da Pinnacle; ordem: nível, não frágil, score, preço; candidates_focus: o mesmo só nos mercados de foco',

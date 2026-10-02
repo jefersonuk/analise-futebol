@@ -1,6 +1,7 @@
 // Painel: as 5 linhas de maior EV e como cada time se saiu nelas nos últimos 10 jogos.
 
 import { settle } from './model.js';
+import { isUnder, rankScore, rankTier } from './consistency.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const numBR = x => String(x).replace('.', ',');
@@ -175,11 +176,11 @@ export function bindTooltips(root) {
 
 const pct = x => `${Math.round(x * 100)}%`;
 const odd2 = x => x.toFixed(2).replace('.', ',');
-const TIERS = { 'âncora': 0, 'sólida': 1, 'especulativa': 2 };
 
 // Por que uma linha que entrou só para completar o painel não passou no filtro de candidatas.
 function outsideReason(l, ok = []) {
   if (ok.includes(l.id)) return null;
+  if (isUnder(l.id) && l.tier === 'sólida') return 'under só se for âncora';
   if (l.tier === 'especulativa') {
     if (l.hit_rate_last10 != null && l.hit_rate_last10 < 0.5) return 'histórico contra';
     if (l.p_model_range[0] < 0.42) return 'pior cenário do modelo fraco';
@@ -200,7 +201,7 @@ export function pickDashboard(dossier, n = 5, { focus = true, side = id => id } 
   const pool = focus ? all.filter(l => dossier.focus_markets.includes(l.market)) : all;
   const first = (focus ? dossier.candidates_focus : dossier.candidates).map(id => byId.get(id)).filter(Boolean).slice(0, n);
   const out = [...first], used = new Set(out.map(l => l.id));
-  const better = (a, b) => TIERS[a.tier] - TIERS[b.tier] || b.consistency_score - a.consistency_score;
+  const better = (a, b) => rankTier(a) - rankTier(b) || rankScore(b) - rankScore(a);
   const add = (l, outside) => { if (out.length < n && !used.has(l.id)) { used.add(l.id); out.push(outside ? { ...l, outside } : l); } };
   if (focus) {
     const sides = new Set(first.map(l => side(l.id)));

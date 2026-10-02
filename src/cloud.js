@@ -7,7 +7,8 @@
 // withCloud({ load, save }, { repo, token, branch }) -> { load, save, flush, pushAll, status }
 
 const API = 'https://api.github.com';
-const SYNCED = /^af:(lg|tm|h1):|^af:teamIndex$/;   // pesado e estável; o resto é barato de rebuscar
+// histórico pesado e estável, e as análises guardadas até o jogo (af:an:<jogo> e o índice af:anidx)
+const SYNCED = /^af:(lg|tm|h1|an):|^af:(teamIndex|anidx)$/;
 const TREE_TTL = 10 * 60e3;
 const DEBOUNCE = 4000;
 
@@ -34,6 +35,15 @@ export function merge(key, a, b) {
     return { m };
   }
   if (key === 'af:teamIndex') return { ...b, ...a };
+  if (/^af:an:/.test(key)) return (a.savedAt || '') >= (b.savedAt || '') ? a : b;   // análise: a mais nova
+  if (key === 'af:anidx') {                                                         // índice: união, sem jogos já passados
+    const out = {}, alive = x => x && x.t > Date.now() - 3 * 3600e3;
+    for (const [id, x] of Object.entries({ ...b, ...a })) {
+      const y = a[id] && b[id] ? ((a[id].savedAt || '') >= (b[id].savedAt || '') ? a[id] : b[id]) : x;
+      if (alive(y)) out[id] = y;
+    }
+    return out;
+  }
   return a;
 }
 
@@ -144,6 +154,20 @@ export function withCloud(local, { repo, token, branch = 'main' }) {
     async save(key, value) {
       await local.save(key, value);
       if (synced(key)) schedule(key);
+    },
+
+    // Apaga aqui e na nuvem (análise de jogo que já passou).
+    async remove(key) {
+      clearTimeout(timers.get(key)); timers.delete(key);
+      await local.del?.(key);
+      if (!synced(key)) return;
+      try {
+        const t = await getTree(), p = pathOf(key), sha = t.get(p);
+        if (!sha) return;
+        const r = await gh(`/contents/${p}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: `cache: apaga ${key}`, sha, branch }) });
+        if (r.ok) { t.delete(p); known.delete(key); }
+      } catch (e) { st.error = e.message; }
     },
 
     // Envia já o que está agendado (Node: antes de sair).

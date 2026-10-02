@@ -45,8 +45,13 @@ setCloud(getCloud());
 export const cloudStatus = () => cloud?.status() || null;
 export const checkCloud = () => (cloud ? cloud.check() : Promise.reject(new Error('nuvem não configurada')));
 export const pushAllToCloud = async onProgress => (cloud ? cloud.pushAll(await store.keys(), onProgress) : 0);
-const load = k => (cloud ? cloud.load(k) : store.load(k));
-const save = (k, v) => (cloud ? cloud.save(k, v) : store.save(k, v));
+// Dados da demo nunca vão para a nuvem.
+const useCloud = () => cloud && !isDemo();
+const load = k => (useCloud() ? cloud.load(k) : store.load(k));
+const save = (k, v) => (useCloud() ? cloud.save(k, v) : store.save(k, v));
+// Documentos do app (análises guardadas), com a mesma nuvem do cache.
+export const loadDoc = load, saveDoc = save;
+export const removeDoc = k => (useCloud() ? cloud.remove(k) : store.del(k));
 
 const client = makeClient({ get: call, load, save });
 const pick = (name, ...args) => (isDemo() ? Promise.resolve(demo[name](...args)) : client[name](...args));

@@ -49,6 +49,11 @@ export async function save(key, value) {
   try { const db = await open(); await tx(db, 'readwrite', os => os.put(value, key)); } catch { /* segue só em memória */ }
 }
 
+export async function del(key) {
+  mem.delete(key);
+  try { const db = await open(); await tx(db, 'readwrite', os => os.delete(key)); } catch { /* já não existe */ }
+}
+
 export async function keys() {
   try { const db = await open(); return (await tx(db, 'readonly', os => os.getAllKeys())) || []; } catch { return [...mem.keys()]; }
 }

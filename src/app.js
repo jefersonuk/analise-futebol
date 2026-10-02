@@ -2,7 +2,8 @@ import * as api from './api.js';
 import { METRICS, analyzeMatch, ev, fairOdd, politicaE } from './model.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
-import { BETS_URL, betsApp, buildEntry, sendEntry } from './entry.js';
+import { initEntry } from './entryview.js';
+import { listSaved, loadAnalysis, saveAnalysis } from './saved.js';
 import { bindTooltips, pickDashboard, renderDashboard } from './dashboard.js';
 import { FOCUS, ODDS_STALE_MIN, buildDossier, loadLeague, resolveBase, side } from './dossier.js';
 import { alternatives, makePricer, nearest, parseLine, renderMyLine, verdict } from './myline.js';
@@ -121,7 +122,8 @@ $('#teamSel').onchange = loadFixtures;
 // ---- análise ----
 const selectedTeam = () => state.teams.find(t => t.id === Number($('#teamSel').value)) || { id: Number($('#teamSel').value) };
 
-// Analisa o jogo selecionado; devolve true quando a análise ficou pronta na tela.
+// Analisa o jogo selecionado; devolve true quando a análise ficou pronta na tela. Se o jogo tem análise
+// guardada (até o horário dele), abre a cópia sem chamar a API.
 async function runAnalysis() {
   startAction();
   const fx = state.fixtures[Number($('#fixSel').value)];
@@ -129,6 +131,8 @@ async function runAnalysis() {
   state.running = true;
   $('#btnRun').disabled = true;
   try {
+    const snap = await loadAnalysis(fx.id);
+    if (snap) { openSnapshot(snap); return true; }
     msg('Identificando a liga…');
     const lg = await resolveBase(api.dossierApi, fx, !!selectedTeam().national);
     if (!lg) throw new Error('Não encontrei a liga de nenhum dos dois times nesta temporada.');
@@ -149,10 +153,9 @@ async function runAnalysis() {
 }
 $('#btnRun').onclick = runAnalysis;
 
-// Busca as odds da Pinnacle agora (sem cache), preenche a tabela e refaz o dossiê com elas.
-async function refreshOdds() {
-  msg('Buscando odds da Pinnacle…');
-  state.oddsP = await api.fixtureOdds(state.fixture.id);
+// Refaz o modelo com as odds de state.oddsP (sem requisição): o total de escanteios do 1º tempo é
+// ancorado no da Pinnacle, e a tabela recebe as odds dela.
+function applyOdds() {
   const { odds, fair } = collect(state.oddsP.bookmakers);
   // refaz o modelo com as odds: o total de escanteios do 1º tempo é ancorado no da Pinnacle
   state.result = analyzeMatch(state.matches, state.fixture.home.id, state.fixture.away.id, state.fixture.t, { fair });
@@ -160,6 +163,13 @@ async function refreshOdds() {
   const ids = new Set(state.result.lines.map(l => l.id));
   for (const [id, odd] of odds) if (ids.has(id) && state.books.get(id) !== 'manual') { state.odds.set(id, odd); state.books.set(id, 'Pinnacle'); }
   state.pinn = fair;
+}
+
+// Busca as odds da Pinnacle agora (sem cache), refaz o modelo e o dossiê e guarda a análise até o jogo.
+async function refreshOdds() {
+  msg('Buscando odds da Pinnacle…');
+  state.oddsP = await api.fixtureOdds(state.fixture.id);
+  applyOdds();
   msg('Montando o dossiê (desfalques, tabela, descanso)…');
   state.dossier = await buildDossier(api.dossierApi, {
     fx: state.fixture, team: selectedTeam(), fixtures: state.fixtures, national: !!state.fixture.base.national,
@@ -167,7 +177,47 @@ async function refreshOdds() {
   });
   state.price = makePricer({ dossier: state.dossier, result: state.result, teams: teamsHist(), banca: BANCA });
   showQuota();
+  state.savedAt = null;
+  saveAnalysis({ fixture: state.fixture, team: selectedTeam(), matches: state.matches, oddsP: state.oddsP, dossier: state.dossier })
+    .then(renderSaved, () => { /* sem armazenamento: segue sem cópia */ });
 }
+
+// Abre uma análise guardada: remonta modelo, tabela e painel a partir da cópia, sem requisição.
+function openSnapshot(snap) {
+  const fx = snap.fixture;
+  state.teams = [snap.team || { id: fx.home.id, name: fx.home.name }];
+  state.fixtures = [fx];
+  $('#teamSel').innerHTML = `<option value="${state.teams[0].id}">${esc(state.teams[0].name || fx.home.name)}</option>`;
+  $('#fixSel').innerHTML = `<option value="0">${hour(fx.t)} · ${esc(fx.home.name)} x ${esc(fx.away.name)} · ${esc(fx.league.name)}</option>`;
+  $('#teamSel').hidden = false; $('#fixSel').hidden = false;
+  state.fixture = fx; state.matches = snap.matches; state.oddsP = snap.oddsP; state.dossier = snap.dossier;
+  state.odds.clear(); state.books.clear(); state.pinn.clear();
+  state.market = 'Todos'; state.my = null; state.savedAt = snap.savedAt;
+  applyOdds();
+  state.price = makePricer({ dossier: state.dossier, result: state.result, teams: teamsHist(), banca: BANCA });
+  render();
+  msg(`Análise guardada às ${new Date(snap.savedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}: aberta sem gastar requisição. `
+    + 'Para odds e desfalques de agora, use 🔄 Atualizar odds.');
+}
+
+// Lista "📂 Guardadas": jogos com análise pronta até o horário deles.
+async function renderSaved() {
+  let list = [];
+  try { list = await listSaved(); } catch { /* sem armazenamento */ }
+  const el = $('#savedList');
+  el.hidden = !list.length;
+  el.innerHTML = list.length ? '<span class="muted">📂 Guardadas até o jogo:</span>' + list.map(x =>
+    `<button data-saved="${x.id}">${esc(x.home)} x ${esc(x.away)} · ${hour(x.t)}</button>`).join('') : '';
+}
+$('#savedList').onclick = async e => {
+  const b = e.target.closest('[data-saved]');
+  if (!b || state.running) return;
+  const snap = await loadAnalysis(Number(b.dataset.saved));
+  if (!snap) { msg('Essa análise não está mais guardada (o jogo já começou?).', true); return renderSaved(); }
+  openSnapshot(snap);
+  $('#out').scrollIntoView({ block: 'start' });
+};
+renderSaved();
 
 $('#btnOdds').onclick = async () => {
   startAction();
@@ -187,7 +237,7 @@ $('#btnOdds').onclick = async () => {
 function renderOddsInfo() {
   const p = state.oddsP, el = $('#oddsInfo');
   if (!p || !p.bookmakers.length) { el.className = 'oddsbar stale'; el.textContent = 'A API não tem odds da Pinnacle para este jogo (ainda).'; return; }
-  const age = p.updatedAt ? Math.round((p.fetchedAt - Date.parse(p.updatedAt)) / 60e3) : null;
+  const age = p.updatedAt ? Math.round((Date.now() - Date.parse(p.updatedAt)) / 60e3) : null;   // idade agora (vale para análise guardada)
   const when = p.updatedAt ? new Date(p.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '?';
   el.className = `oddsbar${age > ODDS_STALE_MIN ? ' stale' : ''}`;
   el.textContent = `Odds da Pinnacle: última atualização da API às ${when} (há ${age ?? '?'} min). `
@@ -398,91 +448,12 @@ function renderGames() {
   $('#games').innerHTML = col(fx.home) + col(fx.away);
 }
 
-// ---- entrar numa linha: manda a aposta para o app de apostas de valor ----
-const money = v => `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-let entry = null;   // { line, houses }
-
-const lineById = id => state.price?.(id) || null;
-
+// ---- entrar numa linha: manda a aposta para o app de apostas de valor (entryview.js) ----
+const openEntry = initEntry({ getLine: id => state.price?.(id) || null, getFixture: () => state.fixture });
 $('#dash').addEventListener('click', e => {
   const b = e.target.closest('[data-enter]');
   if (b) openEntry(b.dataset.enter);
 });
-
-// ctx: { line, fx, btn } quando a linha vem de fora da análise aberta (varredura do dia)
-function openEntry(id, odd = null, ctx = null) {
-  const line = ctx?.line || lineById(id), app = betsApp(), fx = ctx?.fx || state.fixture;
-  if (!line) return;
-  entry = { line, fx, houses: app.houses, btn: ctx?.btn };
-  $('#enTitle').textContent = `${line.market}: ${line.line}`;
-  $('#enGame').textContent = `${fx.home.name} x ${fx.away.name} · ${fx.league.name} · ${hour(fx.t)}`;
-  $('#enFacts').innerHTML = [
-    ['Consistência', `${line.tier} · acerta ${pct(line.p_blend)}`],
-    ['Preço justo', num(line.fair_odd_blend)],
-    ['Odd mínima', `<b>${num(line.odd_min)}</b>`],
-    ['Pinnacle', line.pinnacle_odd ? num(line.pinnacle_odd) : 'sem odd (modelo ancorado)'],
-  ].map(([k, v]) => `<span class="muted">${k}</span><span>${v}</span>`).join('');
-  const opts = app.houses.map((h, i) => `<option value="${i}">${esc(h.name)} — ${h.currency === 'BRL' ? money(h.value) : `${h.currency} ${h.value.toFixed(2)}`}${h.limited ? ' · ⊘ limitada' : ''}</option>`);
-  $('#enHouse').innerHTML = opts.join('') + '<option value="other">Outra casa…</option>';
-  $('#enHouseOther').hidden = app.houses.length > 0;
-  if (!app.houses.length) $('#enHouse').value = 'other';
-  $('#enOdd').value = (odd || line.odd_min).toFixed(2);
-  $('#enStake').value = app.stake ?? line.entry_brl;
-  $('#enMsg').hidden = true;
-  $('#enSend').disabled = false;
-  if (!app.found || app.houses.length < 3) showEntryMsg('Este navegador ainda não tem as suas casas do app de apostas. '
-    + `<a href="${BETS_URL}" target="apostas">Abra o app de apostas aqui</a> e espere ele sincronizar com a nuvem; depois reabra este formulário. `
-    + 'Se registrar agora, a aposta fica aguardando no app de apostas até a casa existir lá.', true);
-  entry.stakeHint = app.stake;
-  checkEntry();
-  $('#entryDlg').showModal();
-}
-
-function entryHouse() {
-  const v = $('#enHouse').value;
-  if (v === 'other') return { name: $('#enHouseOther').value.trim(), currency: 'BRL', value: null };
-  return entry.houses[Number(v)];
-}
-
-function checkEntry() {
-  const { line } = entry, odd = parseFloat($('#enOdd').value), stake = parseFloat($('#enStake').value), h = entryHouse();
-  const out = [];
-  if (odd > 1) {
-    const evv = line.p_blend * odd - 1;
-    out.push(`EV nessa odd: <b class="${evv > 0 ? 'pos' : 'neg'}">${(evv * 100).toFixed(1).replace('.', ',')}%</b> (acerto ${pct(line.p_blend)})`);
-    if (odd < line.odd_min) out.push(`<span class="neg">Abaixo da odd mínima ${num(line.odd_min)}: a margem de segurança some.</span>`);
-    if (odd < 1.5) out.push('<span class="neg">Fora do seu núcleo (odd abaixo de 1,50).</span>');
-  }
-  if (entry.stakeHint) out.push(`<span class="muted">Stake do Modelo F no app de apostas: ${money(entry.stakeHint)} · a análise sugeria ${money(line.entry_brl)}.</span>`);
-  if (h?.value != null && stake > h.value && h.currency === 'BRL') out.push(`<span class="neg">Stake maior que o saldo da casa (${money(h.value)}).</span>`);
-  if (h?.limited) out.push('<span class="neg">Casa marcada como limitada no app de apostas.</span>');
-  $('#enCheck').innerHTML = out.join('<br>');
-}
-
-function showEntryMsg(text, err = false) {
-  const el = $('#enMsg');
-  el.hidden = false;
-  el.innerHTML = text;
-  el.classList.toggle('err', err);
-}
-
-$('#enHouse').onchange = () => { $('#enHouseOther').hidden = $('#enHouse').value !== 'other'; checkEntry(); };
-for (const id of ['#enOdd', '#enStake', '#enHouseOther']) $(id).oninput = checkEntry;
-$('#enCancel').onclick = () => $('#entryDlg').close();
-
-$('#entryForm').onsubmit = e => {
-  e.preventDefault();
-  const h = entryHouse(), odd = parseFloat($('#enOdd').value), stake = parseFloat($('#enStake').value);
-  if (!h?.name) return showEntryMsg('Escolha ou digite a casa.', true);
-  if (!(odd > 1) || !(stake > 0)) return showEntryMsg('Informe a odd e a stake.', true);
-  sendEntry(buildEntry({ line: entry.line, fx: entry.fx, casa: h.name, currency: h.currency, odd, stake }));
-  $('#enSend').disabled = true;
-  showEntryMsg(`Enviada ✓ ${esc(h.name)} @ ${num(odd)}, ${money(stake)}. O app de apostas registra ao abrir (aba ⚽ Análise). `
-    + `<a href="${BETS_URL}" target="apostas">Abrir app de apostas ↗</a>`);
-  window.open(BETS_URL, 'apostas');
-  const btn = entry.btn || document.querySelector(`[data-enter="${CSS.escape(entry.line.id)}"]`);
-  if (btn) { btn.textContent = '✓ Enviada'; btn.disabled = true; }
-};
 
 // ---- varredura do dia ----
 // Analisa um jogo vindo de fora da busca (varredura do dia), pelo mesmo fluxo do botão "Analisar jogo".

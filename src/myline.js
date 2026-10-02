@@ -4,7 +4,7 @@
 
 import { politicaE } from './model.js';
 import { renderDashboard } from './dashboard.js';
-import { TIER_ORDER } from './consistency.js';
+import { isUnder, rankScore, rankTier } from './consistency.js';
 import { lineHistory, modelEntry, side } from './dossier.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -125,6 +125,7 @@ export function verdict(line, odd) {
   else if (odd < line.fair_odd_blend) { level = 'no'; title = `Sem valor: a odd justa é ${odd2(line.fair_odd_blend)}`; }
   else if (odd < line.odd_min) { level = 'mid'; title = `Preço curto: o valor fica dentro da margem de erro (mínima ${odd2(line.odd_min)})`; }
   else if (line.tier === 'especulativa') { level = 'mid'; title = 'Tem preço, mas acerta pouco ou de forma instável (especulativa)'; }
+  else if (isUnder(line.id) && line.tier !== 'âncora') { level = 'mid'; title = 'Under sólida: pela sua regra, under só entra se for âncora; veja o over nas alternativas'; }
   else if (odd < 1.5) { level = 'mid'; title = `Tem valor (${line.tier}), mas a odd está abaixo de 1,50, fora do seu núcleo`; }
   else { level = 'ok'; title = `Entrar: linha ${line.tier}, odd acima da mínima · entrada ${pe.label} (Política E)`; }
   return { level, title, ev, notes };
@@ -151,7 +152,7 @@ const RELATED = [
 ];
 
 const playable = l => l && l.odd_min >= 1.5 && l.odd_min <= 3;
-const better = (a, b) => TIER_ORDER[a.tier] - TIER_ORDER[b.tier] || a.fragile - b.fragile || b.consistency_score - a.consistency_score;
+const better = (a, b) => rankTier(a) - rankTier(b) || a.fragile - b.fragile || rankScore(b) - rankScore(a);
 
 export function alternatives(price, chosen, dossier) {
   const out = [], used = new Set([chosen.id]);
@@ -171,7 +172,8 @@ export function alternatives(price, chosen, dossier) {
   }
   // 2. o outro lado, quando ele é o favorito
   const o = opposite(chosen.id) && price(opposite(chosen.id));
-  if (o && o.p_blend > chosen.p_blend + 0.02) add(o, 'outro lado', `o outro lado acerta mais (${pct(o.p_blend)})`);
+  if (o && isUnder(chosen.id) && playable(o)) add(o, 'outro lado', `over, a sua preferência (${o.tier}, acerta ${pct(o.p_blend)})`);
+  else if (o && o.p_blend > chosen.p_blend + 0.02) add(o, 'outro lado', `o outro lado acerta mais (${pct(o.p_blend)})`);
   // 3. a mesma leitura em outro mercado: a linha mais consistente de cada lado relacionado
   for (const [re, keys] of RELATED) {
     if (!re.test(chosen.id)) continue;

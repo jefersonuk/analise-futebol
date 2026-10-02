@@ -72,3 +72,18 @@ test('painel em foco: candidata de cada mercado, escada só na faixa 1,50–3,00
   assert.ok(!ids.includes('1'));                                     // foco não mostra 1X2
   assert.ok(pickDashboard(dossier, 5, { focus: false, side }).some(l => l.id === '1'));
 });
+
+import { isUnder } from '../src/consistency.js';
+import { byConsistency, isCandidate } from '../src/dossier.js';
+
+test('preferência por over: under só se for âncora e passa na frente só se for claramente melhor', () => {
+  const L = (id, tier, score) => ({ id, tier, consistency_score: score, fragile: true, odd_min: 1.6, politica_e: 'cheia', odd_min_vs_pinnacle_pct: null });
+  assert.ok(isUnder('gU2.5') && isUnder('c1U4.5') && isUnder('cornersU9.5') && isUnder('cAU4.5') && isUnder('crN9'));
+  assert.ok(!isUnder('gO2.5') && !isUnder('c1hH-0.5') && !isUnder('shotsU20.5'));
+  assert.equal(isCandidate(L('gU2.5', 'sólida', 0.7)), false, 'under sólida não é candidata');
+  assert.equal(isCandidate(L('gU2.5', 'âncora', 0.7)), true);
+  // under âncora com score parecido fica atrás do over sólido
+  assert.deepEqual([L('gU2.5', 'âncora', 0.64), L('gO2.5', 'sólida', 0.62)].sort(byConsistency).map(l => l.id), ['gO2.5', 'gU2.5']);
+  // under âncora muito melhor passa na frente
+  assert.deepEqual([L('gO2.5', 'sólida', 0.6), L('gU2.5', 'âncora', 0.72)].sort(byConsistency).map(l => l.id), ['gU2.5', 'gO2.5']);
+});

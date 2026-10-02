@@ -24,3 +24,12 @@ export function consistency({ p, pLow, hits = [] }) {
 
 export const TIER_ORDER = { 'âncora': 0, 'sólida': 1, 'especulativa': 2 };
 export const ODD_FLOOR = 1.5;   // abaixo disso fica fora do núcleo (filtros do surebet.com começam em 1,50)
+
+// Preferência do Jeferson: OVER em gols e escanteios. Under (e "ninguém chega a N", que é um under) só
+// quando é muito atrativo: só vira candidata se for âncora, e na ordem conta um nível abaixo e com
+// UNDER_PENALTY a menos no score — passa na frente de um over apenas quando é claramente mais consistente.
+export const isUnder = id => /^(g|corners|c1|cH|cA)U|^crN/.test(id);
+export const UNDER_PENALTY = 0.05;
+export const rankTier = l => TIER_ORDER[l.tier] + (isUnder(l.id) ? 1 : 0);
+export const rankScore = l => (l.consistency_score ?? 0) - (isUnder(l.id) ? UNDER_PENALTY : 0);
+export const underOk = l => !isUnder(l.id) || l.tier === 'âncora';
