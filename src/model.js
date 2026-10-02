@@ -218,9 +218,27 @@ const ALWAYS = new Set(['1X2', 'Ambas marcam', 'Resultado escanteios', 'Resultad
 // fair: probabilidades sem margem da Pinnacle (odds.js collect). Quando ela precifica o total de
 // escanteios do 1º tempo, o total do modelo é puxado para o dela (peso ANCHOR_W) mantendo a divisão
 // entre os times — é daí que sai o handicap do 1º tempo, mercado que a API não traz.
+// Superioridade de gols que a Pinnacle precifica (mandante − visitante): a que reproduz P(mandante) −
+// P(visitante) sem margem, com o total de gols dela.
+export function marketSupremacy(fair, total) {
+  if (!fair?.has('1') || !fair.has('2') || !(total > 0)) return null;
+  const target = fair.get('1') - fair.get('2');
+  const edge = s => scoreMatrix((total + s) / 2, (total - s) / 2).diff.reduce((acc, [d, p]) => acc + (d > 0 ? p : d < 0 ? -p : 0), 0);
+  let lo = -total + 0.05, hi = total - 0.05;
+  for (let i = 0; i < 50; i++) { const mid = (lo + hi) / 2; if (edge(mid) < target) lo = mid; else hi = mid; }
+  return (lo + hi) / 2;
+}
+
+// Redivide uma previsão de contagem entre os times para a diferença d (o total não muda).
+const resplit = (p, d) => {
+  const T = p.h + p.a, x = Math.max(-(T - 0.4), Math.min(T - 0.4, d));
+  return { ...p, h: (T + x) / 2, a: (T - x) / 2 };
+};
+
 // share1hBelow: abaixo dessa cobertura de escanteios do 1º tempo, o 1º tempo sai dos escanteios do jogo
 // × fração do 1º tempo (a varredura do dia usa 0,5; a análise de um jogo, só quando não há ajuste).
-export function analyzeMatch(matches, home, away, refTime, { fair = null, share1hBelow = 0 } = {}) {
+// favor: calibração favoritismo → escanteios da base (favoritism.js, { corners, corners1h }).
+export function analyzeMatch(matches, home, away, refTime, { fair = null, share1hBelow = 0, favor = null } = {}) {
   const prep = prepare(matches, refTime);
   const fits = {}, pred = {}, phi = { goals: 1 }, anchors = {};
   for (const k of Object.keys(METRICS)) {
@@ -232,6 +250,19 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null, share1
       if (k === 'corners1h') phi.corners1hDiff = r.diff;
       if (k === 'corners') phi.cornersDiff = r.diff;
     }
+  }
+  // Favoritismo: a superioridade de gols da Pinnacle (do modelo, sem odds) redistribui os escanteios entre
+  // os times onde a liga mostrou, fora da amostra, que isso melhora a previsão. O total não muda.
+  const gT = fair ? impliedTotal(fair, 'g', 1) : null;
+  const supMkt = gT ? marketSupremacy(fair, gT.implied_total) : null;
+  const sup = supMkt ?? (pred.goals ? pred.goals.h - pred.goals.a : null);
+  const fav = { sup, source: supMkt != null ? 'pinnacle' : 'modelo', applied: false, applied1h: false };
+  const lin = (r, dc) => (r?.useful ? r.coef[0] + r.coef[1] * dc + r.coef[2] * sup : null);
+  if (favor && sup != null && pred.corners) {
+    const dc = pred.corners.h - pred.corners.a, d = lin(favor.corners, dc);
+    fav.diff_model = dc;
+    if (d != null) { pred.corners = resplit(pred.corners, d); fav.diff = pred.corners.h - pred.corners.a; fav.applied = true; }
+    fav.diff1h = lin(favor.corners1h, dc);
   }
   if (pred.corners && (!pred.corners1h || prep.coverage1h < share1hBelow)) {
     let c1 = 0, c = 0, n = 0;
@@ -249,6 +280,12 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null, share1
       anchors.corners1h = { model_total: model, pinnacle_total: imp.implied_total, from_line: imp.from_line, factor: f };
     }
   }
+  // 1º tempo com relação própria na liga: a diferença dela (o 1º tempo da fração já herdou a do jogo)
+  if (fav.diff1h != null && pred.corners1h) {
+    fav.diff1h_model = pred.corners1h.h - pred.corners1h.a;
+    pred.corners1h = resplit(pred.corners1h, fav.diff1h);
+    fav.applied1h = true;
+  } else if (fav.applied && anchors.corners1hShare) fav.applied1h = true;
   // Total de escanteios do jogo: as linhas de total seguem com o modelo puro (misturado com a Pinnacle no
   // dossiê); só os mercados derivados (handicap, quem tem mais, corrida) usam o total ancorado.
   const derived = {};
@@ -260,13 +297,13 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null, share1
       anchors.corners = { model_total: model, pinnacle_total: imp.implied_total, from_line: imp.from_line, factor: f };
     }
   }
-  if (!pred.goals) return { prep, fits, pred, phi, anchors, lines: [], all: [] };
+  if (!pred.goals) return { prep, fits, pred, phi, anchors, favor: fav, lines: [], all: [] };
   const base = buildLines(pred, phi, [0, 0], derived);
   const alt = SCENARIOS.map(s => new Map(buildLines(pred, phi, s, derived).map(l => [l.id, l])));
   // all: toda linha calculada (para a análise de uma linha pedida); lines: as exibidas nas tabelas
   const all = base.map(l => ({ ...l, sc: alt.map(m => m.get(l.id)) })).filter(l => l.sc.every(Boolean));
   const lines = all.filter(l => ALWAYS.has(l.market) || (l.pWin >= 0.15 && l.pWin <= 0.85 && l.pWin + l.pLose > 0.3));
-  return { prep, fits, pred, phi, anchors, lines, all };
+  return { prep, fits, pred, phi, anchors, favor: fav, lines, all };
 }
 
 export const fairOdd = l => 1 + l.pLose / l.pWin;

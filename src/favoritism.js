@@ -6,11 +6,14 @@
 //     anteriores (uma janela por mês: nada do próprio jogo nem do futuro entra);
 //   - calibrate: por liga, quanto a superioridade explica da diferença real de escanteios (jogo e 1º
 //     tempo) além da força em escanteios — medido nos 75% mais antigos, conferido nos 25% mais recentes;
-//   - marketSupremacy: a superioridade que a Pinnacle precifica no jogo de hoje (1X2 e total sem margem);
+//   - marketSupremacy (model.js): a superioridade que a Pinnacle precifica no jogo de hoje;
+//   - favorFor: as duas coisas para uma base, com memória (a superioridade vai junto em cada jogo, m.sup);
 //   - roleOf: favorito / equilibrado / zebra.
 
 import { fit, predict, prepare } from './ratings.js';
-import { scoreMatrix } from './model.js';
+import { marketSupremacy } from './model.js';
+
+export { marketSupremacy };
 
 const MONTH = 30 * 864e5;
 export const ROLE_EDGE = 0.35;   // gols de superioridade para ser favorito (≈ 47% × 27% de vitória)
@@ -90,16 +93,19 @@ export function calibrate(matches, pre = preMatch(matches)) {
   return { n: rows.length, corners: relation(rows, 'd'), corners1h: relation(rows, 'd1'), bins };
 }
 
-// Superioridade de gols que a Pinnacle precifica: a que reproduz P(mandante) − P(visitante) sem margem,
-// com o total de gols dela. fair: id da linha -> probabilidade sem margem (odds.js).
-export function marketSupremacy(fair, total) {
-  if (!fair?.has('1') || !fair.has('2') || !(total > 0)) return null;
-  const target = fair.get('1') - fair.get('2');
-  const edge = s => { const { diff } = scoreMatrix((total + s) / 2, (total - s) / 2); return diff.reduce((acc, [d, p]) => acc + (d > 0 ? p : d < 0 ? -p : 0), 0); };
-  let lo = -total + 0.05, hi = total - 0.05;
-  for (let i = 0; i < 50; i++) { const mid = (lo + hi) / 2; if (edge(mid) < target) lo = mid; else hi = mid; }
-  return (lo + hi) / 2;
-}
-
 // Diferença de escanteios (mandante − visitante) esperada no jogo de hoje com o favoritismo do mercado.
 export const cornerDiff = (rel, dc, sup) => (rel?.useful ? rel.coef[0] + rel.coef[1] * dc + rel.coef[2] * sup : null);
+
+// Base pronta para a análise: cada jogo com a superioridade pré-jogo (m.sup, do mandante) e a calibração
+// da base. Guardado na memória por base (o cálculo leva ~0,5 s por liga).
+const memo = new Map();
+export function favorFor(matches) {
+  const key = `${matches.length}:${matches.reduce((s, m) => Math.max(s, m.t), 0)}:${matches[0]?.id}`;
+  if (memo.has(key)) return memo.get(key);
+  const pre = preMatch(matches), cal = calibrate(matches, pre);
+  const out = { matches: matches.map(m => (pre.has(m.id) ? { ...m, sup: pre.get(m.id).sup } : m)),
+    cal: { n: cal.n, corners: cal.corners, corners1h: cal.corners1h } };
+  if (memo.size > 40) memo.delete(memo.keys().next().value);
+  memo.set(key, out);
+  return out;
+}
