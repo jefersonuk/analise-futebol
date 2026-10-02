@@ -157,3 +157,4 @@ table.scanrank th:nth-last-child(-n+2) { text-align: left; }
   font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
 #toast.err { border-color: var(--warn); }
 #toast a { color: var(--blue); }
+.histbox .rule { color: var(--text); font-weight: 600; }

@@ -5,7 +5,7 @@
 import { politicaE } from './model.js';
 import { renderDashboard } from './dashboard.js';
 import { isUnder, rankScore, rankTier } from './consistency.js';
-import { lineHistory, modelEntry, side } from './dossier.js';
+import { lineHistory, modelEntry, side, teamNames } from './dossier.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pct = x => `${(x * 100).toFixed(1).replace('.', ',')}%`;
@@ -21,15 +21,34 @@ const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase
   .replace(/([-+]?\d+(?:\.\d+)?)\s*[,/]\s*([-+]?\d+(?:\.\d+)?)/g, (m, a, b) => (Math.abs(a - b) === 0.5 ? String((+a + +b) / 2) : m));
 const NUM = '([-+]?\\d+(?:\\.\\d+)?)';
 
-export function parseLine(text) {
-  const s = norm(text);
+// Palavras que dizem ao leitor o mercado de uma linha do app (o rótulo sozinho, "Mais de 4,5", serve a
+// vários mercados). Vão no fim do texto: as regras de resultado olham o começo.
+const MARKET_HINT = {
+  '1X2': '', 'Handicap asiático': 'handicap', 'Total de gols': 'gols', 'Ambas marcam': 'ambas marcam',
+  'Total de escanteios': 'escanteios', 'Escanteios por time': 'escanteios', 'Handicap de escanteios': 'handicap escanteios',
+  'Resultado escanteios': 'escanteios', 'Corrida de escanteios': 'escanteios', 'Total de chutes': 'chutes',
+  'Total de chutes no gol': 'chutes no gol', 'Total escanteios 1T': 'escanteios 1o tempo',
+  'Handicap escanteios 1T': 'handicap escanteios 1o tempo', 'Resultado escanteios 1T': 'escanteios 1o tempo',
+};
+const SIDE = '(casa|fora|mandante|visitante)';
+const sideOf = w => (['casa', 'mandante', '1'].includes(w) ? 'H' : 'A');
+
+// names: { home, away } do jogo — "CRB −2,5" vira "fora −2,5" quando o CRB é o visitante.
+// market: o mercado da linha, quando se sabe (linha vinda do app: rótulo + mercado).
+export function parseLine(text, { names = null, market = null } = {}) {
+  let s = norm(text);
+  if (names?.home && names?.away) {
+    const [h, a] = [norm(names.home), norm(names.away)];
+    for (const [n, w] of [[h, 'casa'], [a, 'fora']].sort((x, y) => y[0].length - x[0].length)) if (n) s = s.split(n).join(w);
+  }
+  if (market && MARKET_HINT[market] != null) s = `${s} ${MARKET_HINT[market]}`.trim();
   if (!s) return { error: 'Digite a linha.' };
   if (/\b2o? ?(periodo|tempo)\b|segundo tempo|\b2t\b|2nd half/.test(s)) return { error: 'O modelo não calcula linhas do 2º tempo.' };
   const half = /\b1o? ?(periodo|tempo)\b|primeiro tempo|\b1t\b|1st half|first half|\bht\b/.test(s);
   const metric = /escanteio|corner|canto/.test(s) ? 'corners' : /chutes? (no gol|no alvo|a gol)|on target/.test(s) ? 'sot'
     : /chute|finaliza|shots/.test(s) ? 'shots' : 'goals';
-  const teamM = s.match(/\b([12])o? (?:o )?time\b|\btime ([12])\b|\bteam ([12])\b/);
-  const team = teamM && ((teamM[1] || teamM[2] || teamM[3]) === '1' ? 'H' : 'A');
+  const teamM = s.match(/\b([12])o? (?:o )?time\b|\btime ([12])\b|\bteam ([12])\b/) || s.match(new RegExp(`^${SIDE}\\s*:`));
+  const team = teamM && sideOf(teamM[1] || teamM[2] || teamM[3]);
   const fmt = x => String(+x);
   let m;
 
@@ -38,17 +57,17 @@ export function parseLine(text) {
     if (metric !== 'corners' || half) return { error: 'Corrida só existe para escanteios do jogo inteiro.' };
     return { id: `crN${m[1]}` };
   }
-  if ((m = s.match(/\b([12])o? (?:o time )?primeiro\D*(\d+)/))) {
+  if ((m = s.match(/\b([12])o? (?:o time )?primeiro\D*(\d+)/)) || (m = s.match(new RegExp(`^${SIDE} chega a (\\d+)`)))) {
     if (metric !== 'corners' || half) return { error: 'Corrida só existe para escanteios do jogo inteiro.' };
-    return { id: `cr${m[1] === '1' ? 'H' : 'A'}${m[2]}` };
+    return { id: `cr${sideOf(m[1])}${m[2]}` };
   }
   if ((m = s.match(/empate anula|draw no bet|\bdnb\b/)) && (m = s.match(/\b([12])\b/)) && metric === 'goals')
     return { id: `ah${m[1] === '1' ? 'H' : 'A'}0` };
 
   const hcp = s.match(new RegExp(`\\b(?:a?h|handicap|hcp)\\s*([12])\\s*\\(?\\s*${NUM}`))
-    || s.match(new RegExp(`\\b(casa|fora|mandante|visitante)\\s*\\(?\\s*([-+]\\d+(?:\\.\\d+)?|0)`));
+    || s.match(new RegExp(`\\b${SIDE}\\s*\\(?\\s*([-+]\\d+(?:\\.\\d+)?|0)(?![\\d.])`));
   if (hcp) {
-    const S = ['1', 'casa', 'mandante'].includes(hcp[1]) ? 'H' : 'A', h = fmt(hcp[2]);
+    const S = sideOf(hcp[1]), h = fmt(hcp[2]);
     if (metric === 'corners') return { id: half ? `c1h${S}${h}` : `ch${S}${h}` };
     if (metric === 'goals' && !half) return { id: `ah${S}${h}` };
     return { error: 'Handicap só para gols (jogo inteiro) e escanteios (jogo e 1º tempo).' };
@@ -67,8 +86,8 @@ export function parseLine(text) {
   }
 
   const res = s.match(/^([12x])(?:\s|$|-)/) || s.match(/\b(?:vitoria|vence)\s*(?:do )?([12])\b/)
-    || (/^empate\b/.test(s) && [null, 'x']) || (/^casa vence|^mandante vence/.test(s) && [null, '1'])
-    || (/^fora vence|^visitante vence/.test(s) && [null, '2']);
+    || (/^empate\b/.test(s) && [null, 'x'])
+    || ((m = s.match(new RegExp(`^${SIDE} (?:vence|com mais)\\b`))) && [null, sideOf(m[1]) === 'H' ? '1' : '2']);
   if (res) {
     const R = res[1].toUpperCase();
     if (metric === 'corners') return { id: half ? `c1x${R}` : `cx${R}` };
@@ -89,7 +108,7 @@ export function makePricer({ dossier, result, teams, banca }) {
     if (known.has(id)) return known.get(id);
     if (!cache.has(id)) {
       const l = all.get(id);
-      cache.set(id, l ? modelEntry(l, { res: result, hi: lineHistory(id, teams), banca }) : null);
+      cache.set(id, l ? modelEntry(l, { res: result, hi: lineHistory(id, teams), banca, names: teamNames(teams) }) : null);
     }
     return cache.get(id);
   };

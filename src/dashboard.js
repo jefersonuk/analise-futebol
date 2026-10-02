@@ -47,7 +47,7 @@ function spec(id, role, teamName) {
   if ((m = id.match(/^ch([HA])(.+)$/))) return hcp('corners', 'escanteios', m[1], +m[2]);
   if ((m = id.match(/^(cx|c1x)([12X])$/))) {
     const [key, what] = m[1] === 'cx' ? ['corners', 'escanteios'] : ['c1', 'escanteios no 1º tempo'];
-    if (m[2] === 'X') return { what: `saldo de ${what} do ${teamName}`, value: saldo(key), calc: diffCalc(key), x: v => -Math.abs(v), off: 0.5, threshold: 0 };
+    if (m[2] === 'X') return { what: `saldo de ${what} do ${teamName}`, value: saldo(key), calc: diffCalc(key), x: v => -Math.abs(v), off: 0.5, threshold: 0, rule: 'só com saldo 0 (empate)' };
     return hcp(key, what, m[2] === '1' ? 'H' : 'A', -0.5);
   }
   // corrida a N escanteios: "ninguém" pelo time que mais teve; "chega primeiro" só nos jogos em que
@@ -77,7 +77,7 @@ function spec(id, role, teamName) {
   if ((m = id.match(/^ah([HA])(.+)$/))) return ah(m[1], +m[2]);
   if (id === '1') return ah('H', -0.5);
   if (id === '2') return ah('A', -0.5);
-  if (id === 'X') return { what: `saldo de gols do ${teamName}`, value: gd, calc: diffCalc('goals'), x: v => -Math.abs(v), off: 0.5, threshold: 0 };
+  if (id === 'X') return { what: `saldo de gols do ${teamName}`, value: gd, calc: diffCalc('goals'), x: v => -Math.abs(v), off: 0.5, threshold: 0, rule: 'só com saldo 0 (empate)' };
   if (id === 'bttsY' || id === 'bttsN') {
     const yes = id === 'bttsY';
     return { what: 'gols do lado que menos marcou', value: g => Math.min(g.gf, g.ga), x: v => (yes ? v : -v), off: yes ? -0.5 : 0.5, threshold: 0.5 };
@@ -96,7 +96,11 @@ export function history(id, role, teamName, games) {
     return { v, res, g };
   }).filter(Boolean);
   const wins = bars.reduce((n, b) => n + (b.res === 'win' ? 1 : b.res === 'hw' ? 0.5 : 0), 0);
-  return { what: s.what, threshold: s.threshold, bars, wins, calc: s.calc || null };
+  // Direção da aposta para ESTE time: a barra precisa ficar acima ou abaixo do limite (a aposta pode ser
+  // contra o time do gráfico: "CRB −2,5" no gráfico do São Bernardo vence com saldo abaixo de −2,5).
+  const up = s.x(1) > s.x(0), lim = up ? -s.off : s.off;
+  const rule = s.rule || `${up ? 'acima' : 'abaixo'} de ${numBR(lim)}`;
+  return { what: s.what, threshold: s.threshold, bars, wins, calc: s.calc || null, rule };
 }
 
 const n1 = x => x.toFixed(1).replace('.', ',');
@@ -114,7 +118,7 @@ function tipHtml(b, h, teamName) {
   const calc = h.calc ? h.calc(g) : '';
   return `<div class="tip-head">${d}${g.league ? ` · ${esc(g.league)}` : ''} · ${esc(teamName)} ${g.home ? 'em casa' : 'fora'}</div>
     <div class="tip-score">${esc(home)} <b>${hg}–${ag}</b> ${esc(away)}</div>
-    <div class="tip-metric ${RES[b.res].cls}"><span>${esc(h.what)}: ${calc ? `${esc(calc)} = ` : ''}<b>${b.v}</b> (linha ${numBR(h.threshold)})</span>
+    <div class="tip-metric ${RES[b.res].cls}"><span>${esc(h.what)}: ${calc ? `${esc(calc)} = ` : ''}<b>${b.v}</b> · a aposta vence ${esc(h.rule)}</span>
       <span>→ ${RES[b.res].label}</span></div>
     <table><tr><th></th><th>${esc(home)}</th><th>${esc(away)}</th></tr>
       ${row('Escanteios', ord(g.corners))}${row('1º tempo', ord(g.c1))}${row('Chutes', ord(g.shots))}${row('No gol', ord(g.sot))}
@@ -232,14 +236,14 @@ export function renderDashboard(lines, teams) {
   if (!lines.length) return '<p class="muted">Nenhuma linha passou nos filtros para este jogo.</p>';
   const legend = `<div class="legend"><span><i class="good"></i>venceria</span><span><i class="push"></i>devolveria</span>
     <span><i class="critical"></i>perderia</span><span><i class="mean"></i>média dos 10 jogos</span>
-    <span class="muted">C/F = casa/fora · passe o mouse (ou toque) numa barra para ver o jogo</span></div>`;
+    <span class="muted">C/F embaixo da barra = onde o time jogou naquele jogo passado (não é o lado da aposta) · passe o mouse (ou toque) numa barra para ver o jogo</span></div>`;
   return legend + lines.map(l => {
     const charts = teams.map(t => {
       const h = history(l.id, t.role, t.name, t.games);
       if (!h || !h.bars.length) return `<div class="histbox"><b>${esc(t.name)}</b><p class="muted">sem dados para esta linha</p></div>`;
       return `<div class="histbox"><div class="histhead"><b>${esc(t.name)}</b>
         <span>${numBR(h.wins)}/${h.bars.length} ${h.bars.length > 1 ? 'venceriam' : 'venceria'}</span></div>
-        <small class="muted">${esc(h.what)} · média ${n1(h.bars.reduce((t, b) => t + b.v, 0) / h.bars.length)}</small>${chart(h, t.name)}</div>`;
+        <small class="muted">${esc(h.what)} · <b class="rule">a aposta vence ${esc(h.rule)}</b> · média ${n1(h.bars.reduce((t, b) => t + b.v, 0) / h.bars.length)}</small>${chart(h, t.name)}</div>`;
     }).join('');
     const tierCls = l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no';
     return `<article class="dash">

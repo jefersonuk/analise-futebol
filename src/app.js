@@ -1,5 +1,5 @@
 import * as api from './api.js';
-import { METRICS, analyzeMatch, ev, fairOdd, politicaE } from './model.js';
+import { METRICS, analyzeMatch, ev, fairOdd, politicaE, sideLabel } from './model.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { initEntry } from './entryview.js';
@@ -17,6 +17,8 @@ const num = (x, d = 2) => x.toFixed(d).replace('.', ',');
 const date = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 const hour = t => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const BANCA = 44000;
+// Rótulo da linha com o nome dos times do jogo aberto ("CRB −2,5", não "Fora −2,5").
+const named = label => sideLabel(label, state.fixture?.home.name, state.fixture?.away.name);
 
 const state = { teams: [], fixtures: [], fixture: null, result: null, matches: [], dossier: null, oddsP: null, focus: true,
   odds: new Map(), books: new Map(), pinn: new Map(), market: 'Todos', price: null, my: null };
@@ -311,7 +313,7 @@ function renderLines() {
   $('#lines').innerHTML = `<tr><th>Mercado</th><th>Linha</th><th>Modelo</th><th>Faixa</th><th>Odd justa</th>
     <th>Pinnacle</th><th>Odd da casa</th><th>Casa</th><th>EV</th><th>EV pior caso</th><th></th></tr>` + rows.map(l => {
     const ps = l.sc.map(s => s.pWin);
-    return `<tr data-id="${l.id}"><td>${l.market}</td><td>${l.label}</td><td>${pct(l.pWin)}</td>
+    return `<tr data-id="${l.id}"><td>${l.market}</td><td>${esc(named(l.label))}</td><td>${pct(l.pWin)}</td>
       <td class="muted">${pct(Math.min(...ps))}–${pct(Math.max(...ps))}</td><td>${num(fairOdd(l))}</td>
       <td>${pinnCell(l)}</td>
       <td><input type="number" step="0.01" min="1.01" inputmode="decimal" value="${state.odds.get(l.id) || ''}"></td>
@@ -369,7 +371,7 @@ function fillMyLines(selected) {
   const market = $('#myMarket').value, all = state.result.all || state.result.lines;
   const rows = all.filter(l => l.market === market && (l.id === selected || (cond(l) > 0.05 && cond(l) < 0.95)))
     .sort((a, b) => side(a.id).localeCompare(side(b.id)) || thr(a.id) - thr(b.id));
-  $('#myLine').innerHTML = rows.map(l => `<option value="${esc(l.id)}">${esc(l.label)} · acerta ${pct(cond(l))}</option>`).join('');
+  $('#myLine').innerHTML = rows.map(l => `<option value="${esc(l.id)}">${esc(named(l.label))} · acerta ${pct(cond(l))}</option>`).join('');
   if (selected) $('#myLine').value = selected;
 }
 function selectMy(id) {
@@ -388,7 +390,7 @@ function myMsg(text, err = false) {
 $('#myText').oninput = () => {
   const text = $('#myText').value.trim();
   if (!text || !state.price) return myMsg('');
-  const p = parseLine(text);
+  const p = parseLine(text, { names: { home: state.fixture.home.name, away: state.fixture.away.name } });
   if (p.error) return myMsg(p.error, true);
   if (!state.price(p.id)) {
     const near = nearest(state.price, p.id);
@@ -437,7 +439,7 @@ function renderRank() {
     .map(l => ({ l, odd: state.odds.get(l.id), e: ev(l, state.odds.get(l.id)) }))
     .sort((a, b) => b.e.mid - a.e.mid);
   if (!rows.length) { $('#rank').innerHTML = '<span class="muted">Nenhuma odd informada ainda.</span>'; return; }
-  $('#rank').innerHTML = '<div class="scroll"><table>' + rows.map(({ l, odd, e }) => `<tr><td>${l.market}</td><td>${l.label}</td>
+  $('#rank').innerHTML = '<div class="scroll"><table>' + rows.map(({ l, odd, e }) => `<tr><td>${l.market}</td><td>${esc(named(l.label))}</td>
     <td>@ ${num(odd)}</td><td class="book">${esc(state.books.get(l.id) || '')}</td>
     <td class="muted">justa ${num(fairOdd(l))}</td>
     <td class="muted">${state.pinn.has(l.id) ? `Pinnacle ${pct(state.pinn.get(l.id))}` : ''}</td>

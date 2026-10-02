@@ -104,3 +104,18 @@ test('caso real: Corinthians 0–1 Santos (30/08/2026), escanteios 8–1, 1º te
   assert.equal(h1.calc(g), 'Santos 1 − 2 Corinthians');
   assert.equal(h1.bars[0].res, 'lose');   // Fora +0,5 com saldo −1: −1 + 0,5 = −0,5 → perde
 });
+
+test('caso real: São Bernardo x CRB, aposta CRB −2,5 — regra do lado certo em cada gráfico', () => {
+  // América-MG 0–2 São Bernardo (14/09/2026), visto pelo São Bernardo (mandante do jogo de hoje)
+  const sb = { t: Date.parse('2026-09-14T22:00:00Z'), home: false, opp: 'America Mineiro', gf: 2, ga: 0 };
+  const hSB = history('ahA-2.5', 'home', 'São Bernardo', [sb]);
+  assert.equal(hSB.rule, 'abaixo de -2,5');   // a aposta no CRB −2,5 só vence se o São Bernardo perder por 3+
+  assert.equal(hSB.bars[0].v, 2);
+  assert.equal(hSB.bars[0].res, 'lose');
+  // CRB 3–0 Cuiabá (27/09/2026), visto pelo CRB (visitante do jogo de hoje)
+  const crb = { t: Date.parse('2026-09-27T22:00:00Z'), home: true, opp: 'Cuiaba', gf: 3, ga: 0 };
+  const hCRB = history('ahA-2.5', 'away', 'CRB', [crb]);
+  assert.equal(hCRB.rule, 'acima de 2,5');
+  assert.equal(hCRB.bars[0].res, 'win');
+  assert.equal(history('X', 'home', 'São Bernardo', [sb]).rule, 'só com saldo 0 (empate)');
+});

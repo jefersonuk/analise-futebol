@@ -92,3 +92,36 @@ test('minha linha: preço, veredito e alternativas no jogo da demo', async () =>
   assert.equal(price('gO9.5'), null);
   assert.match(nearest(price, 'gO9.5'), /^gO/);
 });
+
+import { sideLabel } from '../src/model.js';
+
+test('ida e volta: todo rótulo do app, com o nome dos times, volta para a mesma linha', async () => {
+  const season = new Date().getUTCFullYear();
+  const matches = demo.leagueMatches(1, season).concat(demo.leagueMatches(1, season - 1));
+  const fx = demo.upcoming(demo.searchTeams('')[0].id)[0];
+  const { collect } = await import('../src/odds.js');
+  const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t, { fair: collect(demo.fixtureOdds(fx.id).bookmakers).fair });
+  const names = { home: fx.home.name, away: fx.away.name };
+  const erros = [];
+  for (const l of res.all) {
+    for (const label of [l.label, sideLabel(l.label, names.home, names.away)]) {
+      const p = parseLine(label, { market: l.market, names });
+      if (p.id !== l.id) erros.push(`${l.market} | ${label} -> ${p.id || p.error} (esperado ${l.id})`);
+    }
+  }
+  assert.deepEqual(erros.slice(0, 10), []);
+  assert.ok(res.all.length > 300);
+});
+
+test('linha com nome de time: o visitante do jogo de hoje, não o mando de um jogo passado', () => {
+  const names = { home: 'São Bernardo', away: 'CRB' };
+  assert.equal(parseLine('CRB −2,5', { names }).id, 'ahA-2.5');
+  assert.equal(parseLine('São Bernardo +0,5 escanteios 1º tempo', { names }).id, 'c1hH0.5');
+  assert.equal(parseLine('São Bernardo: Mais de 4,5', { names, market: 'Escanteios por time' }).id, 'cHO4.5');
+  assert.equal(parseLine('Casa: Mais de 4,5', { market: 'Escanteios por time' }).id, 'cHO4.5');   // antes virava total do jogo
+  assert.equal(parseLine('CRB com mais escanteios', { names }).id, 'cx2');
+  assert.equal(parseLine('CRB chega a 5 primeiro', { names, market: 'Corrida de escanteios' }).id, 'crA5');
+  assert.equal(sideLabel('Fora −2,5', 'São Bernardo', 'CRB'), 'CRB −2,5');
+  assert.equal(sideLabel('Casa: Mais de 4,5', 'São Bernardo', 'CRB'), 'São Bernardo: Mais de 4,5');
+  assert.equal(sideLabel('Empate', 'São Bernardo', 'CRB'), 'Empate');
+});

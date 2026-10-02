@@ -57,6 +57,10 @@ export function settle(entries, line) {
 }
 
 const fmt = x => (x > 0 ? '+' : x < 0 ? '−' : '') + String(Math.abs(x)).replace('.', ',');
+// Rótulo com o nome dos times no lugar de "Casa"/"Fora": o lado da aposta é o mandante/visitante DESTE
+// jogo, e a palavra "fora" também aparece nos jogos passados com outro sentido (onde o time jogou).
+export const sideLabel = (label, home, away) => (home && away
+  ? label.replace(/^Casa\b/, () => home).replace(/^Fora\b/, () => away) : label);
 const num = x => String(x).replace('.', ',');
 const neg = entries => entries.map(([v, p]) => [-v, p]);
 const pmfEntries = pmf => pmf.map((p, k) => [k, p]);

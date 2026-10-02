@@ -4,7 +4,7 @@
 //
 // api: searchTeams, upcoming, leaguesOf, leagueMatches, fixtureOdds, injuries, standings, lastPlayed, quota
 
-import { DERIVED, METRICS, analyzeMatch, ev, fairOdd, impliedTotal, politicaE } from './model.js';
+import { DERIVED, METRICS, analyzeMatch, ev, fairOdd, impliedTotal, politicaE, sideLabel } from './model.js';
 import { rank } from './ratings.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
@@ -174,11 +174,11 @@ export function stakeFor(p, odd, banca) {
 // Linha sem odd da Pinnacle, precificada pelo modelo: ancorada no total da Pinnacle quando o mercado
 // deriva de um total que ela cota (odd mínima = justa × 1,05), senão modelo puro (× 1,08). Sempre frágil.
 // hi: histórico dos dois times na linha ({ home, away }, formato de hist() do dossiê).
-export function modelEntry(l, { res, hi, banca }) {
+export function modelEntry(l, { res, hi, banca, names = {} }) {
   const pm = cond(l), range = l.sc.map(cond), anchor = res.anchors[DERIVED[l.market]];
   const oddMin = (1 / pm) * (anchor ? 1.05 : 1.08);
   const c = consistency({ p: pm, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
-  return { id: l.id, market: l.market, line: l.label, p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
+  return { id: l.id, market: l.market, line: sideLabel(l.label, names.home, names.away), p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
     fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0,
     priced_by: anchor ? `modelo ancorado no total ${DERIVED[l.market] === 'corners1h' ? '1T ' : ''}de escanteios da Pinnacle`
       : 'só o modelo (sem odd da Pinnacle nesta linha)',
@@ -187,6 +187,9 @@ export function modelEntry(l, { res, hi, banca }) {
     fair_odd_blend: r(1 / pm, 2), fragile: true, odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null,
     ...stakeFor(pm, oddMin, banca), history: hi };
 }
+
+// Nome do mandante e do visitante a partir de teams [{ role, name }].
+export const teamNames = teams => ({ home: teams.find(t => t.role === 'home')?.name, away: teams.find(t => t.role === 'away')?.name });
 
 // Histórico dos dois times numa linha (últimos jogos de cada um, do mais recente ao mais antigo).
 export function lineHistory(id, teams) {
@@ -203,6 +206,7 @@ export function lineHistory(id, teams) {
 // e pela varredura do dia. teams: [{ role, name, games }]; only: filtro opcional de linhas.
 export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000, only = null }) {
   const hist = l => lineHistory(l.id, teams);
+  const names = teamNames(teams);
   const g1x2 = ['1', 'X', '2'];
   const x12 = g1x2.every(id => fair.has(id)) ? (() => {
     const lines = g1x2.map(id => res.lines.find(l => l.id === id));
@@ -217,7 +221,7 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
     if (only && !only(l)) continue;
     const pm = cond(l), range = l.sc.map(cond), odd = odds.get(l.id), pp = fair.get(l.id);
     const soft = /escanteios|chutes/i.test(l.market);
-    const base = { id: l.id, market: l.market, line: l.label, p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
+    const base = { id: l.id, market: l.market, line: sideLabel(l.label, names.home, names.away), p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
       fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0 };
     const hi = hist(l), cons = p => consistency({ p, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
     if (odd && pp != null) {
@@ -233,7 +237,7 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
       // Sem preço na API para esta linha: mercado de escanteios derivado (handicap, quem tem mais, corrida)
       // com o total ancorado na Pinnacle (margem 5%), ou, quando a Pinnacle ainda não publicou nada para o
       // jogo, o modelo puro (margem 8%). Sempre frágil.
-      anchored.push(modelEntry(l, { res, hi, banca }));
+      anchored.push(modelEntry(l, { res, hi, banca, names }));
     } else if (pm >= 0.35 && soft && odds.size) {
       const c = cons(pm);
       if (c.tier !== 'especulativa' || pm <= 0.65)
