@@ -17,27 +17,37 @@ function spec(id, role, teamName) {
   let m;
   const total = key => g => (g[key] ? g[key][0] + g[key][1] : null);
   const ou = (side, L) => ({ threshold: L, x: v => (side === 'O' ? v : -v), off: side === 'O' ? -L : L });
-  if ((m = id.match(/^g([OU])(.+)$/))) return { what: 'gols no jogo', value: g => g.gf + g.ga, ...ou(m[1], +m[2]) };
+  // A conta da barra, com nome de time, para o quadro do jogo: total na ordem do placar (mandante + visitante);
+  // saldo do ponto de vista do time do gráfico (time − adversário). Os pares guardados são a favor–contra.
+  const pairOf = key => g => (key === 'goals' ? [g.gf, g.ga] : g[key]);
+  const sumCalc = key => g => {
+    const p = pairOf(key)(g);
+    if (!p) return '';
+    const [a, b] = g.home ? p : [p[1], p[0]], [na, nb] = g.home ? [teamName, g.opp] : [g.opp, teamName];
+    return `${na} ${a} + ${b} ${nb}`;
+  };
+  const diffCalc = key => g => { const p = pairOf(key)(g); return p ? `${teamName} ${p[0]} − ${p[1]} ${g.opp}` : ''; };
+  if ((m = id.match(/^g([OU])(.+)$/))) return { what: 'gols no jogo', value: g => g.gf + g.ga, calc: sumCalc('goals'), ...ou(m[1], +m[2]) };
   if ((m = id.match(/^(corners|shots|sot)([OU])(.+)$/))) {
     const what = { corners: 'escanteios no jogo', shots: 'chutes no jogo', sot: 'chutes no gol no jogo' }[m[1]];
-    return { what, value: total(m[1]), ...ou(m[2], +m[3]) };
+    return { what, value: total(m[1]), calc: sumCalc(m[1]), ...ou(m[2], +m[3]) };
   }
   if ((m = id.match(/^c1h([HA])(.+)$/))) {
     const same = (m[1] === 'H') === (role === 'home'), h = +m[2];
-    return { what: `saldo de escanteios no 1º tempo do ${teamName}`, value: g => (g.c1 ? g.c1[0] - g.c1[1] : null),
+    return { what: `saldo de escanteios no 1º tempo do ${teamName}`, value: g => (g.c1 ? g.c1[0] - g.c1[1] : null), calc: diffCalc('c1'),
       x: v => (same ? v : -v), off: h, threshold: same ? -h : h };
   }
-  if ((m = id.match(/^c1([OU])(.+)$/))) return { what: 'escanteios no 1º tempo', value: total('c1'), ...ou(m[1], +m[2]) };
+  if ((m = id.match(/^c1([OU])(.+)$/))) return { what: 'escanteios no 1º tempo', value: total('c1'), calc: sumCalc('c1'), ...ou(m[1], +m[2]) };
   // handicap / quem tem mais escanteios (jogo: ch, cx; 1º tempo: c1x), pelo saldo do time
   const saldo = (key, what) => g => (g[key] ? g[key][0] - g[key][1] : null);
   const hcp = (key, what, s, h) => {
     const same = (s === 'H') === (role === 'home');
-    return { what: `saldo de ${what} do ${teamName}`, value: saldo(key), x: v => (same ? v : -v), off: h, threshold: same ? -h : h };
+    return { what: `saldo de ${what} do ${teamName}`, value: saldo(key), calc: diffCalc(key), x: v => (same ? v : -v), off: h, threshold: same ? -h : h };
   };
   if ((m = id.match(/^ch([HA])(.+)$/))) return hcp('corners', 'escanteios', m[1], +m[2]);
   if ((m = id.match(/^(cx|c1x)([12X])$/))) {
     const [key, what] = m[1] === 'cx' ? ['corners', 'escanteios'] : ['c1', 'escanteios no 1º tempo'];
-    if (m[2] === 'X') return { what: `saldo de ${what} do ${teamName}`, value: saldo(key), x: v => -Math.abs(v), off: 0.5, threshold: 0 };
+    if (m[2] === 'X') return { what: `saldo de ${what} do ${teamName}`, value: saldo(key), calc: diffCalc(key), x: v => -Math.abs(v), off: 0.5, threshold: 0 };
     return hcp(key, what, m[2] === '1' ? 'H' : 'A', -0.5);
   }
   // corrida a N escanteios: "ninguém" pelo time que mais teve; "chega primeiro" só nos jogos em que
@@ -62,12 +72,12 @@ function spec(id, role, teamName) {
   const gd = g => g.gf - g.ga;
   const ah = (side, h) => {
     const same = (side === 'H') === (role === 'home');   // aposta a favor deste time?
-    return { what: `saldo de gols do ${teamName}`, value: gd, x: v => (same ? v : -v), off: h, threshold: same ? -h : h };
+    return { what: `saldo de gols do ${teamName}`, value: gd, calc: diffCalc('goals'), x: v => (same ? v : -v), off: h, threshold: same ? -h : h };
   };
   if ((m = id.match(/^ah([HA])(.+)$/))) return ah(m[1], +m[2]);
   if (id === '1') return ah('H', -0.5);
   if (id === '2') return ah('A', -0.5);
-  if (id === 'X') return { what: `saldo de gols do ${teamName}`, value: gd, x: v => -Math.abs(v), off: 0.5, threshold: 0 };
+  if (id === 'X') return { what: `saldo de gols do ${teamName}`, value: gd, calc: diffCalc('goals'), x: v => -Math.abs(v), off: 0.5, threshold: 0 };
   if (id === 'bttsY' || id === 'bttsN') {
     const yes = id === 'bttsY';
     return { what: 'gols do lado que menos marcou', value: g => Math.min(g.gf, g.ga), x: v => (yes ? v : -v), off: yes ? -0.5 : 0.5, threshold: 0.5 };
@@ -86,7 +96,7 @@ export function history(id, role, teamName, games) {
     return { v, res, g };
   }).filter(Boolean);
   const wins = bars.reduce((n, b) => n + (b.res === 'win' ? 1 : b.res === 'hw' ? 0.5 : 0), 0);
-  return { what: s.what, threshold: s.threshold, bars, wins };
+  return { what: s.what, threshold: s.threshold, bars, wins, calc: s.calc || null };
 }
 
 const n1 = x => x.toFixed(1).replace('.', ',');
@@ -96,18 +106,20 @@ const pair = p => (p ? `${p[0]}–${p[1]}` : '—');
 // a métrica do gráfico e o resultado que a aposta teria.
 function tipHtml(b, h, teamName) {
   const g = b.g, d = new Date(g.t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const score = g.home ? `${esc(teamName)} <b>${g.gf}–${g.ga}</b> ${esc(g.opp)}` : `${esc(g.opp)} <b>${g.ga}–${g.gf}</b> ${esc(teamName)}`;
-  const rows = [
-    ['Escanteios', g.corners ? `${pair(g.corners)}${g.c1 ? ` · 1º tempo ${pair(g.c1)}` : ''}` : '—'],
-    ['Chutes', g.shots ? `${pair(g.shots)} · no gol ${pair(g.sot)}` : '—'],
-    ['xG-proxy', g.xf != null ? `${n1(g.xf)}–${n1(g.xa)}` : '—'],
-  ];
-  return `<div class="tip-head">${d}${g.league ? ` · ${esc(g.league)}` : ''} · ${g.home ? 'em casa' : 'fora'}</div>
-    <div class="tip-score">${score}</div>
-    <div class="tip-metric ${RES[b.res].cls}"><span>${esc(h.what)}: <b>${b.v}</b> (linha ${numBR(h.threshold)})</span>
+  // tudo na ordem do placar (mandante, visitante); os pares guardados são a favor–contra do time do gráfico
+  const [home, away] = g.home ? [teamName, g.opp] : [g.opp, teamName];
+  const ord = p => (p ? (g.home ? p : [p[1], p[0]]) : null);
+  const [hg, ag] = ord([g.gf, g.ga]);
+  const row = (k, p, f = x => x) => `<tr><td>${k}</td>${p ? `<td>${f(p[0])}</td><td>${f(p[1])}</td>` : '<td colspan="2">—</td>'}</tr>`;
+  const calc = h.calc ? h.calc(g) : '';
+  return `<div class="tip-head">${d}${g.league ? ` · ${esc(g.league)}` : ''} · ${esc(teamName)} ${g.home ? 'em casa' : 'fora'}</div>
+    <div class="tip-score">${esc(home)} <b>${hg}–${ag}</b> ${esc(away)}</div>
+    <div class="tip-metric ${RES[b.res].cls}"><span>${esc(h.what)}: ${calc ? `${esc(calc)} = ` : ''}<b>${b.v}</b> (linha ${numBR(h.threshold)})</span>
       <span>→ ${RES[b.res].label}</span></div>
-    <table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>
-    <div class="tip-note">valores do ponto de vista de ${esc(teamName)} (a favor–contra)</div>`;
+    <table><tr><th></th><th>${esc(home)}</th><th>${esc(away)}</th></tr>
+      ${row('Escanteios', ord(g.corners))}${row('1º tempo', ord(g.c1))}${row('Chutes', ord(g.shots))}${row('No gol', ord(g.sot))}
+      ${row('xG-proxy', g.xf != null ? ord([g.xf, g.xa]) : null, n1)}</table>
+    <div class="tip-note">mandante · visitante, na ordem do placar</div>`;
 }
 
 // Colunas com baseline no zero (saldo pode ser negativo), grade leve, linha da aposta e média.

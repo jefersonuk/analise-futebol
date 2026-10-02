@@ -441,7 +441,7 @@ function renderGames() {
   const { prep } = state.result, fx = state.fixture;
   const pair = p => (p ? `${p[0]}–${p[1]}` : '—');
   const col = team => `<div class="games scroll"><b>${esc(team.name)}</b><table>
-    <tr><th>Data</th><th>Adversário</th><th>Placar</th><th>xG</th><th>Chutes</th><th>Esc.</th></tr>`
+    <tr><th>Data</th><th>Adversário</th><th>Gols pró–contra</th><th>xG pró–contra</th><th>Chutes pró–contra</th><th>Esc. pró–contra</th></tr>`
     + recentGames(prep, team.id).map(g => `<tr><td>${date(g.t)} ${g.home ? 'C' : 'F'}</td><td>${esc(g.opp)}</td>
       <td>${g.gf}–${g.ga}</td><td>${g.xf != null ? `${num(g.xf, 1)}–${num(g.xa, 1)}` : '—'}</td>
       <td>${pair(g.shots)}</td><td>${pair(g.corners)}</td></tr>`).join('') + '</table></div>';

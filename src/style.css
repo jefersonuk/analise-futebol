@@ -77,7 +77,9 @@ svg.hist text.ax.small { font-size: 9px; }
 #chartTip .tip-metric.critical { background: rgba(208,59,59,.2); }
 #chartTip .tip-metric.push { background: rgba(107,119,133,.25); }
 #chartTip table { width: 100%; font-size: 12px; }
-#chartTip td { padding: 2px 0; border: 0; text-align: left; }
+#chartTip td, #chartTip th { padding: 2px 4px; border: 0; text-align: right; }
+#chartTip th { color: var(--muted); font-weight: 500; font-size: 11px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+#chartTip td:first-child, #chartTip th:first-child { text-align: left; padding-left: 0; }
 #chartTip td:first-child { color: var(--muted); width: 78px; }
 #chartTip .tip-note { color: var(--muted); font-size: 11px; margin-top: 4px; }
 svg.hist .base { stroke: var(--grid); stroke-width: 1; }

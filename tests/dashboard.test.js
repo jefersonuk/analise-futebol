@@ -87,3 +87,20 @@ test('preferência por over: under só se for âncora e passa na frente só se f
   // under âncora muito melhor passa na frente
   assert.deepEqual([L('gO2.5', 'sólida', 0.6), L('gU2.5', 'âncora', 0.72)].sort(byConsistency).map(l => l.id), ['gU2.5', 'gO2.5']);
 });
+
+test('caso real: Corinthians 0–1 Santos (30/08/2026), escanteios 8–1, 1º tempo 2–1, visto pelo Santos', () => {
+  // recentGames guarda do ponto de vista do time: a favor–contra
+  const g = { t: Date.parse('2026-08-30T19:00:00Z'), home: false, opp: 'Corinthians', gf: 1, ga: 0, corners: [1, 8], c1: [1, 2], shots: [8, 18], sot: [4, 2] };
+  // São Paulo x Santos, aposta Fora +4,5 escanteios (a favor do Santos, que é o visitante)
+  const h = history('chA4.5', 'away', 'Santos', [g]);
+  assert.equal(h.bars[0].v, -7);
+  assert.equal(h.bars[0].res, 'lose');
+  assert.equal(h.calc(g), 'Santos 1 − 8 Corinthians');
+  // total de escanteios: soma na ordem do placar (mandante primeiro)
+  assert.equal(history('cornersO8.5', 'away', 'Santos', [g]).calc(g), 'Corinthians 8 + 1 Santos');
+  // 1º tempo: saldo do Santos 1 − 2
+  const h1 = history('c1hA0.5', 'away', 'Santos', [g]);
+  assert.equal(h1.bars[0].v, -1);
+  assert.equal(h1.calc(g), 'Santos 1 − 2 Corinthians');
+  assert.equal(h1.bars[0].res, 'lose');   // Fora +0,5 com saldo −1: −1 + 0,5 = −0,5 → perde
+});
