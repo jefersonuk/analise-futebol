@@ -14,6 +14,8 @@ export const SHARE_1H = 0.472;   // fração dos escanteios no 1º tempo (Footiq
 export const CORNERS_PER_GOAL = [0, 3.31];
 export const FAV_EDGE = 0.35;      // superioridade (gols) a partir da qual há favorito; abaixo, jogo equilibrado
 export const CORNER_EDGE = 1;      // diferença de escanteios esperada (jogo) a partir da qual há favorito nos escanteios
+// Papel do time num jogo pela superioridade de gols esperada do ponto de vista dele (≥ 0,35: favorito).
+export const roleOf = sup => (sup == null ? null : sup >= FAV_EDGE ? 'favorito' : sup <= -FAV_EDGE ? 'zebra' : 'equilibrado');
 
 // PMF de contagem com média mu e variância phi*mu (Poisson se phi ~ 1, senão binomial negativa).
 export function dist(mu, phi, max) {

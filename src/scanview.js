@@ -51,7 +51,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       .map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
     const rows = ranked.map(({ g, line }, i) => {
       const h = line.history || {};
-      const hist = [h.home, h.away].map(x => (x && x.n ? `${nb(x.wins)}/${x.n}` : '—')).join(' · ');
+      // contagem simples (o acerto pelo papel de hoje fica na consistência e no gráfico)
+      const hist = [h.home, h.away].map(x => (x && (x.raw?.n ?? x.n) ? (x.hits || `${nb(x.wins)}/${x.n}`) : '—')).join(' · ');
       return `<tr data-go="${i}"><td>${i + 1}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
         <td class="muted">${esc(g.fx.league.name)}</td><td>${esc(line.market.replace('escanteios ', ''))}: <b>${esc(line.line)}</b></td>
         <td><span class="tag ${line.tier === 'âncora' ? 'ok' : line.tier === 'sólida' ? 'mid' : 'no'}">${line.tier}</span></td>

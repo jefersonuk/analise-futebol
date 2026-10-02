@@ -119,3 +119,25 @@ test('caso real: São Bernardo x CRB, aposta CRB −2,5 — regra do lado certo 
   assert.equal(hCRB.bars[0].res, 'win');
   assert.equal(history('X', 'home', 'São Bernardo', [sb]).rule, 'só com saldo 0 (empate)');
 });
+
+import { lineHistory, roleWeight, rolesNow } from '../src/dossier.js';
+
+test('acerto pelo papel: jogos no papel de hoje pesam 1, vizinho 0,6, oposto 0,3', () => {
+  assert.equal(roleWeight('zebra', 'zebra'), 1);
+  assert.equal(roleWeight('zebra', 'equilibrado'), 0.6);
+  assert.equal(roleWeight('zebra', 'favorito'), 0.3);
+  assert.equal(roleWeight(null, 'favorito'), 1);
+  assert.deepEqual(rolesNow({ sup: -1.4 }), { home: 'zebra', away: 'favorito' });
+  assert.deepEqual(rolesNow({ sup: 0.1 }), { home: 'equilibrado', away: 'equilibrado' });
+  // Time que venceu o 1º tempo nos escanteios quando era favorito e perdeu quando era zebra
+  const g = (sup, c1) => ({ t: 0, home: true, opp: 'X', gf: 1, ga: 0, c1, sup });
+  const games = [g(0.8, [4, 1]), g(0.9, [5, 2]), g(0.6, [3, 1]), g(1.1, [4, 0]), g(-0.9, [1, 3]), g(-1.2, [0, 4])];
+  const id = 'c1hH-0.5';   // mandante −0,5 no 1º tempo: vence se ganhar o 1T nos escanteios
+  const asZebra = lineHistory(id, [{ role: 'home', name: 'T', games, roleNow: 'zebra' }]).home;
+  const asFav = lineHistory(id, [{ role: 'home', name: 'T', games, roleNow: 'favorito' }]).home;
+  assert.equal(asZebra.hits, '4/6');                         // contagem simples igual nos dois
+  assert.deepEqual(asZebra.by_role, { favorito: { wins: 4, n: 4 }, zebra: { wins: 0, n: 2 } });
+  assert.ok(Math.abs(asZebra.wins / asZebra.n - 1.2 / 3.2) < 1e-9, 'como zebra: 4×0,3 de 4×0,3+2×1');
+  assert.ok(Math.abs(asFav.wins / asFav.n - 4 / 4.6) < 1e-9, 'como favorito: 4 de 4+2×0,3');
+  assert.equal(asZebra.role_now, 'zebra');
+});

@@ -1,6 +1,6 @@
 // Painel: as 5 linhas de maior EV e como cada time se saiu nelas nos últimos 10 jogos.
 
-import { settle } from './model.js';
+import { roleOf, settle } from './model.js';
 import { isUnder, rankScore, rankTier } from './consistency.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -108,8 +108,13 @@ const pair = p => (p ? `${p[0]}–${p[1]}` : '—');
 
 // Conteúdo do quadro que aparece ao passar o mouse numa barra: o jogo inteiro, com destaque para
 // a métrica do gráfico e o resultado que a aposta teria.
-function tipHtml(b, h, teamName) {
+// Papel do time num jogo passado (superioridade de gols esperada antes do jogo, do ponto de vista dele).
+export const ROLE_MARK = { favorito: '▲', equilibrado: '•', zebra: '▼' };
+const supTxt = s => `${s >= 0 ? '+' : '−'}${Math.abs(s).toFixed(1).replace('.', ',')} gol`;
+
+function tipHtml(b, h, teamName, roleNow) {
   const g = b.g, d = new Date(g.t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const role = roleOf(g.sup);
   // tudo na ordem do placar (mandante, visitante); os pares guardados são a favor–contra do time do gráfico
   const [home, away] = g.home ? [teamName, g.opp] : [g.opp, teamName];
   const ord = p => (p ? (g.home ? p : [p[1], p[0]]) : null);
@@ -118,6 +123,7 @@ function tipHtml(b, h, teamName) {
   const calc = h.calc ? h.calc(g) : '';
   return `<div class="tip-head">${d}${g.league ? ` · ${esc(g.league)}` : ''} · ${esc(teamName)} ${g.home ? 'em casa' : 'fora'}</div>
     <div class="tip-score">${esc(home)} <b>${hg}–${ag}</b> ${esc(away)}</div>
+    ${role ? `<div class="tip-role">${esc(teamName)} era <b>${role}</b> (${supTxt(g.sup)} de superioridade esperada antes do jogo)${roleNow ? (role === roleNow ? ' · mesmo papel de hoje' : ` · hoje: ${roleNow}`) : ''}</div>` : ''}
     <div class="tip-metric ${RES[b.res].cls}"><span>${esc(h.what)}: ${calc ? `${esc(calc)} = ` : ''}<b>${b.v}</b> · a aposta vence ${esc(h.rule)}</span>
       <span>→ ${RES[b.res].label}</span></div>
     <table><tr><th></th><th>${esc(home)}</th><th>${esc(away)}</th></tr>
@@ -127,7 +133,8 @@ function tipHtml(b, h, teamName) {
 }
 
 // Colunas com baseline no zero (saldo pode ser negativo), grade leve, linha da aposta e média.
-function chart(h, teamName) {
+// roleNow: papel do time no jogo de hoje — barras de outro papel ficam apagadas (pesam menos no acerto).
+function chart(h, teamName, roleNow = null) {
   const W = 340, H = 170, top = 16, bottom = 34, left = 24, right = 36;   // esquerda: eixo; direita: rótulo da linha
   const vals = h.bars.map(b => b.v).concat([h.threshold, 0]);
   const lo = Math.min(...vals), hi = Math.max(...vals) + 0.5;
@@ -145,13 +152,13 @@ function chart(h, teamName) {
     const d = hgt < 3 ? `M${x},${y0 - 3}h${bw}v3h${-bw}z`   // valor zero: toco visível sobre a base
       : up ? `M${x},${y0}V${yv + rr}q0,${-rr} ${rr},${-rr}h${bw - 2 * rr}q${rr},0 ${rr},${rr}V${y0}z`
         : `M${x},${y0}V${yv - rr}q0,${rr} ${rr},${rr}h${bw - 2 * rr}q${rr},0 ${rr},${-rr}V${y0}z`;
-    const cx = x + bw / 2;
-    return `<g class="bar" tabindex="0" data-tip="${esc(tipHtml(b, h, teamName))}">
+    const cx = x + bw / 2, role = roleOf(b.g.sup), other = roleNow && role && role !== roleNow;
+    return `<g class="bar${other ? ' other-role' : ''}" tabindex="0" data-tip="${esc(tipHtml(b, h, teamName, roleNow))}">
       <rect x="${left + i * slot}" y="0" width="${slot}" height="${H}" class="hit"/>
       <path d="${d}" class="${RES[b.res].cls}"/>
       <text x="${cx}" y="${up ? yv - 4 : yv + 12}" class="val">${b.v}</text>
       <text x="${cx}" y="${H - 18}" class="ax">${esc(b.g.opp.slice(0, 3).toUpperCase())}</text>
-      <text x="${cx}" y="${H - 6}" class="ax small">${b.g.home ? 'C' : 'F'}</text></g>`;
+      <text x="${cx}" y="${H - 6}" class="ax small">${b.g.home ? 'C' : 'F'}${role ? ROLE_MARK[role] : ''}</text></g>`;
   };
   return `<svg viewBox="0 0 ${W} ${H}" class="hist" role="img" aria-label="${esc(h.what)} nos últimos jogos">
     ${ticks.map(v => `<line x1="${left}" x2="${W - right}" y1="${y(v)}" y2="${y(v)}" class="grid"/>
@@ -231,19 +238,36 @@ export function pickDashboard(dossier, n = 5, { focus = true, side = id => id } 
   return out;
 }
 
-// lines: linhas do dossiê (pickDashboard); teams: [{ name, role, games }]
+// Acerto da linha em cada papel (favorito/equilibrado/zebra), o de hoje primeiro.
+function byRole(h, roleNow) {
+  const by = {};
+  for (const b of h.bars) {
+    const role = roleOf(b.g.sup);
+    if (!role) continue;
+    const x = (by[role] ||= { w: 0, n: 0 });
+    x.n++; x.w += b.res === 'win' ? 1 : b.res === 'hw' ? 0.5 : 0;
+  }
+  const order = ['favorito', 'equilibrado', 'zebra'].sort((a, b) => (b === roleNow) - (a === roleNow));
+  const parts = order.filter(k => by[k]).map(k => `${k === roleNow ? '<b>' : ''}como ${k}${k === roleNow ? ' (como hoje)' : ''}: ${numBR(by[k].w)}/${by[k].n}${k === roleNow ? '</b>' : ''}`);
+  if (roleNow && !by[roleNow]) parts.unshift(`<b>nenhum jogo como ${roleNow} (como hoje)</b>`);
+  return parts.length ? `<small class="byrole">${parts.join(' · ')}</small>` : '';
+}
+
+// lines: linhas do dossiê (pickDashboard); teams: [{ name, role, games, roleNow }]
 export function renderDashboard(lines, teams) {
   if (!lines.length) return '<p class="muted">Nenhuma linha passou nos filtros para este jogo.</p>';
   const legend = `<div class="legend"><span><i class="good"></i>venceria</span><span><i class="push"></i>devolveria</span>
     <span><i class="critical"></i>perderia</span><span><i class="mean"></i>média dos 10 jogos</span>
-    <span class="muted">C/F embaixo da barra = onde o time jogou naquele jogo passado (não é o lado da aposta) · passe o mouse (ou toque) numa barra para ver o jogo</span></div>`;
+    <span class="muted">C/F embaixo da barra = onde o time jogou naquele jogo passado (não é o lado da aposta) · ▲ favorito · • equilibrado · ▼ zebra naquele jogo
+      (superioridade esperada antes do jogo); barras apagadas: papel diferente do de hoje, pesam menos no acerto · passe o mouse (ou toque) numa barra para ver o jogo</span></div>`;
   return legend + lines.map(l => {
     const charts = teams.map(t => {
       const h = history(l.id, t.role, t.name, t.games);
       if (!h || !h.bars.length) return `<div class="histbox"><b>${esc(t.name)}</b><p class="muted">sem dados para esta linha</p></div>`;
-      return `<div class="histbox"><div class="histhead"><b>${esc(t.name)}</b>
+      return `<div class="histbox"><div class="histhead"><b>${esc(t.name)}${t.roleNow ? ` <span class="role-now">${ROLE_MARK[t.roleNow]} ${t.roleNow} hoje</span>` : ''}</b>
         <span>${numBR(h.wins)}/${h.bars.length} ${h.bars.length > 1 ? 'venceriam' : 'venceria'}</span></div>
-        <small class="muted">${esc(h.what)} · <b class="rule">a aposta vence ${esc(h.rule)}</b> · média ${n1(h.bars.reduce((t, b) => t + b.v, 0) / h.bars.length)}</small>${chart(h, t.name)}</div>`;
+        <small class="muted">${esc(h.what)} · <b class="rule">a aposta vence ${esc(h.rule)}</b> · média ${n1(h.bars.reduce((t, b) => t + b.v, 0) / h.bars.length)}</small>
+        ${byRole(h, t.roleNow)}${chart(h, t.name, t.roleNow)}</div>`;
     }).join('');
     const tierCls = l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no';
     return `<article class="dash">

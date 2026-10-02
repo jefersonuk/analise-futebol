@@ -18,6 +18,8 @@ export function recentGames(prep, team, n = 10) {
         xf: s ? prep.xg(m, home) : null, xa: s ? prep.xg(m, !home) : null,
         corners: pick(4), shots: pick(3), sot: pick(2),
         c1: m.c1 ? (home ? [m.c1[0], m.c1[1]] : [m.c1[1], m.c1[0]]) : null,
+        // superioridade de gols esperada antes do jogo, do ponto de vista do time (favoritism.js; null sem dado)
+        sup: m.sup != null ? (home ? m.sup : -m.sup) : null,
       };
     });
 }

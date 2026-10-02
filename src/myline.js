@@ -131,7 +131,8 @@ export function verdict(line, odd) {
   notes.push(`Acerta ${pct(p)} sem contar a devolução${push}. Odd justa ${odd2(line.fair_odd_blend)}, mínima ${odd2(line.odd_min)} `
     + `(${line.priced_by === 'pinnacle' ? `Pinnacle ${odd2(line.pinnacle_odd)} sem margem, misturada com o modelo` : line.priced_by}).`);
   const hs = [line.history?.home, line.history?.away].filter(h => h && h.n);
-  if (hs.length) notes.push(`Últimos jogos: ${hs.map(h => `${h.hits} (${h.what})`).join(' · ')}.`);
+  const roleTxt = h => (h.role_now ? (h.by_role?.[h.role_now] ? `; como ${h.role_now}, como hoje: ${String(h.by_role[h.role_now].wins).replace('.', ',')}/${h.by_role[h.role_now].n}` : `; nenhum jogo como ${h.role_now}, como hoje`) : '');
+  if (hs.length) notes.push(`Últimos jogos: ${hs.map(h => `${h.hits} (${h.what}${roleTxt(h)})`).join(' · ')}.`);
   if (line.diff_pp != null && Math.abs(line.diff_pp) >= 5)
     notes.push(`O modelo ${line.diff_pp > 0 ? 'gosta mais' : 'gosta menos'} desta linha que a Pinnacle (${line.diff_pp > 0 ? '+' : ''}${String(line.diff_pp).replace('.', ',')} pp). O preço segue a Pinnacle.`);
   if (line.priced_by !== 'pinnacle') notes.push('Sem odd da Pinnacle nesta linha: o preço é do modelo, por isso a odd mínima tem margem maior.');

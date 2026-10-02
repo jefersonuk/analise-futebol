@@ -158,3 +158,10 @@ table.scanrank th:nth-last-child(-n+2) { text-align: left; }
 #toast.err { border-color: var(--warn); }
 #toast a { color: var(--blue); }
 .histbox .rule { color: var(--text); font-weight: 600; }
+svg.hist .bar.other-role path { opacity: .3; }
+svg.hist .bar.other-role .val { opacity: .5; }
+.histbox .byrole { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.histbox .byrole b { color: var(--text); font-weight: 600; }
+.histhead .role-now { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 6px; }
+#chartTip .tip-role { font-size: 12px; color: var(--muted); margin: -2px 0 6px; }
+#chartTip .tip-role b { color: var(--text); }

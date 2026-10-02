@@ -8,7 +8,8 @@ export const MARK = '#ESPECIALISTA-FUTEBOL v1';
 const byScore = (a, b) => (b.consistency_score ?? 0) - (a.consistency_score ?? 0);
 const slim = l => {
   const { history, ...rest } = l;
-  const h = t => t && { what: t.what, threshold: t.threshold, hits: t.hits, values_newest_first: t.values_newest_first };
+  const h = t => t && { what: t.what, rule: t.rule, hits: t.hits, role_now: t.role_now, by_role: t.by_role, hits_weighted_by_role: t.n ? `${t.wins}/${t.n}` : null,
+    values_newest_first: t.values_newest_first };
   return { ...rest, history: history && { home: h(history.home), away: h(history.away) } };
 };
 

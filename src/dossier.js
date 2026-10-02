@@ -4,7 +4,7 @@
 //
 // api: searchTeams, upcoming, leaguesOf, leagueMatches, fixtureOdds, injuries, standings, lastPlayed, quota
 
-import { CORNER_EDGE, DERIVED, FAV_EDGE, METRICS, analyzeMatch, ev, fairOdd, impliedTotal, politicaE, sideLabel } from './model.js';
+import { CORNER_EDGE, DERIVED, FAV_EDGE, METRICS, analyzeMatch, ev, fairOdd, impliedTotal, politicaE, roleOf, sideLabel } from './model.js';
 import { rank } from './ratings.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
@@ -185,7 +185,7 @@ export function modelEntry(l, { res, hi, banca, names = {} }) {
     priced_by: anchor ? `modelo ancorado no total ${DERIVED[l.market] === 'corners1h' ? '1T ' : ''}de escanteios da Pinnacle`
       : 'só o modelo (sem odd da Pinnacle nesta linha)',
     pinnacle_odd: null, p_pinnacle: null, diff_pp: null,
-    p_blend: r(pm), tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
+    p_blend: r(pm), tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(rawRate(hi), 2), hit_rate_role: r(c.hit_rate, 2),
     fair_odd_blend: r(1 / pm, 2), fragile: true, odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null,
     ...stakeFor(pm, oddMin, banca), history: hi };
 }
@@ -224,15 +224,36 @@ export const contraAlert = (f, names = {}) => (f?.contra
 // Nome do mandante e do visitante a partir de teams [{ role, name }].
 export const teamNames = teams => ({ home: teams.find(t => t.role === 'home')?.name, away: teams.find(t => t.role === 'away')?.name });
 
+// Papel de cada time no jogo de hoje, pela superioridade que o mercado (ou o modelo) dá ao mandante.
+export const rolesNow = favor => ({ home: roleOf(favor?.sup), away: roleOf(favor?.sup == null ? null : -favor.sup) });
+
+// Peso de um jogo passado no acerto da linha, pela distância entre o papel do time naquele jogo e o de hoje:
+// mesmo papel 1, papel vizinho 0,6, oposto 0,3 (sem papel conhecido: 1). Quem joga hoje como zebra não vira
+// "âncora" com acertos de quando era favorito.
+const ROLE_ORDER = { zebra: 0, equilibrado: 1, favorito: 2 };
+export const roleWeight = (now, then) => (now == null || then == null ? 1 : [1, 0.6, 0.3][Math.abs(ROLE_ORDER[now] - ROLE_ORDER[then])]);
+
 // Histórico dos dois times numa linha (últimos jogos de cada um, do mais recente ao mais antigo).
+// wins/n: acerto pesado pelo papel (vai para a consistência); hits/raw: a contagem simples, para exibir;
+// by_role: acerto em cada papel. teams: [{ role, name, games, roleNow }].
 export function lineHistory(id, teams) {
   const one = t => {
     const h = t && history(id, t.role, t.name, t.games);
-    return h && { what: h.what, threshold: h.threshold, hits: `${h.wins}/${h.bars.length}`, wins: h.wins, n: h.bars.length,
-      values_newest_first: h.bars.map(b => b.v).reverse() };
+    if (!h) return null;
+    let wins = 0, n = 0;
+    const by = {};
+    for (const b of h.bars) {
+      const role = roleOf(b.g.sup), w = roleWeight(t.roleNow, role), win = b.res === 'win' ? 1 : b.res === 'hw' ? 0.5 : 0;
+      wins += w * win; n += w;
+      if (role) { const x = (by[role] ||= { wins: 0, n: 0 }); x.wins += win; x.n++; }
+    }
+    return { what: h.what, threshold: h.threshold, rule: h.rule, hits: `${h.wins}/${h.bars.length}`, raw: { wins: h.wins, n: h.bars.length },
+      wins: r(wins, 2), n: r(n, 2), role_now: t.roleNow ?? null, by_role: by, values_newest_first: h.bars.map(b => b.v).reverse() };
   };
   return { home: one(teams.find(t => t.role === 'home')), away: one(teams.find(t => t.role === 'away')) };
 }
+// Acerto simples dos últimos jogos dos dois times somados (o que o gráfico mostra).
+const rawRate = hi => { const xs = [hi.home, hi.away].filter(Boolean), n = xs.reduce((s, x) => s + x.raw.n, 0); return n ? xs.reduce((s, x) => s + x.raw.wins, 0) / n : null; };
 
 // Preço de cada linha do modelo: com Pinnacle (mistura log-linear, odd mínima ×1,03/×1,05), ancorada
 // ou só do modelo (modelEntry), e as linhas de mercado soft sem preço (model_only). Usado pelo dossiê
@@ -262,7 +283,7 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
       const fragile = alerts.length > 0 || Math.abs(diff) >= (soft ? 10 : 5);
       const oddMin = (1 / pb) * (fragile ? 1.05 : 1.03), c = cons(pb);
       priced.push({ ...base, priced_by: 'pinnacle', pinnacle_odd: odd, p_pinnacle: r(pp), diff_pp: r(diff, 1), p_blend: r(pb),
-        tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
+        tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(rawRate(hi), 2), hit_rate_role: r(c.hit_rate, 2),
         fair_odd_blend: r(1 / pb, 2), fragile, odd_min: r(oddMin, 2),
         odd_min_vs_pinnacle_pct: r((oddMin / odd - 1) * 100, 1), ...stake(pb, oddMin),
         ev_model_at_pinnacle: r(e.mid), ev_model_worst: r(e.low), history: hi });
@@ -274,7 +295,7 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
     } else if (pm >= 0.35 && soft && odds.size) {
       const c = cons(pm);
       if (c.tier !== 'especulativa' || pm <= 0.65)
-        modelOnly.push({ ...base, tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(c.hit_rate, 2),
+        modelOnly.push({ ...base, tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(rawRate(hi), 2), hit_rate_role: r(c.hit_rate, 2),
           odd_min_model_only: r(fairOdd(l) * 1.08, 2), history: hi });
     }
   }
@@ -338,7 +359,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   const { odds, fair } = collect(oddsP.bookmakers);
   const oddsAgeMin = oddsP.updatedAt ? Math.round((oddsP.fetchedAt - Date.parse(oddsP.updatedAt)) / 60e3) : null;
   const injuries = val(1, []), table = val(2, []);
-  const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t, { fair, favor: favor ?? favorFor(matches).cal });
+  if (!favor || !matches.some(m => m.sup != null)) { const fv = favorFor(matches); matches = fv.matches; favor = favor ?? fv.cal; }
+  const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t, { fair, favor });
   if (!res.lines.length) throw new Error('jogos insuficientes na liga para ajustar o modelo');
   const nextOf = { [team.id]: fixtures, [other.id]: val(5, []) };
 
@@ -402,8 +424,9 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   };
 
   // ---- linhas ----
-  const teamsHist = [{ role: 'home', name: fx.home.name, games: recent[fx.home.id] },
-    { role: 'away', name: fx.away.name, games: recent[fx.away.id] }];
+  const now = rolesNow(res.favor);
+  const teamsHist = [{ role: 'home', name: fx.home.name, games: recent[fx.home.id], roleNow: now.home },
+    { role: 'away', name: fx.away.name, games: recent[fx.away.id], roleNow: now.away }];
   const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams: teamsHist, banca });
   const { candidatesFocus, candidates } = pickCandidates(priced, anchored);
 

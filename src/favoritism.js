@@ -11,14 +11,14 @@
 //   - roleOf: favorito / equilibrado / zebra.
 
 import { fit, predict, prepare } from './ratings.js';
-import { CORNERS_PER_GOAL, marketSupremacy } from './model.js';
+import { CORNERS_PER_GOAL, FAV_EDGE, marketSupremacy, roleOf } from './model.js';
 
 export { marketSupremacy };
 
 const MONTH = 30 * 864e5;
-export const ROLE_EDGE = 0.35;   // gols de superioridade para ser favorito (≈ 47% × 27% de vitória)
+export const ROLE_EDGE = FAV_EDGE;   // gols de superioridade para ser favorito (≈ 47% × 27% de vitória)
 
-export const roleOf = sup => (sup == null ? null : sup >= ROLE_EDGE ? 'favorito' : sup <= -ROLE_EDGE ? 'zebra' : 'equilibrado');
+export { roleOf };
 
 // id do jogo -> { sup, dc } do ponto de vista do mandante.
 export function preMatch(matches, { step = MONTH, minRows = 120 } = {}) {

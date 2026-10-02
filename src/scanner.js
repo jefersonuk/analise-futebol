@@ -13,7 +13,7 @@
 import { analyzeMatch, politicaE } from './model.js';
 import { collect } from './odds.js';
 import { recentGames } from './insights.js';
-import { FRIENDLIES, byConsistency, contraAlert, favorSummary, isCandidate, priceLines, seasonsFor } from './dossier.js';
+import { FRIENDLIES, byConsistency, contraAlert, favorSummary, isCandidate, priceLines, rolesNow, seasonsFor } from './dossier.js';
 import { favorFor } from './favoritism.js';
 
 export const SCAN_MARKETS = ['Total escanteios 1T', 'Handicap escanteios 1T'];   // o ranking padrão
@@ -60,7 +60,8 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null) {
   const games = id => res.fits.corners?.games.get(id) || 0;
   const thin = [fx.home, fx.away].filter(t => games(t.id) < MIN_GAMES);
   if (thin.length) return { skip: `${thin.map(t => t.name).join(' e ')} com menos de ${MIN_GAMES} jogos com estatística de escanteios na base` };
-  const teams = [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(res.prep, t.id) }));
+  const now = rolesNow(res.favor);
+  const teams = [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(res.prep, t.id), roleNow: now[role] }));
   const ageMin = oddsP.updatedAt ? Math.round((Date.now() - Date.parse(oddsP.updatedAt)) / 60e3) : null;
   const alerts = ageMin > 90 ? [`odds da Pinnacle com ${ageMin} min`] : [];
   if (teamBase) alerts.push('base: jogos dos dois times em todas as competições (amostra menor que a de uma liga)');

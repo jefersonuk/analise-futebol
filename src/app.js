@@ -5,7 +5,7 @@ import { collect } from './odds.js';
 import { initEntry } from './entryview.js';
 import { listSaved, loadAnalysis, saveAnalysis } from './saved.js';
 import { bindTooltips, pickDashboard, renderDashboard } from './dashboard.js';
-import { FOCUS, ODDS_STALE_MIN, buildDossier, favorSummary, loadLeague, repriceDossier, resolveBase, side } from './dossier.js';
+import { FOCUS, ODDS_STALE_MIN, buildDossier, favorSummary, loadLeague, repriceDossier, resolveBase, rolesNow, side } from './dossier.js';
 import { favorFor } from './favoritism.js';
 import { alternatives, makePricer, nearest, parseLine, renderMyLine, verdict } from './myline.js';
 import { initScan } from './scanview.js';
@@ -202,7 +202,9 @@ function openSnapshot(snap) {
   $('#fixSel').innerHTML = `<option value="0">${hour(fx.t)} · ${esc(fx.home.name)} x ${esc(fx.away.name)} · ${esc(fx.league.name)}</option>`;
   $('#teamSel').hidden = false; $('#fixSel').hidden = false;
   state.fixture = fx; state.matches = snap.matches; state.oddsP = snap.oddsP; state.dossier = snap.dossier;
-  state.favor = snap.favor || favorFor(snap.matches).cal;
+  // guardada antes do favoritismo: calcula a superioridade pré-jogo dos jogos e a calibração agora
+  if (!snap.favor || !snap.matches.some(m => m.sup != null)) { const fv = favorFor(snap.matches); state.matches = fv.matches; state.favor = fv.cal; }
+  else state.favor = snap.favor;
   state.odds.clear(); state.books.clear(); state.pinn.clear();
   state.market = 'Todos'; state.my = null; state.savedAt = snap.savedAt;
   applyOdds();
@@ -359,8 +361,8 @@ function renderDash() {
 
 // Últimos jogos de cada time, no formato dos gráficos.
 function teamsHist() {
-  const { prep } = state.result, fx = state.fixture;
-  return [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(prep, t.id) }));
+  const { prep, favor } = state.result, fx = state.fixture, now = rolesNow(favor);
+  return [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(prep, t.id), roleNow: now[role] }));
 }
 
 // ---- minha linha: análise focada na linha que vou apostar ----
