@@ -52,6 +52,17 @@ export function initEntry({ getLine, getFixture }) {
     $('#enCheck').innerHTML = out.join('<br>');
   }
 
+  // Aviso no rodapé da página (a caixa já fechou), some sozinho.
+  let toastTimer = null;
+  function toast(html, err = false) {
+    const el = $('#toast');
+    el.innerHTML = html;
+    el.classList.toggle('err', err);
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, err ? 12000 : 7000);
+  }
+
   function say(text, err = false) {
     const el = $('#enMsg');
     el.hidden = false;
@@ -94,6 +105,7 @@ export function initEntry({ getLine, getFixture }) {
 
   $('#entryForm').onsubmit = async e => {
     e.preventDefault();
+    if (e.submitter && e.submitter.id !== 'enSend') return;   // só o botão Registrar envia
     const h = house(), odd = parseFloat($('#enOdd').value), stakeNat = parseFloat($('#enStake').value);
     const cur = h?.currency || 'BRL', r = rateOf(cur);
     if (!h?.name) return say('Escolha ou digite a casa.', true);
@@ -107,9 +119,10 @@ export function initEntry({ getLine, getFixture }) {
     $('#enSend').disabled = true;
     const stake = Math.round(stakeNat * r * 100) / 100;
     const cloud = await sendEntry(buildEntry({ line: entry.line, fx: entry.fx, casa: h.name, currency: cur, odd, stake, stakeNat }));
-    say(`Enviada ✓ ${esc(h.name)} @ ${num(odd)}, ${cash(stakeNat, cur)}${cur !== 'BRL' ? ` (${cash(stake)})` : ''}. `
-      + (cloud ? 'Está na caixa da nuvem: o app de apostas de qualquer aparelho sincronizado registra ao abrir (aba ⚽ Análise). '
-        : 'Ficou só na caixa deste navegador (a ☁️ nuvem não está conectada aqui): registre abrindo o app de apostas NESTE navegador. ')
+    $('#entryDlg').close();
+    toast(`Enviada ✓ ${esc(entry.line.market)}: ${esc(entry.line.line)} · ${esc(h.name)} @ ${num(odd)}, ${cash(stakeNat, cur)}${cur !== 'BRL' ? ` (${cash(stake)})` : ''}. `
+      + (cloud ? 'O app de apostas de qualquer aparelho sincronizado registra (aba ⚽ Análise). '
+        : 'Ficou só neste navegador (☁️ nuvem não conectada aqui): registre abrindo o app de apostas NESTE navegador. ')
       + `<a href="${BETS_URL}" target="apostas">Abrir app de apostas ↗</a>`, !cloud);
     window.open(BETS_URL, 'apostas');
     const btn = entry.btn || document.querySelector(`[data-enter="${CSS.escape(entry.line.id)}"]`);

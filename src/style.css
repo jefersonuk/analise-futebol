@@ -150,3 +150,8 @@ table.scanrank :is(td, th):is(:nth-child(3), :nth-child(4), :nth-child(5)) { tex
 table.scanrank td.extra { text-align: left; }
 table.scanrank th:nth-last-child(-n+2) { text-align: left; }
 .chips.saved { margin: 10px 0 0; align-items: center; }
+#toast { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60;
+  width: min(560px, calc(100vw - 32px)); background: #0b1016; border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px;
+  font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+#toast.err { border-color: var(--warn); }
+#toast a { color: var(--blue); }

@@ -124,11 +124,13 @@
     <p id="enCheck" class="check"></p>
     <p id="enMsg" class="msg" hidden></p>
     <div class="row end">
-      <button value="cancel" class="ghost" id="enCancel">Cancelar</button>
+      <button type="button" class="ghost" id="enCancel">Cancelar</button>
       <button id="enSend" class="primary" value="send">Registrar no app de apostas</button>
     </div>
   </form>
 </dialog>
+
+<div id="toast" role="status" aria-live="polite" hidden></div>
 
 <script type="module" src="src/app.js"></script>
 </body>
