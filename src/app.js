@@ -155,7 +155,8 @@ async function runAnalysis() {
   } catch (e) { msg(e.message, true); return false; }
   finally { state.running = false; $('#btnRun').disabled = false; }
 }
-$('#btnRun').onclick = runAnalysis;
+// Botão "Analisar jogo": pronta a análise, a tela desce até o resultado.
+$('#btnRun').onclick = async () => { if (await runAnalysis()) $('#out').scrollIntoView({ block: 'start' }); };
 
 // Refaz o modelo com as odds de state.oddsP (sem requisição): o total de escanteios do 1º tempo é
 // ancorado no da Pinnacle, e a tabela recebe as odds dela.
@@ -200,6 +201,7 @@ function openSnapshot(snap) {
   applyOdds();
   state.price = makePricer({ dossier: state.dossier, result: state.result, teams: teamsHist(), banca: BANCA });
   render();
+  showQuota();   // contador desta ação (0 na API), não o da ação anterior
   msg(`Análise guardada às ${new Date(snap.savedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}: aberta sem gastar requisição. `
     + 'Para odds e desfalques de agora, use 🔄 Atualizar odds.');
 }
@@ -216,6 +218,7 @@ async function renderSaved() {
 $('#savedList').onclick = async e => {
   const b = e.target.closest('[data-saved]');
   if (!b || state.running) return;
+  startAction();
   const snap = await loadAnalysis(Number(b.dataset.saved));
   if (!snap) { msg('Essa análise não está mais guardada (o jogo já começou?).', true); return renderSaved(); }
   openSnapshot(snap);
