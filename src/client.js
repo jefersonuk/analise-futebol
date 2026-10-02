@@ -44,6 +44,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 export function makeClient({ get: rawGet, load, save }) {
   const stats = { api: 0, cache: 0 };
+  let liveMemo = null;   // jogos em andamento (todas as ligas), guardados só por 1 min e só na memória
   const get = (path, params) => { stats.api++; return rawGet(path, params); };
 
   async function cached(key, ttl, fn) {
@@ -106,6 +107,17 @@ export function makeClient({ get: rawGet, load, save }) {
     // Próximos jogos do time, com liga e temporada (calendário muda pouco: 2 h).
     upcoming: teamId => cached(`af:next:${teamId}`, 2 * HOUR, async () =>
       (await get('/fixtures', { team: teamId, next: 10 })).map(fixtureOut)),
+
+    // Jogos do time em andamento agora. Uma consulta live=all (todas as ligas) a cada minuto, no máximo,
+    // filtrada pelo time — o filtro "próximos jogos" (next) não traz o que já começou. Só a busca manual usa.
+    liveOf: async teamId => {
+      if (!liveMemo || Date.now() - liveMemo.t > 60e3) liveMemo = { t: Date.now(), list: await get('/fixtures', { live: 'all' }) };
+      else stats.cache++;
+      return liveMemo.list.filter(f => f.teams.home.id === teamId || f.teams.away.id === teamId).map(f => ({
+        ...fixtureOut(f),
+        live: { status: f.fixture.status.short, elapsed: f.fixture.status.elapsed, goals: [f.goals.home, f.goals.away] },
+      }));
+    },
 
     // Último jogo disputado em qualquer competição (descanso antes do confronto).
     lastPlayed: teamId => cached(`af:last:${teamId}`, 6 * HOUR, async () =>

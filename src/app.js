@@ -99,17 +99,21 @@ async function search(fromApi = false) {
     if (list.some(t => t.local)) msg('Times do seu histórico (sem gastar requisição). Não achou? Use "Buscar na API".');
   } catch (e) { msg(e.message, true); }
 }
+// Busca manual: jogos em andamento do time (no topo) + próximos jogos.
+const liveTag = f => (f.live ? `🔴 AO VIVO ${f.live.elapsed ?? ''}' · ${f.live.goals[0] ?? 0}–${f.live.goals[1] ?? 0} · ` : '');
 async function loadFixtures() {
-  msg('Buscando próximos jogos…');
+  msg('Buscando jogos ao vivo e próximos…');
   $('#btnRun').disabled = true;
   try {
-    state.fixtures = await api.upcoming(Number($('#teamSel').value));
+    const id = Number($('#teamSel').value);
+    const [next, live] = await Promise.all([api.upcoming(id), api.liveOf(id).catch(() => [])]);
+    state.fixtures = live.concat(next.filter(f => !live.some(l => l.id === f.id)));
     showQuota();
     const sel = $('#fixSel');
     sel.hidden = !state.fixtures.length;
-    if (!state.fixtures.length) return msg('Esse time não tem jogos agendados.', true);
+    if (!state.fixtures.length) return msg('Esse time não tem jogo ao vivo nem agendado.', true);
     sel.innerHTML = state.fixtures.map((f, i) =>
-      `<option value="${i}">${hour(f.t)} · ${esc(f.home.name)} x ${esc(f.away.name)} · ${esc(f.league.name)}</option>`).join('');
+      `<option value="${i}">${liveTag(f)}${hour(f.t)} · ${esc(f.home.name)} x ${esc(f.away.name)} · ${esc(f.league.name)}</option>`).join('');
     $('#btnRun').disabled = false;
     msg('');
   } catch (e) { msg(e.message, true); }
@@ -132,7 +136,7 @@ async function runAnalysis() {
   $('#btnRun').disabled = true;
   try {
     const snap = await loadAnalysis(fx.id);
-    if (snap) { openSnapshot(snap); return true; }
+    if (snap) { openSnapshot(fx.live ? { ...snap, fixture: { ...snap.fixture, live: fx.live } } : snap); return true; }
     msg('Identificando a liga…');
     const lg = await resolveBase(api.dossierApi, fx, !!selectedTeam().national);
     if (!lg) throw new Error('Não encontrei a liga de nenhum dos dois times nesta temporada.');
@@ -252,7 +256,9 @@ function render() {
   const cup = fx.base.cross ? `Jogo entre ligas (${fx.league.name}): forças medidas em ${fx.base.name}; os jogos da competição entre times das duas ligas põem as ligas na mesma escala. `
     : fx.base.national ? `Jogo de seleções (${fx.league.name}): forças medidas nos jogos dos dois times e de todos os adversários que eles enfrentaram (amistosos com metade do peso). `
     : fx.base.id !== fx.league.id ? `Jogo de ${fx.league.name}; forças medidas em ${fx.base.name}. ` : '';
-  $('#basis').textContent = `${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
+  const live = fx.live ? `🔴 Jogo em andamento (${fx.live.elapsed ?? '?'}', ${fx.live.goals[0] ?? 0}–${fx.live.goals[1] ?? 0} quando você buscou): `
+    + 'esta é a análise pré-jogo; as linhas valem para o jogo inteiro desde o apito inicial e não levam em conta placar, minuto nem odds ao vivo. ' : '';
+  $('#basis').textContent = `${live}${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
     + `peso decrescente com o tempo (meia-vida ≈ 1 ano), ${(r.prep.coverage * 100).toFixed(0)}% com estatística de chutes, `
     + `${(r.prep.coverage1h * 100).toFixed(0)}% com escanteios do 1º tempo (a API só tem desde 2024).`
     + (r.anchors.corners1h ? ` Total de escanteios do 1º tempo ancorado na Pinnacle: modelo ${num(r.anchors.corners1h.model_total)} → `

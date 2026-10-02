@@ -106,3 +106,22 @@ test('Libertadores entre ligas: base com as duas ligas e a própria copa', async
   assert.equal(matches.find(x => x.id === 2).c1, undefined);                // jogo só de outros times: sem custo
   assert.ok(seen.every(s => s === 'tm127' || s === 'tm435'));
 });
+
+test('jogos ao vivo: uma consulta live=all por minuto, filtrada pelo time, com minuto e placar', async () => {
+  const live = [
+    { fixture: { id: 7, timestamp: (Date.now() - 40 * 60e3) / 1000, status: { short: '1H', elapsed: 37 } }, league: { id: 5, name: 'UEFA Nations League', season: 2026 },
+      teams: { home: { id: 101, name: 'Kazakhstan' }, away: { id: 102, name: 'Faroe Islands' } }, goals: { home: 1, away: 0 } },
+    { fixture: { id: 8, timestamp: Date.now() / 1000, status: { short: '2H', elapsed: 60 } }, league: { id: 71, name: 'Serie A', season: 2026 },
+      teams: { home: { id: 1, name: 'A' }, away: { id: 2, name: 'B' } }, goals: { home: 0, away: 0 } },
+  ];
+  const calls = [];
+  const client = makeClient({ get: async (p, params) => { calls.push(params); return live; }, load: async () => null, save: async () => {} });
+  const k = await client.liveOf(101);
+  assert.equal(k.length, 1);
+  assert.equal(k[0].id, 7);
+  assert.deepEqual(k[0].live, { status: '1H', elapsed: 37, goals: [1, 0] });
+  assert.equal(k[0].league.season, 2026);
+  await client.liveOf(102); await client.liveOf(999);
+  assert.equal(calls.length, 1, 'uma consulta só dentro do minuto');
+  assert.deepEqual(calls[0], { live: 'all' });
+});

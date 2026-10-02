@@ -35,8 +35,9 @@ export async function saveAnalysis({ fixture, team, matches, oddsP, dossier }) {
   await saveDoc(IDX, idx);
 }
 
-// A cópia do jogo, se ainda vale (jogo não começou).
+// A cópia do jogo, se ainda vale: antes do jogo e durante ele (até 3 h depois do início), para o jogo
+// ao vivo abrir a análise pré-jogo sem requisição.
 export async function loadAnalysis(id) {
   const a = await loadDoc(KEY(id));
-  return a && a.v === 1 && a.fixture.t > Date.now() ? a : null;
+  return a && a.v === 1 && a.fixture.t > Date.now() - GRACE ? a : null;
 }

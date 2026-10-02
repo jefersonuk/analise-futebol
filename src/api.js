@@ -140,6 +140,7 @@ export const lastPlayed = teamId => pick('lastPlayed', teamId);
 export const attachHalfCorners = (scope, season, matches, onProgress, opts) =>
   pick('attachHalfCorners', scope, season, matches, onProgress, opts);
 export const dayFixtures = date => pick('dayFixtures', date);
+export const liveOf = teamId => (isDemo() ? Promise.resolve([]) : client.liveOf(teamId));
 export const teamInfo = id => (isDemo() ? Promise.resolve(null) : client.teamInfo(id));
 export const dayOdds = (date, bet) => pick('dayOdds', date, bet);
 export const hasLeague = (leagueId, season) => pick('hasLeague', leagueId, season);
