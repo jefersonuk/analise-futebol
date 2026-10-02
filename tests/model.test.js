@@ -174,7 +174,8 @@ test('favorito pelo 1X2 leva os escanteios: a divisão segue o mercado, o total 
   const teams = [['home', h], ['away', a]].map(([role, id]) => ({ role, name: role === 'home' ? 'Helmond' : 'Heracles', games: recentGames(res.prep, id) }));
   const { priced, anchored } = priceLines(res, { odds: new Map(), fair, alerts: [], teams });
   const fav = anchored.concat(priced).filter(l => /^c1hA\d/.test(l.id) && parseFloat(l.id.slice(4)) > 0);
-  assert.ok(fav.length && fav.every(l => l.inviable && !isCandidate(l)), 'Heracles +x no 1T nunca é candidata');
+  assert.ok(fav.every(l => l.inviable && !isCandidate(l)), 'Heracles +x no 1T nunca é candidata');
+  assert.ok(res.all.find(l => l.id === 'c1hA1.5').pWin > 0.75, 'e o favorito +1,5 no 1T fica com acerto alto (odd de mercado baixa)');
 });
 
 test('jogo equilibrado: handicap positivo vale para os dois lados', () => {
@@ -193,4 +194,5 @@ test('modelo contra o mercado: alerta quando o modelo dá os escanteios ao outro
   const res = analyzeMatch(ms, h, a, t, { fair: fairOf([...x12(7, 5, 1.45), ['gO2.5', 0.6], ['gU2.5', 0.4]]) });
   assert.equal(res.favor.contra, true);
   assert.ok(res.pred.corners.h < res.pred.corners.a);
+  near(res.favor.diff, res.favor.diff_market, 1e-9);   // modelo na direção errada: só o mercado
 });

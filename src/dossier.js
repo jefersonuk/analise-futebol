@@ -219,7 +219,7 @@ export function favorSummary(f, names = {}) {
   return parts.join(' · ');
 }
 export const contraAlert = (f, names = {}) => (f?.contra
-  ? `modelo contra o mercado nos escanteios: o mercado põe ${f.diff_market >= 0 ? names.home : names.away} com mais escanteios e o modelo dizia o contrário — a divisão segue o mercado` : null);
+  ? `modelo contra o mercado nos escanteios: o mercado põe ${f.diff_market >= 0 ? names.home : names.away} com mais escanteios e o modelo dizia o contrário — a divisão segue só o mercado` : null);
 
 // Nome do mandante e do visitante a partir de teams [{ role, name }].
 export const teamNames = teams => ({ home: teams.find(t => t.role === 'home')?.name, away: teams.find(t => t.role === 'away')?.name });

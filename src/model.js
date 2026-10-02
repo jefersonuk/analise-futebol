@@ -277,7 +277,7 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null, share1
   // Favoritismo e divisão dos escanteios. Quem deve ter mais escanteios vem do mercado, como o total:
   // 1º o handicap de escanteios da Pinnacle (56), 2º os escanteios por time dela (57/58), 3º o favoritismo
   // do 1X2 (superioridade de gols × escanteios por gol, medido nos dados). A divisão final é 80% mercado e
-  // 20% modelo — o modelo sozinho erra feio quando a base não liga os times (time rebaixado, copa).
+  // 20% modelo — e 100% mercado quando o modelo erra a direção (base que não liga os times).
   const gT = fair ? impliedTotal(fair, 'g', 1) : null;
   const supMkt = gT ? marketSupremacy(fair, gT.implied_total) : null;
   const sup = supMkt ?? (pred.goals ? pred.goals.h - pred.goals.a : null);
@@ -291,11 +291,12 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null, share1
       if (h && a) { dMkt = h.implied_total - a.implied_total; src = 'pinnacle_por_time'; }
     }
     if (dMkt == null) { const [a0, b0] = favor?.cornersPerGoal || CORNERS_PER_GOAL; dMkt = a0 + b0 * sup; src = supMkt != null ? '1x2' : 'modelo'; }
-    const w = src === 'modelo' ? 0.5 : ANCHOR_W, d = w * dMkt + (1 - w) * dcModel;
+    // o modelo aponta o OUTRO time como dono dos escanteios, com folga: a base dele não liga os times (time
+    // rebaixado/promovido, copa) — aí a divisão é só do mercado; senão 80% mercado (50% sem odds)
+    const contra = src !== 'modelo' && Math.sign(dMkt) !== Math.sign(dcModel) && Math.abs(dMkt - dcModel) >= 1.5;
+    const w = contra ? 1 : src === 'modelo' ? 0.5 : ANCHOR_W, d = w * dMkt + (1 - w) * dcModel;
     pred.corners = resplit(pred.corners, d);
-    Object.assign(fav, { applied: true, corners_source: src, diff_market: dMkt, diff_model: dcModel, diff: pred.corners.h - pred.corners.a, weight_market: w,
-      // o modelo aponta o outro time como dono dos escanteios, com folga: alerta (a base provavelmente não liga os times)
-      contra: Math.sign(dMkt) !== Math.sign(dcModel) && Math.abs(dMkt - dcModel) >= 1.5 });
+    Object.assign(fav, { applied: true, corners_source: src, diff_market: dMkt, diff_model: dcModel, diff: pred.corners.h - pred.corners.a, weight_market: w, contra });
   }
   if (pred.corners && (!pred.corners1h || prep.coverage1h < share1hBelow)) {
     let c1 = 0, c = 0, n = 0;
