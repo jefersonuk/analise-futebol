@@ -5,7 +5,8 @@ import { collect } from './odds.js';
 import { initEntry } from './entryview.js';
 import { listSaved, loadAnalysis, saveAnalysis } from './saved.js';
 import { bindTooltips, pickDashboard, renderDashboard } from './dashboard.js';
-import { FOCUS, ODDS_STALE_MIN, buildDossier, loadLeague, resolveBase, side } from './dossier.js';
+import { FOCUS, ODDS_STALE_MIN, buildDossier, favorSummary, loadLeague, repriceDossier, resolveBase, side } from './dossier.js';
+import { favorFor } from './favoritism.js';
 import { alternatives, makePricer, nearest, parseLine, renderMyLine, verdict } from './myline.js';
 import { initScan } from './scanview.js';
 import { bindSpecialist, briefGame } from './brief.js';
@@ -145,8 +146,11 @@ async function runAnalysis() {
     const { matches, seasons } = await loadLeague(api.dossierApi, lg, fx.league.season, t => { msg(t); showQuota(); });
     showQuota();
     msg('Ajustando forças da liga…');
+    msg('Medindo favoritismo × escanteios na base…');
+    const fv = favorFor(matches);
     state.fixture = { ...fx, base: lg, seasons, n: matches.length };
-    state.matches = matches;
+    state.matches = fv.matches;
+    state.favor = fv.cal;
     state.odds.clear(); state.books.clear(); state.pinn.clear();
     state.market = 'Todos';
     state.my = null;
@@ -165,7 +169,7 @@ $('#btnRun').onclick = async () => { if (await runAnalysis()) $('#out').scrollIn
 function applyOdds() {
   const { odds, fair } = collect(state.oddsP.bookmakers);
   // refaz o modelo com as odds: o total de escanteios do 1º tempo é ancorado no da Pinnacle
-  state.result = analyzeMatch(state.matches, state.fixture.home.id, state.fixture.away.id, state.fixture.t, { fair });
+  state.result = analyzeMatch(state.matches, state.fixture.home.id, state.fixture.away.id, state.fixture.t, { fair, favor: state.favor });
   for (const [id, b] of state.books) if (b === 'Pinnacle') { state.odds.delete(id); state.books.delete(id); }
   const ids = new Set(state.result.lines.map(l => l.id));
   for (const [id, odd] of odds) if (ids.has(id) && state.books.get(id) !== 'manual') { state.odds.set(id, odd); state.books.set(id, 'Pinnacle'); }
@@ -180,12 +184,12 @@ async function refreshOdds() {
   msg('Montando o dossiê (desfalques, tabela, descanso)…');
   state.dossier = await buildDossier(api.dossierApi, {
     fx: state.fixture, team: selectedTeam(), fixtures: state.fixtures, national: !!state.fixture.base.national,
-    matches: state.matches, lg: state.fixture.base, oddsPayload: state.oddsP, banca: BANCA,
+    matches: state.matches, lg: state.fixture.base, oddsPayload: state.oddsP, banca: BANCA, favor: state.favor,
   });
   state.price = makePricer({ dossier: state.dossier, result: state.result, teams: teamsHist(), banca: BANCA });
   showQuota();
   state.savedAt = null;
-  saveAnalysis({ fixture: state.fixture, team: selectedTeam(), matches: state.matches, oddsP: state.oddsP, dossier: state.dossier })
+  saveAnalysis({ fixture: state.fixture, team: selectedTeam(), matches: state.matches, oddsP: state.oddsP, dossier: state.dossier, favor: state.favor })
     .then(renderSaved, () => { /* sem armazenamento: segue sem cópia */ });
 }
 
@@ -198,9 +202,11 @@ function openSnapshot(snap) {
   $('#fixSel').innerHTML = `<option value="0">${hour(fx.t)} · ${esc(fx.home.name)} x ${esc(fx.away.name)} · ${esc(fx.league.name)}</option>`;
   $('#teamSel').hidden = false; $('#fixSel').hidden = false;
   state.fixture = fx; state.matches = snap.matches; state.oddsP = snap.oddsP; state.dossier = snap.dossier;
+  state.favor = snap.favor || favorFor(snap.matches).cal;
   state.odds.clear(); state.books.clear(); state.pinn.clear();
   state.market = 'Todos'; state.my = null; state.savedAt = snap.savedAt;
   applyOdds();
+  state.dossier = repriceDossier(snap.dossier, state.result, snap.oddsP, teamsHist(), BANCA);   // modelo atual, sem requisição
   state.price = makePricer({ dossier: state.dossier, result: state.result, teams: teamsHist(), banca: BANCA });
   render();
   showQuota();   // contador desta ação (0 na API), não o da ação anterior
@@ -263,7 +269,8 @@ function render() {
     : fx.base.id !== fx.league.id ? `Jogo de ${fx.league.name}; forças medidas em ${fx.base.name}. ` : '';
   const live = fx.live ? `🔴 Jogo em andamento (${fx.live.elapsed ?? '?'}', ${fx.live.goals[0] ?? 0}–${fx.live.goals[1] ?? 0} quando você buscou): `
     + 'esta é a análise pré-jogo; as linhas valem para o jogo inteiro desde o apito inicial e não levam em conta placar, minuto nem odds ao vivo. ' : '';
-  $('#basis').textContent = `${live}${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
+  const fav = favorSummary(r.favor, { home: fx.home.name, away: fx.away.name });
+  $('#basis').textContent = `${live}${fav ? `${fav[0].toUpperCase()}${fav.slice(1)}. ` : ''}${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
     + `peso decrescente com o tempo (meia-vida ≈ 1 ano), ${(r.prep.coverage * 100).toFixed(0)}% com estatística de chutes, `
     + `${(r.prep.coverage1h * 100).toFixed(0)}% com escanteios do 1º tempo (a API só tem desde 2024).`
     + (r.anchors.corners1h ? ` Total de escanteios do 1º tempo ancorado na Pinnacle: modelo ${num(r.anchors.corners1h.model_total)} → `

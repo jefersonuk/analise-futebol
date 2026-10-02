@@ -135,12 +135,14 @@ export function verdict(line, odd) {
   if (line.diff_pp != null && Math.abs(line.diff_pp) >= 5)
     notes.push(`O modelo ${line.diff_pp > 0 ? 'gosta mais' : 'gosta menos'} desta linha que a Pinnacle (${line.diff_pp > 0 ? '+' : ''}${String(line.diff_pp).replace('.', ',')} pp). O preço segue a Pinnacle.`);
   if (line.priced_by !== 'pinnacle') notes.push('Sem odd da Pinnacle nesta linha: o preço é do modelo, por isso a odd mínima tem margem maior.');
+  if (line.inviable) return { level: 'no', title: `Inviável: ${line.inviable}`, ev: null, notes };
   if (!(odd > 1)) return { level: 'info', title: `Procure odd ≥ ${odd2(line.odd_min)} (${line.tier})`, ev: null, notes };
 
   const ev = p * odd - 1, pe = politicaE(odd);
   if (line.pinnacle_odd && odd > line.pinnacle_odd) notes.push(`Sua odd é maior que a da própria Pinnacle (${odd2(line.pinnacle_odd)}).`);
   let level, title;
-  if (pe.factor === 0) { level = 'no'; title = 'Não entrar: odd acima de 3,00 (Política E)'; }
+  if (line.inviable) { level = 'no'; title = `Inviável: ${line.inviable}`; }
+  else if (pe.factor === 0) { level = 'no'; title = 'Não entrar: odd acima de 3,00 (Política E)'; }
   else if (odd < line.fair_odd_blend) { level = 'no'; title = `Sem valor: a odd justa é ${odd2(line.fair_odd_blend)}`; }
   else if (odd < line.odd_min) { level = 'mid'; title = `Preço curto: o valor fica dentro da margem de erro (mínima ${odd2(line.odd_min)})`; }
   else if (line.tier === 'especulativa') { level = 'mid'; title = 'Tem preço, mas acerta pouco ou de forma instável (especulativa)'; }
@@ -170,7 +172,7 @@ const RELATED = [
   [/^cHO/, ['chH', 'crH']], [/^cAO/, ['chA', 'crA']], [/^cHU/, ['cornersU', 'chA']], [/^cAU/, ['cornersU', 'chH']],
 ];
 
-const playable = l => l && l.odd_min >= 1.5 && l.odd_min <= 3;
+const playable = l => l && !l.inviable && l.odd_min >= 1.5 && l.odd_min <= 3;
 const better = (a, b) => rankTier(a) - rankTier(b) || a.fragile - b.fragile || rankScore(b) - rankScore(a);
 
 export function alternatives(price, chosen, dossier) {

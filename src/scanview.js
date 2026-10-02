@@ -79,6 +79,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   function card(g, line, i) {
     const p = g.pinnacle_1h, e = g.expected_1h;
     const facts = [
+      g.favor_text ? `<b>${esc(g.favor_text)}</b>` : '',
       p ? `Pinnacle 1T: linha ${nb(p.line)} → total ${n2(p.total)} (modelo ${n2(p.model)})` : 'sem total 1T da Pinnacle',
       e ? `esperado no 1T: ${esc(g.fx.home.name)} ${n2(e.home)} · ${esc(g.fx.away.name)} ${n2(e.away)}` : '',
       g.share_1h ? `1º tempo = ${pct(g.share_1h)} dos escanteios do jogo` : '',
@@ -86,7 +87,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       g.no_history || '', ...g.alerts,
     ].filter(Boolean);
     const family = l => (SCAN_MARKETS.includes(line.market) ? SCAN_MARKETS.includes(l.market) : l.market === line.market);
-    const others = g.lines.filter(l => l.id !== line.id && family(l) && l.odd_min >= 1.5 && l.odd_min <= 3)
+    const others = g.lines.filter(l => l.id !== line.id && family(l) && !l.inviable && l.odd_min >= 1.5 && l.odd_min <= 3)
       .sort((a, b) => b.consistency_score - a.consistency_score).slice(0, 4)
       .map(l => `<span class="other">${esc(l.market.replace('escanteios ', ''))}: <b>${esc(l.line)}</b> ${pct(l.p_blend)} · mín ${n2(l.odd_min)}</span>`).join('');
     const extras = EXTRA_MARKETS.map(m => [m, bestLine(g.lines, { market: m })]).filter(([, l]) => l && l.id !== line.id)

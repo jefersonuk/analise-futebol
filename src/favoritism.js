@@ -11,7 +11,7 @@
 //   - roleOf: favorito / equilibrado / zebra.
 
 import { fit, predict, prepare } from './ratings.js';
-import { marketSupremacy } from './model.js';
+import { CORNERS_PER_GOAL, marketSupremacy } from './model.js';
 
 export { marketSupremacy };
 
@@ -90,7 +90,10 @@ export function calibrate(matches, pre = preMatch(matches)) {
     const avg = f => (b.length ? r3(b.reduce((s, r) => s + f(r), 0) / b.length) : null);
     return { from: lo, to: edges[i + 1], n: b.length, sup: avg(r => r.sup), d: avg(r => r.d), dc: avg(r => r.dc ?? 0), resid: avg(r => r.d - (r.dc ?? 0)) };
   });
-  return { n: rows.length, corners: relation(rows, 'd'), corners1h: relation(rows, 'd1'), bins };
+  // escanteios por gol de superioridade nesta base, puxado para a média das 16 ligas (peso de 300 jogos)
+  const so = rows.length >= 50 ? ols(rows.map(r => [r.sup]), rows.map(r => r.d)) : null, K = 300;
+  const cornersPerGoal = so ? CORNERS_PER_GOAL.map((p, i) => r3((rows.length * so[i] + K * p) / (rows.length + K))) : CORNERS_PER_GOAL;
+  return { n: rows.length, corners: relation(rows, 'd'), corners1h: relation(rows, 'd1'), bins, cornersPerGoal };
 }
 
 // Diferença de escanteios (mandante − visitante) esperada no jogo de hoje com o favoritismo do mercado.
@@ -104,7 +107,7 @@ export function favorFor(matches) {
   if (memo.has(key)) return memo.get(key);
   const pre = preMatch(matches), cal = calibrate(matches, pre);
   const out = { matches: matches.map(m => (pre.has(m.id) ? { ...m, sup: pre.get(m.id).sup } : m)),
-    cal: { n: cal.n, corners: cal.corners, corners1h: cal.corners1h } };
+    cal: { n: cal.n, cornersPerGoal: cal.cornersPerGoal } };
   if (memo.size > 40) memo.delete(memo.keys().next().value);
   memo.set(key, out);
   return out;

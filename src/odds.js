@@ -6,16 +6,23 @@ export const PINNACLE = 4;
 const n = s => String(parseFloat(s));   // "2.50" -> "2.5", "-0" -> "0"
 
 // Valor de aposta da API -> { id da linha no modelo, grupo de pernas complementares }.
-// No handicap asiático a API rotula a perna do visitante com a linha do mandante ("Away -1" = visitante +1).
+// No handicap asiático (de gols, 4, e de escanteios, 56) a API rotula a perna do visitante com a linha do
+// mandante ("Away -1" = visitante +1): as duas pernas do par têm o mesmo número.
 function mapValue(betId, value) {
   const v = String(value).trim();
   let m;
   switch (betId) {
     case 1: return { Home: '1', Draw: 'X', Away: '2' }[v] ? { id: { Home: '1', Draw: 'X', Away: '2' }[v], group: '1' } : null;
     case 8: return v === 'Yes' ? { id: 'bttsY', group: '8' } : v === 'No' ? { id: 'bttsN', group: '8' } : null;
-    case 4:
+    case 4: case 56: {   // 56 = handicap asiático de escanteios do jogo (mesma convenção do de gols)
       if (!(m = v.match(/^(Home|Away)\s*([+-]?[\d.]+)$/))) return null;
-      return m[1] === 'Home' ? { id: `ahH${n(m[2])}`, group: `4:${n(m[2])}` } : { id: `ahA${n(-parseFloat(m[2]))}`, group: `4:${n(m[2])}` };
+      const k = betId === 4 ? 'ah' : 'ch';
+      return m[1] === 'Home' ? { id: `${k}H${n(m[2])}`, group: `${betId}:${n(m[2])}` } : { id: `${k}A${n(-parseFloat(m[2]))}`, group: `${betId}:${n(m[2])}` };
+    }
+    case 57: case 58: {   // escanteios do mandante / do visitante (por time)
+      if (!(m = v.match(/^(Over|Under)\s*([\d.]+)$/))) return null;
+      return { id: `c${betId === 57 ? 'H' : 'A'}${m[1] === 'Over' ? 'O' : 'U'}${n(m[2])}`, group: `${betId}:${n(m[2])}` };
+    }
     case 5: case 50: case 45: case 77: {   // 77 = total de escanteios do 1º tempo
       if (!(m = v.match(/^(Over|Under)\s*([\d.]+)$/))) return null;
       const pre = { 45: 'corners', 77: 'c1' }[betId] || 'g';

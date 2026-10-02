@@ -36,3 +36,20 @@ test('usa só a Pinnacle e mapeia os mercados', () => {
   near(fair.get('cornersO9.5') + fair.get('cornersU9.5'), 1);
   near(fair.get('1') + fair.get('X') + fair.get('2'), 1);
 });
+
+test('escanteios da Pinnacle: handicap (56) e por time (57/58), formato real da API', () => {
+  // São Paulo x Santos, 02/10/2026 (valores reais da API)
+  const bets = [
+    { id: 56, values: [['Home -1', '1.60'], ['Away -1', '2.20'], ['Home -2', '1.96'], ['Away -2', '1.79'], ['Home +0', '1.69'], ['Away +0', '2.03']].map(([value, odd]) => ({ value, odd })) },
+    { id: 57, values: [{ value: 'Over 5.5', odd: '1.65' }, { value: 'Under 5.5', odd: '2.15' }] },
+    { id: 58, values: [{ value: 'Over 4.5', odd: '2.04' }, { value: 'Under 4.5', odd: '1.72' }] },
+  ];
+  const { odds, fair } = collect([{ id: 4, bets }]);
+  assert.equal(odds.get('chH-1'), 1.6);
+  assert.equal(odds.get('chA1'), 2.2);          // "Away -1" = visitante +1
+  assert.equal(odds.get('chA0'), 2.03);
+  assert.ok(Math.abs(fair.get('chH-1') + fair.get('chA1') - 1) < 1e-9);
+  assert.equal(odds.get('cHO5.5'), 1.65);
+  assert.equal(odds.get('cAU4.5'), 1.72);
+  assert.ok(Math.abs(fair.get('cHO5.5') + fair.get('cHU5.5') - 1) < 1e-9);
+});

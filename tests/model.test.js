@@ -131,3 +131,66 @@ test('escanteios 1º tempo: total ancorado na Pinnacle e handicap coerente', () 
   if (home && away) near(home.pWin + away.pWin, 1, 1e-9);
   assert.ok(anc.lines.some(l => l.market === 'Handicap escanteios 1T'));
 });
+
+import { diffDist, impliedCornerDiff, marketSupremacy, CORNERS_PER_GOAL } from '../src/model.js';
+import { inviableReason, priceLines, isCandidate } from '../src/dossier.js';
+import { recentGames } from '../src/insights.js';
+
+test('handicap de escanteios da Pinnacle: a diferença implícita volta ao valor que gerou o preço', () => {
+  for (const D of [-2.5, -0.8, 0, 1.3, 3]) {
+    const T = 10.4, h = -1.5;   // linha "mandante −1,5"
+    const r = settle(diffDist((T + D) / 2, (T - D) / 2, 1.2), h);
+    const fair = new Map([[`chH${h}`, r.pWin / (r.pWin + r.pLose)], [`chA${-h}`, r.pLose / (r.pWin + r.pLose)]]);
+    near(impliedCornerDiff(fair, T, 1.2), D, 0.01);
+  }
+});
+
+// Liga sintética com escanteios, para o cenário "favorito fora de casa".
+function cornersLeague() {
+  const season = new Date().getUTCFullYear();
+  return [season - 1, season].flatMap(s => leagueMatches(1, s));
+}
+const fairOf = (pairs) => new Map(pairs);
+const x12 = (h, d, a) => { const z = 1 / h + 1 / d + 1 / a; return [['1', 1 / h / z], ['X', 1 / d / z], ['2', 1 / a / z]]; };
+
+test('favorito pelo 1X2 leva os escanteios: a divisão segue o mercado, o total não muda', () => {
+  const ms = cornersLeague(), h = ms[0].h, a = ms[1].a, t = ms[ms.length - 1].t + 864e5;
+  const base = analyzeMatch(ms, h, a, t, {});
+  // Helmond x Heracles: 6,30 / 5,12 / 1,51 e total de gols 2,9 (Over/Under 2,5 sem margem ~0,58)
+  const fair = fairOf([...x12(6.302, 5.124, 1.509), ['gO2.5', 0.58], ['gU2.5', 0.42]]);
+  const res = analyzeMatch(ms, h, a, t, { fair });
+  const sup = res.favor.sup;
+  assert.ok(sup < -1, `superioridade do visitante: ${sup}`);
+  near(res.favor.diff_market, CORNERS_PER_GOAL[0] + CORNERS_PER_GOAL[1] * sup, 1e-9);
+  assert.equal(res.favor.corners_source, '1x2');
+  assert.ok(res.pred.corners.h - res.pred.corners.a < -2, 'visitante favorito com mais escanteios');
+  near(res.pred.corners.h + res.pred.corners.a, base.pred.corners.h + base.pred.corners.a, 1e-9);
+  assert.ok(res.pred.corners1h.h < res.pred.corners1h.a, '1º tempo segue o jogo');
+  // handicap positivo para o favorito: inviável; para o azarão: jogável
+  assert.match(inviableReason('c1hA1.5', res.favor, { home: 'Helmond', away: 'Heracles' }), /Heracles é o favorito/);
+  assert.equal(inviableReason('c1hH1.5', res.favor, { home: 'Helmond', away: 'Heracles' }), null);
+  assert.equal(inviableReason('ahA0.5', res.favor, {}) != null, true);
+  assert.equal(inviableReason('ahA-1.5', res.favor, {}), null);   // favorito dando handicap: existe
+  const teams = [['home', h], ['away', a]].map(([role, id]) => ({ role, name: role === 'home' ? 'Helmond' : 'Heracles', games: recentGames(res.prep, id) }));
+  const { priced, anchored } = priceLines(res, { odds: new Map(), fair, alerts: [], teams });
+  const fav = anchored.concat(priced).filter(l => /^c1hA\d/.test(l.id) && parseFloat(l.id.slice(4)) > 0);
+  assert.ok(fav.length && fav.every(l => l.inviable && !isCandidate(l)), 'Heracles +x no 1T nunca é candidata');
+});
+
+test('jogo equilibrado: handicap positivo vale para os dois lados', () => {
+  const ms = cornersLeague(), h = ms[0].h, a = ms[1].a, t = ms[ms.length - 1].t + 864e5;
+  const res = analyzeMatch(ms, h, a, t, { fair: fairOf([...x12(2.6, 3.3, 2.75), ['gO2.5', 0.5], ['gU2.5', 0.5]]) });
+  assert.ok(Math.abs(res.favor.sup) < 0.35);
+  assert.equal(inviableReason('c1hA0.5', res.favor), null);
+  assert.equal(inviableReason('c1hH0.5', res.favor), null);
+});
+
+test('modelo contra o mercado: alerta quando o modelo dá os escanteios ao outro time', () => {
+  const ms = cornersLeague(), t = ms[ms.length - 1].t + 864e5;
+  // procura um confronto em que o modelo dá mais escanteios ao mandante
+  const pairs = [...new Set(ms.map(m => m.h))].flatMap(h => [...new Set(ms.map(m => m.a))].filter(a => a !== h).map(a => [h, a]));
+  const [h, a] = pairs.find(([h, a]) => { const r = analyzeMatch(ms, h, a, t, {}); return r.pred.corners.h - r.pred.corners.a > 1.5; });
+  const res = analyzeMatch(ms, h, a, t, { fair: fairOf([...x12(7, 5, 1.45), ['gO2.5', 0.6], ['gU2.5', 0.4]]) });
+  assert.equal(res.favor.contra, true);
+  assert.ok(res.pred.corners.h < res.pred.corners.a);
+});

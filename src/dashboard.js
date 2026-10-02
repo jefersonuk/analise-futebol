@@ -221,11 +221,11 @@ export function pickDashboard(dossier, n = 5, { focus = true, side = id => id } 
   const add = (l, outside) => { if (out.length < n && !used.has(l.id)) { used.add(l.id); out.push(outside ? { ...l, outside } : l); } };
   if (focus) {
     const sides = new Set(first.map(l => side(l.id)));
-    pool.filter(l => sides.has(side(l.id)) && l.odd_min >= 1.5 && l.politica_e !== 'não entrar').sort(better)
+    pool.filter(l => sides.has(side(l.id)) && !l.inviable && l.odd_min >= 1.5 && l.politica_e !== 'não entrar').sort(better)
       .forEach(l => add(l, outsideReason(l, dossier.candidates_focus)));
   }
   const markets = new Set(out.map(l => l.market));
-  pool.filter(l => l.odd_min >= 1.2 && (focus || !markets.has(l.market)))
+  pool.filter(l => !l.inviable && l.odd_min >= 1.2 && (focus || !markets.has(l.market)))
     .sort((a, b) => (a.odd_min < 1.5) - (b.odd_min < 1.5) || better(a, b))
     .forEach(l => { if (focus || !markets.has(l.market)) { markets.add(l.market); add(l, outsideReason(l, [])); } });
   return out;

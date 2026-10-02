@@ -8,6 +8,12 @@ const MAXG = 10;
 const VMR_CAP = { corners: 1.35, shots: 1.6, sot: 1.6, corners1h: 1.6 };
 const ANCHOR_W = 0.8;   // peso da Pinnacle ao ancorar o total de escanteios do 1º tempo
 export const SHARE_1H = 0.472;   // fração dos escanteios no 1º tempo (Footiqo, 141 mil jogos) quando a liga não tem dado
+// Escanteios a mais do mandante por gol de superioridade esperada (mandante − visitante): diferença de
+// escanteios ≈ a + b·superioridade. Medido em 16 ligas (11,5 mil jogos, superioridade pré-jogo sem olhar o
+// futuro): b de 2,3 a 4,7 por liga, média ponderada 3,31; a ≈ 0. favoritism.js ajusta por base.
+export const CORNERS_PER_GOAL = [0, 3.31];
+export const FAV_EDGE = 0.35;      // superioridade (gols) a partir da qual há favorito; abaixo, jogo equilibrado
+export const CORNER_EDGE = 1;      // diferença de escanteios esperada (jogo) a partir da qual há favorito nos escanteios
 
 // PMF de contagem com média mu e variância phi*mu (Poisson se phi ~ 1, senão binomial negativa).
 export function dist(mu, phi, max) {
@@ -101,7 +107,7 @@ function countLines(key, market, prefix, mu, phi, span, c) {
 }
 
 // Diferença casa − fora de duas contagens (binomiais negativas com a dispersão da diferença medida na liga).
-function diffDist(muH, muA, phiD) {
+export function diffDist(muH, muA, phiD) {
   const max = Math.ceil(Math.max(muH, muA) * 3 + 20);
   const ph = dist(muH, phiD, max), pa = dist(muA, phiD, max), diff = new Map();
   for (let i = 0; i <= max; i++) for (let j = 0; j <= max; j++) diff.set(i - j, (diff.get(i - j) || 0) + ph[i] * pa[j]);
@@ -233,6 +239,19 @@ export function marketSupremacy(fair, total) {
   return (lo + hi) / 2;
 }
 
+// Diferença de escanteios (mandante − visitante) que a Pinnacle precifica no handicap de escanteios (56):
+// a que reproduz a probabilidade sem margem da linha mais equilibrada, com o total T.
+export function impliedCornerDiff(fair, total, phiD) {
+  const lines = [...fair].filter(([id]) => /^chH-?[\d.]+$/.test(id)).map(([id, p]) => [parseFloat(id.slice(3)), p]);
+  if (!lines.length || !(total > 1)) return null;
+  const [h, p] = lines.sort((a, b) => Math.abs(a[1] - 0.5) - Math.abs(b[1] - 0.5))[0];
+  const probAt = d => { const r = settle(diffDist((total + d) / 2, (total - d) / 2, phiD), h); return r.pWin / (r.pWin + r.pLose); };
+  let lo = -(total - 0.6), hi = total - 0.6;
+  if (p <= probAt(lo) || p >= probAt(hi)) return null;
+  for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (probAt(mid) < p) lo = mid; else hi = mid; }
+  return (lo + hi) / 2;
+}
+
 // Redivide uma previsão de contagem entre os times para a diferença d (o total não muda).
 const resplit = (p, d) => {
   const T = p.h + p.a, x = Math.max(-(T - 0.4), Math.min(T - 0.4, d));
@@ -255,18 +274,28 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null, share1
       if (k === 'corners') phi.cornersDiff = r.diff;
     }
   }
-  // Favoritismo: a superioridade de gols da Pinnacle (do modelo, sem odds) redistribui os escanteios entre
-  // os times onde a liga mostrou, fora da amostra, que isso melhora a previsão. O total não muda.
+  // Favoritismo e divisão dos escanteios. Quem deve ter mais escanteios vem do mercado, como o total:
+  // 1º o handicap de escanteios da Pinnacle (56), 2º os escanteios por time dela (57/58), 3º o favoritismo
+  // do 1X2 (superioridade de gols × escanteios por gol, medido nos dados). A divisão final é 80% mercado e
+  // 20% modelo — o modelo sozinho erra feio quando a base não liga os times (time rebaixado, copa).
   const gT = fair ? impliedTotal(fair, 'g', 1) : null;
   const supMkt = gT ? marketSupremacy(fair, gT.implied_total) : null;
   const sup = supMkt ?? (pred.goals ? pred.goals.h - pred.goals.a : null);
-  const fav = { sup, source: supMkt != null ? 'pinnacle' : 'modelo', applied: false, applied1h: false };
-  const lin = (r, dc) => (r?.useful ? r.coef[0] + r.coef[1] * dc + r.coef[2] * sup : null);
-  if (favor && sup != null && pred.corners) {
-    const dc = pred.corners.h - pred.corners.a, d = lin(favor.corners, dc);
-    fav.diff_model = dc;
-    if (d != null) { pred.corners = resplit(pred.corners, d); fav.diff = pred.corners.h - pred.corners.a; fav.applied = true; }
-    fav.diff1h = lin(favor.corners1h, dc);
+  const fav = { sup, source: supMkt != null ? 'pinnacle_1x2' : 'modelo', applied: false };
+  if (pred.corners && sup != null) {
+    const dcModel = pred.corners.h - pred.corners.a;
+    const tC = fair ? impliedTotal(fair, 'corners', phi.corners) : null, T = tC ? tC.implied_total : pred.corners.h + pred.corners.a;
+    let dMkt = fair ? impliedCornerDiff(fair, T, phi.cornersDiff || phi.corners) : null, src = dMkt != null ? 'pinnacle_handicap' : null;
+    if (dMkt == null && fair) {
+      const h = impliedTotal(fair, 'cH', phi.corners), a = impliedTotal(fair, 'cA', phi.corners);
+      if (h && a) { dMkt = h.implied_total - a.implied_total; src = 'pinnacle_por_time'; }
+    }
+    if (dMkt == null) { const [a0, b0] = favor?.cornersPerGoal || CORNERS_PER_GOAL; dMkt = a0 + b0 * sup; src = supMkt != null ? '1x2' : 'modelo'; }
+    const w = src === 'modelo' ? 0.5 : ANCHOR_W, d = w * dMkt + (1 - w) * dcModel;
+    pred.corners = resplit(pred.corners, d);
+    Object.assign(fav, { applied: true, corners_source: src, diff_market: dMkt, diff_model: dcModel, diff: pred.corners.h - pred.corners.a, weight_market: w,
+      // o modelo aponta o outro time como dono dos escanteios, com folga: alerta (a base provavelmente não liga os times)
+      contra: Math.sign(dMkt) !== Math.sign(dcModel) && Math.abs(dMkt - dcModel) >= 1.5 });
   }
   if (pred.corners && (!pred.corners1h || prep.coverage1h < share1hBelow)) {
     let c1 = 0, c = 0, n = 0;
@@ -284,12 +313,15 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null, share1
       anchors.corners1h = { model_total: model, pinnacle_total: imp.implied_total, from_line: imp.from_line, factor: f };
     }
   }
-  // 1º tempo com relação própria na liga: a diferença dela (o 1º tempo da fração já herdou a do jogo)
-  if (fav.diff1h != null && pred.corners1h) {
-    fav.diff1h_model = pred.corners1h.h - pred.corners1h.a;
-    pred.corners1h = resplit(pred.corners1h, fav.diff1h);
-    fav.applied1h = true;
-  } else if (fav.applied && anchors.corners1hShare) fav.applied1h = true;
+  // 1º tempo: a diferença de mercado do jogo na proporção do 1º tempo (total 1T ÷ total do jogo), com o
+  // mesmo peso; quando o 1º tempo já saiu da fração dos escanteios do jogo, ele herdou a divisão acima.
+  if (fav.applied && pred.corners1h) {
+    const T1 = pred.corners1h.h + pred.corners1h.a, Tf = anchors.corners?.pinnacle_total
+      ?? (fair && impliedTotal(fair, 'corners', phi.corners)?.implied_total) ?? (pred.corners.h + pred.corners.a);
+    const d1Model = pred.corners1h.h - pred.corners1h.a, d1Mkt = fav.diff_market * (T1 / Tf);
+    pred.corners1h = resplit(pred.corners1h, fav.weight_market * d1Mkt + (1 - fav.weight_market) * d1Model);
+    Object.assign(fav, { diff1h_market: d1Mkt, diff1h_model: d1Model, diff1h: pred.corners1h.h - pred.corners1h.a });
+  }
   // Total de escanteios do jogo: as linhas de total seguem com o modelo puro (misturado com a Pinnacle no
   // dossiê); só os mercados derivados (handicap, quem tem mais, corrida) usam o total ancorado.
   const derived = {};

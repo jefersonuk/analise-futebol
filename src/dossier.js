@@ -4,13 +4,14 @@
 //
 // api: searchTeams, upcoming, leaguesOf, leagueMatches, fixtureOdds, injuries, standings, lastPlayed, quota
 
-import { DERIVED, METRICS, analyzeMatch, ev, fairOdd, impliedTotal, politicaE, sideLabel } from './model.js';
+import { CORNER_EDGE, DERIVED, FAV_EDGE, METRICS, analyzeMatch, ev, fairOdd, impliedTotal, politicaE, sideLabel } from './model.js';
 import { rank } from './ratings.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { history } from './dashboard.js';
 import { ODD_FLOOR, consistency, rankScore, rankTier, underOk } from './consistency.js';
 import { HALF_FROM } from './client.js';
+import { favorFor } from './favoritism.js';
 
 const DAY = 864e5;
 // Mercados em que o Jeferson concentra o trabalho (painel e candidatas de foco).
@@ -175,11 +176,12 @@ export function stakeFor(p, odd, banca) {
 // deriva de um total que ela cota (odd mínima = justa × 1,05), senão modelo puro (× 1,08). Sempre frágil.
 // hi: histórico dos dois times na linha ({ home, away }, formato de hist() do dossiê).
 export function modelEntry(l, { res, hi, banca, names = {} }) {
+  const inviable = inviableReason(l.id, res.favor, names);
   const pm = cond(l), range = l.sc.map(cond), anchor = res.anchors[DERIVED[l.market]];
   const oddMin = (1 / pm) * (anchor ? 1.05 : 1.08);
   const c = consistency({ p: pm, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
   return { id: l.id, market: l.market, line: sideLabel(l.label, names.home, names.away), p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
-    fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0,
+    fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0, inviable,
     priced_by: anchor ? `modelo ancorado no total ${DERIVED[l.market] === 'corners1h' ? '1T ' : ''}de escanteios da Pinnacle`
       : 'só o modelo (sem odd da Pinnacle nesta linha)',
     pinnacle_odd: null, p_pinnacle: null, diff_pp: null,
@@ -187,6 +189,37 @@ export function modelEntry(l, { res, hi, banca, names = {} }) {
     fair_odd_blend: r(1 / pm, 2), fragile: true, odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null,
     ...stakeFor(pm, oddMin, banca), history: hi };
 }
+
+// Handicap POSITIVO para o favorito não existe a preço jogável: as casas montam a linha principal em volta
+// da vantagem esperada do favorito, e "favorito +x" sai abaixo de ~1,30. Linha assim só aparece quando o
+// modelo diverge do mercado — é artefato, não oportunidade. Favorito: nos escanteios, pela diferença que o
+// mercado espera (handicap de escanteios da Pinnacle ou o 1X2); nos gols, pela superioridade do 1X2.
+export function inviableReason(id, favor, names = {}) {
+  const m = id.match(/^(ah|ch|c1h)([HA])(-?[\d.]+)$/);
+  if (!m || !(+m[3] > 0) || !favor || favor.sup == null) return null;
+  const goals = favor.sup >= FAV_EDGE ? 'H' : favor.sup <= -FAV_EDGE ? 'A' : null;
+  const corners = favor.diff_market == null ? goals
+    : favor.diff_market >= CORNER_EDGE ? 'H' : favor.diff_market <= -CORNER_EDGE ? 'A' : null;
+  if ((m[1] === 'ah' ? goals : corners) !== m[2]) return null;
+  const who = (m[2] === 'H' ? names.home : names.away) || (m[2] === 'H' ? 'o mandante' : 'o visitante');
+  return `${who} é o favorito${m[1] === 'ah' ? '' : ' nos escanteios'}: handicap positivo para o favorito não sai a preço jogável`;
+}
+
+// Resumo do favoritismo e da divisão dos escanteios, para a tela e o especialista.
+const SRC = { pinnacle_handicap: 'handicap de escanteios da Pinnacle', pinnacle_por_time: 'escanteios por time da Pinnacle',
+  '1x2': 'favoritismo do 1X2 × escanteios por gol medidos na liga', modelo: 'modelo de gols (sem odds)' };
+export function favorSummary(f, names = {}) {
+  if (!f || f.sup == null) return null;
+  const n1 = x => Math.abs(x).toFixed(1).replace('.', ','), who = x => (x >= 0 ? names.home : names.away);
+  const parts = [Math.abs(f.sup) < FAV_EDGE
+    ? `jogo equilibrado (${n1(f.sup)} gol de diferença${f.source === 'pinnacle_1x2' ? ' pela Pinnacle' : ' pelo modelo'})`
+    : `favorito: ${who(f.sup)} (${n1(f.sup)} gol de superioridade${f.source === 'pinnacle_1x2' ? ', 1X2 da Pinnacle' : ', pelo modelo'})`];
+  if (f.applied) parts.push(`escanteios: o mercado põe ${who(f.diff_market)} com ${n1(f.diff_market)} a mais no jogo`
+    + `${f.diff1h_market != null ? ` e ${n1(f.diff1h_market)} no 1º tempo` : ''} (${SRC[f.corners_source]}); o modelo sozinho dizia ${who(f.diff_model)} +${n1(f.diff_model)}`);
+  return parts.join(' · ');
+}
+export const contraAlert = (f, names = {}) => (f?.contra
+  ? `modelo contra o mercado nos escanteios: o mercado põe ${f.diff_market >= 0 ? names.home : names.away} com mais escanteios e o modelo dizia o contrário — a divisão segue o mercado` : null);
 
 // Nome do mandante e do visitante a partir de teams [{ role, name }].
 export const teamNames = teams => ({ home: teams.find(t => t.role === 'home')?.name, away: teams.find(t => t.role === 'away')?.name });
@@ -221,7 +254,7 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
     if (only && !only(l)) continue;
     const pm = cond(l), range = l.sc.map(cond), odd = odds.get(l.id), pp = fair.get(l.id);
     const soft = /escanteios|chutes/i.test(l.market);
-    const base = { id: l.id, market: l.market, line: sideLabel(l.label, names.home, names.away), p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
+    const base = { id: l.id, market: l.market, line: sideLabel(l.label, names.home, names.away), inviable: inviableReason(l.id, res.favor, names), p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
       fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0 };
     const hi = hist(l), cons = p => consistency({ p, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
     if (odd && pp != null) {
@@ -251,15 +284,39 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
 // Candidata (consistência primeiro, preço depois): âncora/sólida, odd mínima ≥ 1,50 e permitida pela
 // Política E, que uma casa soft consegue pagar (até ~5% acima da Pinnacle), e under só se for âncora.
 export const isCandidate = l => l.tier !== 'especulativa' && l.odd_min >= ODD_FLOOR && l.politica_e !== 'não entrar'
-  && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5) && underOk(l);
+  && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5) && underOk(l) && !l.inviable;
 // Ordem: nível (under um nível abaixo), não frágil antes de frágil, score (under com desconto), preço.
 export const byConsistency = (a, b) => rankTier(a) - rankTier(b) || a.fragile - b.fragile
   || rankScore(b) - rankScore(a) || (a.odd_min_vs_pinnacle_pct ?? 99) - (b.odd_min_vs_pinnacle_pct ?? 99);
 
+// Candidatas — consistência primeiro, preço depois: só linhas âncora/sólida, com odd mínima dentro da
+// faixa operada (≥ 1,50 e permitida pela Política E), que uma casa soft consegue pagar (até ~5% acima da
+// Pinnacle) e que o mercado oferece. Ordem: nível, não frágil antes de frágil, score, facilidade do preço.
+function pickCandidates(priced, anchored) {
+  priced.sort((a, b) => Math.abs(b.diff_pp) - Math.abs(a.diff_pp));
+  const all = priced.concat(anchored);
+  const top = list => list.filter(isCandidate).sort(byConsistency).filter(distinct()).slice(0, 8).map(l => l.id);
+  return { candidatesFocus: top(all.filter(l => FOCUS.includes(l.market))), candidates: top(all) };
+}
+
+// Análise guardada aberta de novo: refaz o preço de todas as linhas com o modelo atual e as odds guardadas
+// (sem requisição), para o painel nunca misturar números de duas versões do modelo.
+export function repriceDossier(dossier, res, oddsP, teams, banca = 44000) {
+  const { odds, fair } = collect(oddsP?.bookmakers || []);
+  const fx = { home: { name: teamNames(teams).home }, away: { name: teamNames(teams).away } };
+  const alerts = (dossier.data_quality?.alerts || []).filter(a => !/^modelo contra o mercado/.test(a));
+  const contra = contraAlert(res.favor, { home: fx.home.name, away: fx.away.name });
+  if (contra) alerts.push(contra);
+  const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams, banca });
+  return { ...dossier, data_quality: { ...dossier.data_quality, alerts }, lines_with_pinnacle: priced, lines_anchored: anchored,
+    model_only_lines: modelOnly, ...pickCandidates(priced, anchored),
+    favoritism: res.favor && { summary: favorSummary(res.favor, { home: fx.home.name, away: fx.away.name }), ...res.favor } };
+}
+
 // fx: jogo (de upcoming). team: time buscado. fixtures: próximos jogos dele (evita chamada repetida).
 // matches/lg: jogos da liga já baixados pelo app (opcional). banca em R$.
 // oddsPayload: resultado de api.fixtureOdds já buscado pelo app (para a tabela e o dossiê usarem as mesmas odds).
-export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtures = [], banca = 44000, matches = null, lg = null, oddsPayload = null, national = false, onProgress }) {
+export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtures = [], banca = 44000, matches = null, lg = null, oddsPayload = null, national = false, favor = null, onProgress }) {
   const S = fx.league.season;
   if (!lg) lg = await resolveBase(api, fx, national);
   if (!lg) throw new Error('os dois times não disputam a mesma liga nesta temporada; confronto entre ligas não é suportado');
@@ -281,7 +338,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   const { odds, fair } = collect(oddsP.bookmakers);
   const oddsAgeMin = oddsP.updatedAt ? Math.round((oddsP.fetchedAt - Date.parse(oddsP.updatedAt)) / 60e3) : null;
   const injuries = val(1, []), table = val(2, []);
-  const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t, { fair });
+  const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t, { fair, favor: favor ?? favorFor(matches).cal });
   if (!res.lines.length) throw new Error('jogos insuficientes na liga para ajustar o modelo');
   const nextOf = { [team.id]: fixtures, [other.id]: val(5, []) };
 
@@ -297,6 +354,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   else if (lg.cross) alerts.push(`jogo entre ligas (${fx.league.name}): ${lg.name} — a comparação entre as ligas vem dos jogos da competição; confira se a diferença de nível faz sentido`);
   else if (lg.id !== fx.league.id) alerts.push(`jogo de ${fx.league.name} medido pela liga ${lg.name} (rotação provável)`);
   if (lg.national && fx.league.id === FRIENDLIES) alerts.push('amistoso: rotação e intensidade imprevisíveis');
+  const contra = contraAlert(res.favor, { home: fx.home.name, away: fx.away.name });
+  if (contra) alerts.push(contra);
   if (!odds.size) alerts.push('sem odds da Pinnacle: não há régua de preço');
   else if (oddsAgeMin > ODDS_STALE_MIN) alerts.push(`odds da Pinnacle com ${oddsAgeMin} min de idade (a API atualiza a cada ~3 h): confira o preço atual antes de entrar`);
 
@@ -346,17 +405,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   const teamsHist = [{ role: 'home', name: fx.home.name, games: recent[fx.home.id] },
     { role: 'away', name: fx.away.name, games: recent[fx.away.id] }];
   const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams: teamsHist, banca });
-  priced.sort((a, b) => Math.abs(b.diff_pp) - Math.abs(a.diff_pp));
-  // Candidatas — consistência primeiro, preço depois: só linhas âncora/sólida, com odd mínima dentro da
-  // faixa operada (≥ 1,50 e permitida pela Política E) e que uma casa soft consegue pagar (até ~5% acima da Pinnacle).
-  // Ordem: nível de consistência, não frágil antes de frágil, score de consistência, facilidade do preço.
-  const ranked = isCandidate, order = byConsistency;
-  const candidatesFocus = priced.concat(anchored).filter(l => FOCUS.includes(l.market) && ranked(l))
-    .sort(order).filter(distinct()).slice(0, 8).map(l => l.id);
-  const candidates = priced.concat(anchored)
-    .filter(ranked)
-    .sort(order)
-    .filter(distinct()).slice(0, 8).map(l => l.id);
+  const { candidatesFocus, candidates } = pickCandidates(priced, anchored);
 
   const imp = (prefix, phi) => {
     const x = impliedTotal(fair, prefix, phi);
@@ -383,6 +432,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
       home: teamOut(fx.home, 'mandante', val(3, null)),
       away: teamOut(fx.away, 'visitante', val(4, null)),
     },
+    favoritism: res.favor && { summary: favorSummary(res.favor, { home: fx.home.name, away: fx.away.name }),
+      ...Object.fromEntries(Object.entries(res.favor).map(([k, v]) => [k, typeof v === 'number' ? r(v, 2) : v])) },
     focus_markets: FOCUS,
     candidates_focus: candidatesFocus,
     candidates,

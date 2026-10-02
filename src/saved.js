@@ -26,9 +26,9 @@ export async function listSaved() {
   return Object.values(await index()).filter(x => x.t > Date.now()).sort((a, b) => a.t - b.t);
 }
 
-export async function saveAnalysis({ fixture, team, matches, oddsP, dossier }) {
+export async function saveAnalysis({ fixture, team, matches, oddsP, dossier, favor = null }) {
   const savedAt = new Date().toISOString();
-  await saveDoc(KEY(fixture.id), { v: 1, savedAt, fixture, team, matches, oddsP, dossier });
+  await saveDoc(KEY(fixture.id), { v: 1, savedAt, fixture, team, matches, oddsP, dossier, favor });
   const idx = await index();
   idx[fixture.id] = { id: fixture.id, home: fixture.home.name, away: fixture.away.name, league: fixture.league.name,
     t: fixture.t, savedAt, oddsAt: oddsP?.updatedAt || null };
