@@ -6,6 +6,8 @@
 // do 1º tempo ficam guardados para sempre; a lista de jogos de uma liga só é rebaixada quando algum
 // jogo agendado já deveria ter terminado; buscas de time, ligas e calendário têm validade longa.
 
+import { BETS } from './odds.js';
+
 const HOUR = 3600e3, DAY = 24 * HOUR;
 const FINISHED = new Set(['FT', 'AET', 'PEN']);
 const DEAD = new Set(['CANC', 'ABD', 'AWD', 'WO']);   // não vão acontecer: não seguram o próximo refresh
@@ -187,18 +189,20 @@ export function makeClient({ get: rawGet, load, save }) {
     dayFixtures: date => cached(`af:day:${date}`, 30 * 60e3, async () =>
       (await get('/fixtures', { date, timezone: TZ })).filter(f => f.fixture.status.short === 'NS').map(fixtureOut)),
 
-    // Odds da Pinnacle de um mercado para todos os jogos de uma data (paginado, 10 jogos por página).
+    // Odds da Pinnacle de todos os jogos de uma data (paginado, 10 jogos por página): de um mercado (bet) ou,
+    // sem bet, de todos os mercados que o app lê (BETS) — o mesmo que fixtureOdds daria jogo a jogo.
     // Validade de 20 min: a API só atualiza odds a cada ~3 h. Devolve [{ fixture, league, updatedAt, bookmakers }].
-    dayOdds: (date, bet) => cached(`af:dayodds:${date}:${bet}`, 20 * 60e3, async () => {
+    dayOdds: (date, bet = null) => cached(`af:dayodds:${date}:${bet ?? 'all'}`, 20 * 60e3, async () => {
       const out = [];
       let tz = { timezone: TZ };
-      for (let page = 1, total = 1; page <= total && page <= 60; page++) {
+      for (let page = 1, total = 1; page <= total && page <= 100; page++) {
         let res;
-        try { res = await get('/odds', { date, bookmaker: 4, bet, page, ...tz }); }
+        try { res = await get('/odds', { date, bookmaker: 4, ...(bet ? { bet } : {}), page, ...tz }); }
         catch (e) { if (tz.timezone && /timezone/i.test(e.message)) { tz = {}; page--; continue; } throw e; }
         total = res.paging?.total || total;
         for (const r of res) out.push({ fixture: r.fixture.id, league: { id: r.league.id, name: r.league.name, season: r.league.season,
-          country: r.league.country }, updatedAt: r.update || null, bookmakers: r.bookmakers || [] });
+          country: r.league.country }, updatedAt: r.update || null,
+          bookmakers: (r.bookmakers || []).map(b => ({ ...b, bets: (b.bets || []).filter(x => bet || BETS.includes(x.id)) })) });
       }
       return out;
     }),

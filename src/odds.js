@@ -2,6 +2,9 @@
 // com a probabilidade sem margem (método power).
 
 export const PINNACLE = 4;
+// Mercados da API que o app lê (mapValue): 1X2, handicap asiático, gols, ambas marcam, escanteios do jogo,
+// handicap de escanteios, escanteios por time e total de escanteios do 1º tempo.
+export const BETS = [1, 4, 5, 8, 45, 50, 56, 57, 58, 77];
 
 const n = s => String(parseFloat(s));   // "2.50" -> "2.5", "-0" -> "0"
 

@@ -34,18 +34,18 @@ export function briefGame(d) {
   };
 }
 
-// A varredura do dia: cada jogo com a linha do ranking, as alternativas e a melhor linha de gols e de
-// escanteios do jogo inteiro.
+// A varredura do dia: cada jogo com a linha do ranking, as alternativas e a melhor linha de cada mercado
+// da varredura (1º tempo, gols e escanteios do jogo).
 export function briefScan(scan, ranked) {
   return {
     kind: 'varredura',
-    date: scan.date, generated_at: scan.generated_at, fixtures: scan.fixtures, with_odds: scan.with_odds,
+    date: scan.date, generated_at: scan.generated_at, fixtures: scan.fixtures, with_odds: scan.with_odds, with_1h: scan.with_1h ?? null,
     games: ranked.map(({ g, line }, i) => ({
       rank: i + 1,
       kickoff: new Date(g.fx.t).toISOString(), competition: g.fx.league.name, home: g.fx.home.name, away: g.fx.away.name,
       base: g.team_base ? 'jogos dos dois times em todas as competições' : 'liga do jogo',
       alerts: g.alerts, odds_age_min: g.odds_age_min, pinnacle_1h: g.pinnacle_1h, expected_1h: g.expected_1h,
-      share_1h: g.share_1h, c1_history_games: g.c1_known, no_history: g.no_history || null,
+      share_1h: g.share_1h, c1_history_games: g.c1_known, no_history: g.no_history || null, no_corners: g.no_corners || null,
       top_line: slim(line),
       other_lines: g.lines.filter(l => l.id !== line.id && l.market === line.market && l.odd_min >= 1.4 && l.odd_min <= 3).sort(byScore).slice(0, 3).map(slim),
       best_by_market: Object.fromEntries(Object.entries(g.best || {}).filter(([, l]) => l && l.id !== line.id).map(([m, l]) => [m, slim(l)])),

@@ -1,7 +1,8 @@
-// Tela da varredura do dia (escanteios do 1º tempo): ranking, relatório de cada jogo com os gráficos dos
-// últimos 10 jogos de cada time na linha, entrada direta e atalho para a análise completa do jogo.
+// Tela da varredura do dia: ranking (escanteios do 1º tempo primeiro; sem eles, gols e escanteios do jogo),
+// relatório de cada jogo com os gráficos dos últimos 10 jogos de cada time na linha, entrada direta e atalho
+// para a análise completa do jogo.
 
-import { EXTRA_MARKETS, SCAN_MARKETS, bestLine, rankGames, scanDay } from './scanner.js';
+import { CORNER_MARKETS, EXTRA_MARKETS, GOAL_MARKETS, H1, H1_MARKETS, bestLine, rankGames, scanDay } from './scanner.js';
 import { bindTooltips, renderDashboard } from './dashboard.js';
 import { load, save } from './store.js';
 import { bindSpecialist, briefScan } from './brief.js';
@@ -14,6 +15,10 @@ const nb = x => String(x).replace('.', ',');
 const hour = t => new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const dayStr = off => new Date(Date.now() + off * 864e5).toLocaleDateString('sv-SE');   // AAAA-MM-DD no fuso local
 const BUDGET_KEY = 'afScanBudget';
+const GAME_MARKETS = GOAL_MARKETS.concat(CORNER_MARKETS);
+// Filtros: a linha de cada jogo (1º tempo quando há candidata nele), o 1º tempo e cada mercado.
+const FILTERS = [['Melhor do jogo', null], ['Escanteios 1T', H1], ['Total 1T', 'Total escanteios 1T'], ['Handicap 1T', 'Handicap escanteios 1T'],
+  ...GAME_MARKETS.map(m => [m, m])];
 
 export function initScan({ api, openEntry, analyzeFixture, banca }) {
   let scan = null, market = null, ranked = [];
@@ -45,10 +50,12 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const out = $('#scanOut');
     $('#scanSpec').hidden = !scan?.games.length;
     if (!scan) { out.innerHTML = ''; return; }
-    ranked = rankGames(scan.games, { market });
+    ranked = rankGames(scan.games, { market }).slice(0, scan.top || 20);
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const chips = [['Escanteios 1T', null], ...SCAN_MARKETS.map(m => [m.replace('escanteios ', ''), m]), ...EXTRA_MARKETS.map(m => [m, m])]
-      .map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
+    const chips = FILTERS.map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
+    // varredura guardada pela versão anterior (só jogos com o 1º tempo na Pinnacle) não tem with_1h
+    const pool = scan.with_1h == null ? `${scan.with_odds} com escanteios do 1º tempo na Pinnacle`
+      : `${scan.with_odds} com odds da Pinnacle (${scan.with_1h} com escanteios do 1º tempo)`;
     const rows = ranked.map(({ g, line }, i) => {
       const h = line.history || {};
       // contagem simples (o acerto pelo papel de hoje fica na consistência e no gráfico)
@@ -63,7 +70,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const cards = ranked.map(({ g, line }, i) => card(g, line, i)).join('');
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
       ${scan.skipped.map(s => `<li>${hour(s.fx.t)} ${esc(s.fx.home.name)} x ${esc(s.fx.away.name)} <span class="muted">(${esc(s.fx.league.name)}): ${esc(s.why)}</span></li>`).join('')}</ul></details>` : '';
-    out.innerHTML = `<p class="muted">Varredura de ${when}: ${scan.fixtures} jogos por começar, ${scan.with_odds} com escanteios do 1º tempo na Pinnacle,
+    out.innerHTML = `<p class="muted">Varredura de ${when}: ${scan.fixtures} jogos por começar, ${pool},
       ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>
       <div class="chips" id="scanChips">${chips}</div>
       ${ranked.length ? `<div class="scroll"><table class="scanrank"><tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Linha</th><th>Nível</th>
@@ -81,17 +88,18 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const p = g.pinnacle_1h, e = g.expected_1h;
     const facts = [
       g.favor_text ? `<b>${esc(g.favor_text)}</b>` : '',
-      p ? `Pinnacle 1T: linha ${nb(p.line)} → total ${n2(p.total)} (modelo ${n2(p.model)})` : 'sem total 1T da Pinnacle',
-      e ? `esperado no 1T: ${esc(g.fx.home.name)} ${n2(e.home)} · ${esc(g.fx.away.name)} ${n2(e.away)}` : '',
-      g.share_1h ? `1º tempo = ${pct(g.share_1h)} dos escanteios do jogo` : '',
-      `histórico do 1º tempo: ${g.c1_known[0]} e ${g.c1_known[1]} dos últimos 10 jogos`,
-      g.no_history || '', ...g.alerts,
+      g.no_corners ? `<b>${esc(g.no_corners)}</b>` : p ? '' : 'sem escanteios do 1º tempo na Pinnacle neste jogo',
+      p ? `Pinnacle 1T: linha ${nb(p.line)} → total ${n2(p.total)} (modelo ${n2(p.model)})` : '',
+      p && e ? `esperado no 1T: ${esc(g.fx.home.name)} ${n2(e.home)} · ${esc(g.fx.away.name)} ${n2(e.away)}` : '',
+      p && g.share_1h ? `1º tempo = ${pct(g.share_1h)} dos escanteios do jogo` : '',
+      p ? `histórico do 1º tempo: ${g.c1_known[0]} e ${g.c1_known[1]} dos últimos 10 jogos` : '',
+      esc(g.no_history || ''), ...g.alerts.map(esc),
     ].filter(Boolean);
-    const family = l => (SCAN_MARKETS.includes(line.market) ? SCAN_MARKETS.includes(l.market) : l.market === line.market);
+    const family = l => (H1_MARKETS.includes(line.market) ? H1_MARKETS.includes(l.market) : l.market === line.market);
     const others = g.lines.filter(l => l.id !== line.id && family(l) && !l.inviable && l.odd_min >= 1.5 && l.odd_min <= 3)
       .sort((a, b) => b.consistency_score - a.consistency_score).slice(0, 4)
       .map(l => `<span class="other">${esc(l.market.replace('escanteios ', ''))}: <b>${esc(l.line)}</b> ${pct(l.p_blend)} · mín ${n2(l.odd_min)}</span>`).join('');
-    const extras = EXTRA_MARKETS.map(m => [m, bestLine(g.lines, { market: m })]).filter(([, l]) => l && l.id !== line.id)
+    const extras = GAME_MARKETS.map(m => [m, bestLine(g.lines, { market: m })]).filter(([, l]) => l && l.id !== line.id)
       .map(([m, l]) => `<span class="other">${esc(m)}: ${mini(l)}</span>`).join('');
     return `<article class="scancard" id="scan-${i}" data-g="${i}">
       <div class="row head"><h3>${i + 1}. ${esc(g.fx.home.name)} x ${esc(g.fx.away.name)} <span class="muted">${hour(g.fx.t)} · ${esc(g.fx.league.name)}</span></h3>

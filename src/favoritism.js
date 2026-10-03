@@ -103,7 +103,8 @@ export const cornerDiff = (rel, dc, sup) => (rel?.useful ? rel.coef[0] + rel.coe
 // da base. Guardado na memória por base (o cálculo leva ~0,5 s por liga).
 const memo = new Map();
 export function favorFor(matches) {
-  const key = `${matches.length}:${matches.reduce((s, m) => Math.max(s, m.t), 0)}:${matches[0]?.id}`;
+  // a mesma base com estatística ou 1º tempo chegando depois não pode reaproveitar o cálculo antigo
+  const key = `${matches.length}:${matches.reduce((s, m) => Math.max(s, m.t), 0)}:${matches[0]?.id}:${matches.filter(m => m.s).length}:${matches.filter(m => m.c1).length}`;
   if (memo.has(key)) return memo.get(key);
   const pre = preMatch(matches), cal = calibrate(matches, pre);
   const out = { matches: matches.map(m => (pre.has(m.id) ? { ...m, sup: pre.get(m.id).sup } : m)),

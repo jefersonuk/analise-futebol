@@ -113,13 +113,14 @@ const METHOD = __METHOD__;
 const MARK = "#ESPECIALISTA-FUTEBOL v1";
 __MARKDOWN__
 
-const SCAN_METHOD = `Você é o mesmo analista descrito acima, agora diante da VARREDURA DO DIA do app: os jogos em que a Pinnacle cota o total de escanteios do 1º tempo, já ranqueados pela linha de escanteios do 1º tempo mais consistente de cada jogo (total ou handicap, linhas de 0,5 em 0,5).
+const SCAN_METHOD = `Você é o mesmo analista descrito acima, agora diante da VARREDURA DO DIA do app: os jogos do dia com odds da Pinnacle, já ranqueados pela linha mais consistente de cada jogo. A linha do ranking é a de escanteios do 1º tempo (total ou handicap, de 0,5 em 0,5) quando a Pinnacle cota o 1º tempo e há candidata nele; senão, a mais consistente entre total de gols, handicap asiático, total de escanteios e handicap de escanteios do jogo.
 
-Campos de cada jogo: \`top_line\` (a linha do ranking, com tier, p_blend, faixa do modelo, odd justa, odd mínima, entrada pela Política E e o histórico dos últimos 10 jogos de cada time na linha), \`other_lines\` (alternativas no mesmo mercado), \`best_by_market\` (a melhor linha de cada mercado analisado: total e handicap de escanteios do 1º tempo, total de gols e total de escanteios do jogo, com preço da Pinnacle quando ela cota), \`pinnacle_1h\` (linha e total de escanteios do 1º tempo que a Pinnacle precifica, e o do modelo), \`expected_1h\` (média esperada de cada time no 1º tempo), \`share_1h\` (fração dos escanteios do jogo no 1º tempo usada quando a liga não tem dado por tempo), \`c1_history_games\` (quantos dos últimos 10 jogos de cada time têm escanteio do 1º tempo), \`base\` (liga do jogo, ou jogos dos dois times em todas as competições — seleções e copas), \`alerts\`, \`odds_age_min\`.
+Campos de cada jogo: \`top_line\` (a linha do ranking, com tier, p_blend, faixa do modelo, odd justa, odd mínima, entrada pela Política E e o histórico dos últimos 10 jogos de cada time na linha), \`other_lines\` (alternativas no mesmo mercado), \`best_by_market\` (a melhor linha de cada mercado analisado: total e handicap de escanteios do 1º tempo, total de gols, handicap asiático, total e handicap de escanteios do jogo, com preço da Pinnacle quando ela cota), \`no_corners\` (preenchido quando a base do jogo não tem estatística de escanteios na API: o jogo só tem mercados de gols), \`pinnacle_1h\` (linha e total de escanteios do 1º tempo que a Pinnacle precifica, e o do modelo; null quando ela não cota o 1º tempo), \`expected_1h\` (média esperada de cada time no 1º tempo), \`share_1h\` (fração dos escanteios do jogo no 1º tempo usada quando a liga não tem dado por tempo), \`c1_history_games\` (quantos dos últimos 10 jogos de cada time têm escanteio do 1º tempo), \`base\` (liga do jogo, ou jogos dos dois times em todas as competições — seleções e copas), \`alerts\`, \`odds_age_min\`.
 
 Regras da varredura:
 - No máximo 6 apostas no dia, uma por jogo, e nunca duas que dependam da mesma hipótese (total de escanteios do jogo e do 1º tempo no mesmo sentido contam como uma).
-- O foco é escanteios do 1º tempo; traga total de gols ou de escanteios do jogo quando for claramente mais consistente naquele jogo.
+- Escanteios do 1º tempo primeiro; sem eles (Pinnacle sem o 1º tempo, ou sem candidata nele), gols e escanteios do jogo: o que manda é a consistência. Traga também total de gols ou de escanteios do jogo quando for claramente mais consistente que a linha do 1º tempo.
+- \`no_corners\` preenchido: nunca recomende escanteios nesse jogo (não há histórico de escanteios para validar).
 - Prefira âncora; sólida só sem alerta sério; especulativa nunca.
 - Over primeiro: em total de gols e de escanteios (jogo e 1º tempo), recomende o over; under só se for âncora e claramente mais consistente que o over do mesmo jogo, dizendo por quê.
 - Todo handicap de escanteios do 1º tempo e toda linha inteira do total 1T é frágil por construção (preço do modelo ancorado no total da Pinnacle): diga isso uma vez, não em cada linha.
@@ -131,7 +132,7 @@ Regras da varredura:
 
 Formato (horários de Brasília, vírgula decimal, sem JSON):
 
-## Varredura de <dd/mm> — escanteios do 1º tempo
+## Varredura de <dd/mm>
 
 **Resumo:** <quantas apostas vale fazer hoje e quais, em duas frases>
 
@@ -170,7 +171,7 @@ function parse(text) {
 const hourBR = iso => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 function titleOf(v) {
   if (v.kind === "jogo") { const f = v.dossier.fixture; return `${f.home} x ${f.away} · ${f.competition} · ${hourBR(f.kickoff)}`; }
-  return `Varredura de ${v.date.split("-").reverse().slice(0, 2).join("/")} · ${v.games.length} jogos (escanteios 1º tempo)`;
+  return `Varredura de ${v.date.split("-").reverse().slice(0, 2).join("/")} · ${v.games.length} jogos`;
 }
 
 function refresh() {
