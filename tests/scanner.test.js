@@ -113,3 +113,16 @@ test('seleções e copas: sem histórico na liga, a base vira os jogos dos times
   assert.ok(scan.games.every(g => g.lines.every(l => l.fragile)));
   assert.equal(new Set(asked).size, 20, 'todos os times dos jogos do torneio, juntos numa base');
 });
+
+test('linha do jogo: 1º tempo quando é candidata; senão o mercado mais consistente; under só âncora', () => {
+  const L = (id, market, tier, extra = {}) => ({ id, market, tier, odd_min: 1.7, politica_e: 'cheia', consistency_score: 0.6, fragile: false,
+    odd_min_vs_pinnacle_pct: 2, ...extra });
+  const goals = L('gO2.5', 'Total de gols', 'âncora', { consistency_score: 0.7 });
+  const h1 = L('c1O4.5', 'Total escanteios 1T', 'sólida', { fragile: true, odd_min_vs_pinnacle_pct: null });
+  assert.equal(bestLine([goals, h1]).id, 'c1O4.5', 'candidata do 1º tempo vem primeiro');
+  assert.equal(bestLine([goals, { ...h1, tier: 'especulativa' }]).id, 'gO2.5', 'sem candidata no 1º tempo, o mais consistente');
+  assert.equal(bestLine([goals, h1], { market: H1 }).id, 'c1O4.5');
+  const under = L('gU2.5', 'Total de gols', 'sólida', { consistency_score: 0.8 }), over = L('gO1.5', 'Total de gols', 'especulativa');
+  assert.equal(bestLine([under, over], { market: 'Total de gols' }).id, 'gO1.5', 'under sólida nunca é a linha mostrada');
+  assert.equal(bestLine([{ ...under, tier: 'âncora' }, over], { market: 'Total de gols' }).id, 'gU2.5', 'under âncora pode');
+});

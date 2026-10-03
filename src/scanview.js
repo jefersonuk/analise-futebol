@@ -6,6 +6,7 @@ import { CORNER_MARKETS, EXTRA_MARKETS, GOAL_MARKETS, H1, H1_MARKETS, bestLine, 
 import { bindTooltips, renderDashboard } from './dashboard.js';
 import { load, save } from './store.js';
 import { bindSpecialist, briefScan } from './brief.js';
+import { isCandidate } from './dossier.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -15,6 +16,12 @@ const nb = x => String(x).replace('.', ',');
 const hour = t => new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const dayStr = off => new Date(Date.now() + off * 864e5).toLocaleDateString('sv-SE');   // AAAA-MM-DD no fuso local
 const BUDGET_KEY = 'afScanBudget';
+// Linha consistente que não é aposta pelo preço: a odd mínima passa de 5% acima da Pinnacle (casa soft
+// raramente paga isso). Sem candidata no jogo, a tela mostra a linha mais consistente, mas apagada.
+const priceGap = l => (!isCandidate(l) && l.odd_min_vs_pinnacle_pct > 5 ? l.odd_min_vs_pinnacle_pct : null);
+const gap1 = l => nb(Math.round(priceGap(l) * 10) / 10);   // 5,3: o corte é 5%, não arredonda para ele
+const gapTxt = l => `${gap1(l)}% acima da Pinnacle`;
+const tierTag = l => `<span class="tag ${l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no'}">${l.tier}</span>`;
 const GAME_MARKETS = GOAL_MARKETS.concat(CORNER_MARKETS);
 // Filtros: a linha de cada jogo (1º tempo quando há candidata nele), o 1º tempo e cada mercado.
 const FILTERS = [['Melhor do jogo', null], ['Escanteios 1T', H1], ['Total 1T', 'Total escanteios 1T'], ['Handicap 1T', 'Handicap escanteios 1T'],
@@ -60,9 +67,10 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       const h = line.history || {};
       // contagem simples (o acerto pelo papel de hoje fica na consistência e no gráfico)
       const hist = [h.home, h.away].map(x => (x && (x.raw?.n ?? x.n) ? (x.hits || `${nb(x.wins)}/${x.n}`) : '—')).join(' · ');
-      return `<tr data-go="${i}"><td>${i + 1}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
+      const gap = priceGap(line);
+      return `<tr data-go="${i}" class="${isCandidate(line) ? '' : 'weak'}"><td>${i + 1}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
         <td class="muted">${esc(g.fx.league.name)}</td><td>${esc(line.market.replace('escanteios ', ''))}: <b>${esc(line.line)}</b></td>
-        <td><span class="tag ${line.tier === 'âncora' ? 'ok' : line.tier === 'sólida' ? 'mid' : 'no'}">${line.tier}</span></td>
+        <td>${tierTag(line)}${gap ? ` <span class="tag price" title="sem aposta: a odd mínima fica ${gapTxt(line)}; casa soft raramente paga mais de 5% acima">+${gap1(line)}% Pin</span>` : ''}</td>
         <td>${pct(line.p_blend)}</td><td class="muted">${hist}</td><td>${n2(line.fair_odd_blend)}</td><td><b>${n2(line.odd_min)}</b></td>
         <td class="muted">${line.pinnacle_odd ? n2(line.pinnacle_odd) : '—'}</td>
         ${EXTRA_MARKETS.map(m => `<td class="extra">${mini(bestLine(g.lines, { market: m }))}</td>`).join('')}</tr>`;
@@ -70,9 +78,12 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const cards = ranked.map(({ g, line }, i) => card(g, line, i)).join('');
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
       ${scan.skipped.map(s => `<li>${hour(s.fx.t)} ${esc(s.fx.home.name)} x ${esc(s.fx.away.name)} <span class="muted">(${esc(s.fx.league.name)}): ${esc(s.why)}</span></li>`).join('')}</ul></details>` : '';
+    const nCand = ranked.filter(x => isCandidate(x.line)).length;
     out.innerHTML = `<p class="muted">Varredura de ${when}: ${scan.fixtures} jogos por começar, ${pool},
       ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>
       <div class="chips" id="scanChips">${chips}</div>
+      ${ranked.length ? `<p class="muted"><b>${nCand} ${nCand === 1 ? 'jogo com candidata' : 'jogos com candidata'}</b> neste filtro. Apagados: sem aposta
+        (linha especulativa, ou odd mínima mais de 5% acima da Pinnacle — só vale se alguma casa pagar a mínima).</p>` : ''}
       ${ranked.length ? `<div class="scroll"><table class="scanrank"><tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Linha</th><th>Nível</th>
         <th>Acerta</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th>
         <th>Total de gols</th><th>Total de escanteios</th></tr>${rows}</table></div>` : '<p class="muted">Nenhum jogo com linha jogável (odd mínima 1,50–3,00).</p>'}
@@ -87,6 +98,9 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   function card(g, line, i) {
     const p = g.pinnacle_1h, e = g.expected_1h;
     const facts = [
+      isCandidate(line) ? '<b>candidata</b>' : priceGap(line)
+        ? `<b>sem aposta pelo preço</b>: odd mínima ${n2(line.odd_min)} contra ${n2(line.pinnacle_odd)} da Pinnacle (${gapTxt(line)})`
+        : '<b>sem aposta</b>: linha especulativa',
       g.favor_text ? `<b>${esc(g.favor_text)}</b>` : '',
       g.no_corners ? `<b>${esc(g.no_corners)}</b>` : p ? '' : 'sem escanteios do 1º tempo na Pinnacle neste jogo',
       p ? `Pinnacle 1T: linha ${nb(p.line)} → total ${n2(p.total)} (modelo ${n2(p.model)})` : '',

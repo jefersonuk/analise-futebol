@@ -138,6 +138,8 @@ label.gap { display: block; margin-top: 14px; }
 #scanBudget { width: 100px; }
 table.scanrank tr[data-go] { cursor: pointer; }
 table.scanrank tr[data-go]:hover td { background: rgba(255,255,255,.03); }
+table.scanrank tr.weak td { opacity: .5; }
+.tag.price { border-color: var(--warn); color: var(--warn); border-style: dashed; }
 table.scanrank :is(td, th):is(:nth-child(3), :nth-child(4), :nth-child(5)) { text-align: left; }
 .scancard { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 14px; }
 .scancard h3 { margin: 0; font-size: 16px; }

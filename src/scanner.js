@@ -18,6 +18,7 @@ import { collect } from './odds.js';
 import { recentGames } from './insights.js';
 import { FRIENDLIES, byConsistency, contraAlert, favorSummary, isCandidate, priceLines, rolesNow, seasonsFor } from './dossier.js';
 import { favorFor } from './favoritism.js';
+import { underOk } from './consistency.js';
 
 export const H1_MARKETS = ['Total escanteios 1T', 'Handicap escanteios 1T'];
 export const GOAL_MARKETS = ['Total de gols', 'Handicap asiático'];
@@ -50,8 +51,9 @@ async function teamPool(api, fixtures, S, onProgress) {
 }
 const r2 = x => Math.round(x * 100) / 100;
 
-// jogável: odd mínima na faixa operada e linha que o mercado oferece (não "favorito +x")
-const playable = l => l.odd_min >= 1.5 && politicaE(l.odd_min).factor > 0 && !l.inviable;
+// jogável: odd mínima na faixa operada, linha que o mercado oferece (não "favorito +x") e over primeiro
+// (under só âncora, como nas candidatas)
+const playable = l => l.odd_min >= 1.5 && politicaE(l.odd_min).factor > 0 && !l.inviable && underOk(l);
 // Melhor linha de um jogo: candidata (âncora/sólida) primeiro; senão a mais consistente jogável.
 // market: um mercado, H1 (os dois do 1º tempo) ou null (a do jogo: o 1º tempo quando há candidata nele,
 // senão a mais consistente de todos os mercados da varredura).
