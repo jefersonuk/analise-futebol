@@ -1,6 +1,6 @@
 // Modo demonstração (chave "demo"): uma liga sintética de 20 times, sem gastar requisições.
 
-import { dist, scoreMatrix, settle } from './model.js';
+import { diffDist, dist, scoreMatrix, settle } from './model.js';
 
 const NAMES = ['Aurora', 'Boreal', 'Cometa', 'Dínamo', 'Estrela', 'Fênix', 'Galáxia', 'Horizonte', 'Íris', 'Júpiter',
   'Kosmos', 'Lunar', 'Meteoro', 'Nebulosa', 'Órion', 'Pulsar', 'Quasar', 'Radiante', 'Solar', 'Titã'];
@@ -112,9 +112,12 @@ export function fixtureOdds(fixtureId) {
   const muC = 5 * 1.1 * H.cor + 5 * 0.9 * A.cor, pc = dist(muC, 1, 60).map((p, k) => [k, p]);
   const ouOf = (pmf, lines) => lines.flatMap(L => [{ value: `Over ${L}`, odd: odd(eff(settle(pmf, -L))) }, { value: `Under ${L}`, odd: odd(eff(settle(neg(pmf), L))) }]);
   const rc = Math.round(muC);
-  co.push(...ouOf(pc, [...new Set([8, 8.5, rc - 1.5, rc - 0.5, rc + 0.5, rc + 1.5])]));
-  const c1 = ouOf(dist(0.46 * muC, 1, 40).map((p, k) => [k, p]), [3.5, 4, 4.5, 5.5]);
+  co.push(...ouOf(pc, [...new Set([8, 8.5, 9, rc - 1.5, rc - 0.5, rc + 0.5, rc + 1.5])]));
+  const c1 = ouOf(dist(0.46 * muC, 1, 40).map((p, k) => [k, p]), [3.5, 4, 4.5, 5, 5.5]);
   const { tot: tot1 } = scoreMatrix(0.45 * 1.1 * H.att * A.def, 0.45 * 0.9 * A.att * H.def, 0);   // gols do 1º tempo: 45% dos do jogo
-  bets.push({ id: 4, values: ah }, { id: 5, values: ou }, { id: 6, values: ouOf(tot1, [0.5, 1.5, 2.5]) }, { id: 45, values: co }, { id: 77, values: c1 });
+  const de = diffDist(5 * 1.1 * H.cor, 5 * 0.9 * A.cor, 1);   // handicap de escanteios (rótulo da API: número do mandante nas duas pernas)
+  const ch = [-2, -1.5, -1, -0.5, 0, 0.5, 1].flatMap(h => [{ value: `Home ${h}`, odd: odd(eff(settle(de, h))) }, { value: `Away ${h}`, odd: odd(eff(settle(neg(de), -h))) }]);
+  bets.push({ id: 4, values: ah }, { id: 5, values: ou }, { id: 6, values: ouOf(tot1, [0.5, 1.5, 2.5]) }, { id: 45, values: co }, { id: 56, values: ch },
+    { id: 77, values: c1 });
   return { updatedAt: new Date(Date.now() - 40 * 60e3).toISOString(), fetchedAt: Date.now(), bookmakers: [{ id: 4, name: 'Pinnacle', bets }] };
 }

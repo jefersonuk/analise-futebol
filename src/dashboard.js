@@ -1,7 +1,7 @@
 // Painel: as 5 linhas de maior EV e como cada time se saiu nelas nos últimos 10 jogos.
 
 import { roleOf, settle } from './model.js';
-import { byValue, isMain, isUnder, isValueBet, rankScore, rankTier } from './consistency.js';
+import { isMainLine, isUnder, rankScore, rankTier, underOk } from './consistency.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const numBR = x => String(x).replace('.', ',');
@@ -205,7 +205,7 @@ const VALUE_CLS = { confirmado: 'ok', 'sem confirmação': 'mid', 'sem valor': '
 // Por que uma linha que entrou só para completar o painel não passou no filtro de candidatas.
 function outsideReason(l, ok = []) {
   if (ok.includes(l.id)) return null;
-  if (isUnder(l.id) && l.tier === 'sólida') return 'under só se for âncora';
+  if (isUnder(l.id) && !underOk(l)) return 'under só se for âncora';
   if (l.tier === 'especulativa') {
     if (l.hit_rate_last10 != null && l.hit_rate_last10 < 0.5) return 'histórico contra';
     if (l.p_model_range[0] < 0.42) return 'pior cenário do modelo fraco';
@@ -217,33 +217,22 @@ function outsideReason(l, ok = []) {
   return 'alternativa de linha';
 }
 
-// Por que uma linha principal não é aposta de valor.
-function valueReason(l) {
-  if (isValueBet(l)) return null;
-  if (l.value_level === 'sem valor') return 'sem valor';
-  if (l.value_level === 'sem confirmação') return 'valor sem confirmação';
-  if (l.odd_min < 1.5) return 'odd abaixo de 1,50';
-  if (l.politica_e === 'não entrar') return 'odd acima de 3,00';
-  if (l.odd_min_vs_pinnacle_pct > 5) return 'preço difícil de achar';
-  if (isUnder(l.id)) return 'under só com valor de +4%';
-  return 'fora do filtro';
-}
-
-// As n linhas do painel. Modo foco: as linhas principais do pré-jogo com preço da Pinnacle — apostas de
-// valor primeiro, depois as outras pela ordem de valor, com o motivo (under só quando é aposta). Modo
-// todos: uma candidata por mercado; se faltar, completa com as mais consistentes restantes, com o motivo.
+// As n linhas do painel. Modo foco: as linhas principais do pré-jogo com preço da Pinnacle — candidatas
+// primeiro, depois as de maior chance de ganho na faixa de odd, com o motivo. Modo todos: uma candidata por
+// mercado; se faltar, completa com as mais consistentes restantes, com o motivo.
 export function pickDashboard(dossier, n = 5, { focus = true } = {}) {
   const all = dossier.lines_with_pinnacle.concat(dossier.lines_anchored || []);
   const byId = new Map(all.map(l => [l.id, l]));
+  const better = (a, b) => rankTier(a) - rankTier(b) || rankScore(b) - rankScore(a);
   if (focus) {
     const first = dossier.candidates_focus.map(id => byId.get(id)).filter(Boolean);
-    const rest = all.filter(l => isMain(l.id) && l.value_level && !l.inviable && !first.includes(l) && (!isUnder(l.id) || isValueBet(l)))
-      .sort(byValue).map(l => ({ ...l, outside: valueReason(l) }));
+    const rest = all.filter(l => isMainLine(l) && !l.inviable && underOk(l) && !first.includes(l))
+      .sort((a, b) => (a.odd_min < 1.5 || a.politica_e === 'não entrar') - (b.odd_min < 1.5 || b.politica_e === 'não entrar') || better(a, b))
+      .map(l => ({ ...l, outside: outsideReason(l, dossier.candidates_focus) }));
     return first.concat(rest).slice(0, n);
   }
   const first = dossier.candidates.map(id => byId.get(id)).filter(Boolean).slice(0, n);
   const out = [...first], used = new Set(out.map(l => l.id));
-  const better = (a, b) => rankTier(a) - rankTier(b) || rankScore(b) - rankScore(a);
   const add = (l, outside) => { if (out.length < n && !used.has(l.id)) { used.add(l.id); out.push(outside ? { ...l, outside } : l); } };
   const markets = new Set(out.map(l => l.market));
   all.filter(l => !l.inviable && l.odd_min >= 1.2 && !markets.has(l.market))

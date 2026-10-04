@@ -9,14 +9,14 @@ import { rank } from './ratings.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { history } from './dashboard.js';
-import { MAIN_LINES, ODD_FLOOR, byValue, consistency, isMain, isValueBet, rankScore, rankTier, underOk, valueOf } from './consistency.js';
+import { HANDICAP, MAIN_LINES, ODD_FLOOR, consistency, isMainLine, rankScore, rankTier, underOk, valueOf } from './consistency.js';
 import { HALF_FROM } from './client.js';
 import { favorFor } from './favoritism.js';
 
 const DAY = 864e5;
 // Mercados das linhas principais do pré-jogo (painel e candidatas de foco): escanteios 1T, escanteios do
-// jogo, gols 1T e gols do jogo — só nas linhas de MAIN_LINES (consistency.js).
-export const FOCUS = Object.keys(MAIN_LINES);
+// jogo, gols 1T, gols do jogo — só nas linhas de MAIN_LINES (consistency.js) — e handicap de escanteios do jogo.
+export const FOCUS = Object.keys(MAIN_LINES).concat(HANDICAP);
 export const ODDS_STALE_MIN = 90;   // acima disso a odd da API provavelmente já andou
 // Peso do modelo na mistura log-linear com a Pinnacle (o resto é da Pinnacle). Valores iniciais
 // do relatório (0,05–0,15 em mercados líquidos; mais onde a Pinnacle é fraca); calibrar por CLV.
@@ -316,13 +316,12 @@ export const byConsistency = (a, b) => rankTier(a) - rankTier(b) || a.fragile - 
 // Candidatas de todos os mercados — consistência primeiro, preço depois: só linhas âncora/sólida, com odd
 // mínima dentro da faixa operada (≥ 1,50 e permitida pela Política E), que uma casa soft consegue pagar (até
 // ~5% acima da Pinnacle) e que o mercado oferece. Ordem: nível, não frágil antes de frágil, score, preço.
-// Foco (linhas principais do pré-jogo): apostas de valor confirmado (isValueBet), pela ordem de valor.
+// Foco: o mesmo filtro só nas linhas principais do pré-jogo com preço da Pinnacle (isMainLine).
 function pickCandidates(priced, anchored) {
   priced.sort((a, b) => Math.abs(b.diff_pp) - Math.abs(a.diff_pp));
   const all = priced.concat(anchored);
   const top = list => list.filter(isCandidate).sort(byConsistency).filter(distinct()).slice(0, 8).map(l => l.id);
-  const focus = priced.filter(l => isMain(l.id) && isValueBet(l)).sort(byValue).filter(distinct()).slice(0, 8).map(l => l.id);
-  return { candidatesFocus: focus, candidates: top(all) };
+  return { candidatesFocus: top(priced.filter(isMainLine)), candidates: top(all) };
 }
 
 // Análise guardada aberta de novo: refaz o preço de todas as linhas com o modelo atual e as odds guardadas
@@ -480,9 +479,9 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
       consistency: 'score = 0,5·p + 0,25·p_pior_cenário + 0,25·acerto_10_jogos_encolhido (10 jogos de peso para p); '
         + 'âncora: p ≥ 0,60, pior cenário ≥ 0,50 e cada time ≥ 6/10; sólida: p ≥ 0,52, pior cenário ≥ 0,42 e acerto somado ≥ 50%; resto especulativa',
       candidates: 'âncora/sólida, odd mínima ≥ 1,50 e permitida pela Política E, até 5% acima da Pinnacle; ordem: nível, não frágil, score, preço',
-      main_lines: 'linhas principais do pré-jogo: escanteios 1T 4 e 4,5, escanteios do jogo 8 e 8,5, gols 1T 1,5, gols do jogo 1,5 e 2,5 (as mais baixas só pagam no ao vivo)',
-      value: 'value_pct = p_blend / p_pinnacle − 1 (EV na odd justa da Pinnacle); value_level confirmado: valor ≥ +2%, pior cenário do modelo ≥ p_pinnacle, histórico pelo papel (8+ jogos) ≥ p_pinnacle + 5 pp e nenhum time 10 pp abaixo; sem confirmação: valor ≥ +1% e histórico ≥ p_pinnacle − 5 pp (ou curto)',
-      candidates_focus: 'linhas principais com valor confirmado, odd mínima 1,50–3,00, até 5% acima da Pinnacle; over primeiro (under só com valor ≥ +4%); ordem: valor',
+      main_lines: 'linhas principais do pré-jogo: escanteios 1T 4, 4,5 e 5 e do jogo 8, 8,5 e 9 (over ou under), gols 1T 1,5 e do jogo 1,5 e 2,5 (só over) e handicap de escanteios do jogo nas linhas da Pinnacle; as mais baixas só pagam no ao vivo',
+      value: 'informativo: value_pct = p_blend / p_pinnacle − 1 (EV na odd justa da Pinnacle); value_level confirmado: valor ≥ +2%, pior cenário do modelo ≥ p_pinnacle, histórico pelo papel (8+ jogos) ≥ p_pinnacle + 5 pp e nenhum time 10 pp abaixo; sem confirmação: valor ≥ +1% e histórico ≥ p_pinnacle − 5 pp (ou curto)',
+      candidates_focus: 'o filtro de candidates só nas linhas principais com preço da Pinnacle (over e under valem igual nos totais de escanteios); ordem: chance de ganho (nível, não frágil, score)',
       derived_corners: 'handicap de escanteios, quem tem mais escanteios (jogo e 1º tempo) e corrida a N escanteios: médias de cada time pelo modelo com o total puxado 80% para o total da Pinnacle (do jogo ou do 1º tempo); corrida: total binomial negativo, cada escanteio do visitante com prob. μA/(μH+μA); odd mínima = justa × 1,05 (× 1,08 sem âncora), sempre frágil',
       corners_1h_handicap: 'a API não traz odd de handicap de escanteios do 1º tempo: média de cada time pelo modelo, total puxado 80% para o total 1T implícito na Pinnacle, diferença com binomial negativa na dispersão da diferença medida na liga; odd mínima = justa × 1,05, sempre frágil' },
   };

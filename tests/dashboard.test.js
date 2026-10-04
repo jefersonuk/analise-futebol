@@ -58,20 +58,22 @@ test('handicap de escanteios 1T usa o saldo de escanteios do 1º tempo do time',
 
 import { pickDashboard } from '../src/dashboard.js';
 
-test('painel em foco: linhas principais, apostas de valor primeiro e o motivo das outras', () => {
-  const L = (id, market, level, value, odd, extra = {}) => ({ id, market, value_level: level, value_pct: value, odd_min: odd,
-    politica_e: odd > 3 ? 'não entrar' : 'cheia', odd_min_vs_pinnacle_pct: 2, tier: 'sólida', consistency_score: 0.6, p_model_range: [0.5, 0.6], ...extra });
+test('painel em foco: linhas principais com preço da Pinnacle, candidatas primeiro e o motivo das outras', () => {
+  const L = (id, market, tier, score, odd, extra = {}) => ({ id, market, tier, consistency_score: score, odd_min: odd, priced_by: 'pinnacle',
+    politica_e: odd > 3 ? 'não entrar' : 'cheia', odd_min_vs_pinnacle_pct: 2, p_model_range: [0.5, 0.6], ...extra });
   const dossier = {
-    focus_markets: ['Total escanteios 1T', 'Total de escanteios', 'Total de gols 1T', 'Total de gols'],
-    candidates_focus: ['c1O4.5'], candidates: ['1'],
-    lines_with_pinnacle: [L('c1O4.5', 'Total escanteios 1T', 'confirmado', 3.1, 1.9), L('gO2.5', 'Total de gols', 'sem confirmação', 1.4, 2.1),
-      L('gO1.5', 'Total de gols', 'sem valor', -2, 1.3), L('gU2.5', 'Total de gols', 'sem valor', -1, 1.8), L('gO3', 'Total de gols', 'confirmado', 5, 2.6),
-      L('cornersO8.5', 'Total de escanteios', 'confirmado', 2.4, 1.7, { odd_min_vs_pinnacle_pct: 7 }), L('1', '1X2', 'sólida', 0, 1.9)],
-    lines_anchored: [L('c1O4', 'Total escanteios 1T', null, null, 1.6)],
+    focus_markets: ['Total escanteios 1T', 'Total de escanteios', 'Total de gols 1T', 'Total de gols', 'Handicap de escanteios'],
+    candidates_focus: ['cornersU8.5'], candidates: ['1'],
+    lines_with_pinnacle: [L('cornersU8.5', 'Total de escanteios', 'sólida', 0.62, 1.7), L('gO2.5', 'Total de gols', 'especulativa', 0.45, 2.1),
+      L('gO1.5', 'Total de gols', 'âncora', 0.8, 1.3), L('gU2.5', 'Total de gols', 'sólida', 0.6, 1.8), L('gO3', 'Total de gols', 'âncora', 0.7, 1.7),
+      L('c1O4.5', 'Total escanteios 1T', 'sólida', 0.6, 1.9, { odd_min_vs_pinnacle_pct: 7 }), L('chA1.5', 'Handicap de escanteios', 'sólida', 0.58, 1.8),
+      L('1', '1X2', 'sólida', 0.6, 1.9)],
+    lines_anchored: [L('c1O4', 'Total escanteios 1T', 'âncora', 0.8, 1.6, { priced_by: 'modelo' }), L('chA3', 'Handicap de escanteios', 'âncora', 0.8, 1.6, { priced_by: 'modelo' })],
   };
   const lines = pickDashboard(dossier, 5, { focus: true });
-  assert.deepEqual(lines.map(l => l.id), ['c1O4.5', 'cornersO8.5', 'gO2.5', 'gO1.5']);   // nem linha fora das principais (gO3), nem under sem valor, nem sem Pinnacle
-  assert.deepEqual(lines.map(l => l.outside ?? null), [null, 'preço difícil de achar', 'valor sem confirmação', 'sem valor']);
+  // nem linha fora das principais (gO3), nem under de gols, nem linha sem preço da Pinnacle; odd abaixo de 1,50 por último
+  assert.deepEqual(lines.map(l => l.id), ['cornersU8.5', 'c1O4.5', 'chA1.5', 'gO2.5', 'gO1.5']);
+  assert.deepEqual(lines.map(l => l.outside ?? null), [null, 'preço difícil de achar', 'alternativa de linha', 'acerto baixo', 'odd abaixo de 1,50']);
   assert.ok(pickDashboard(dossier, 5, { focus: false }).some(l => l.id === '1'));
 });
 

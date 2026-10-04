@@ -1,8 +1,8 @@
-// Varredura do dia: valor nas linhas principais do pré-jogo (consistency.js: escanteios 1T 4 e 4,5,
-// escanteios do jogo 8 e 8,5, gols 1T 1,5, gols do jogo 1,5 e 2,5) de todos os jogos por começar com odds da
-// Pinnacle, pelo mesmo modelo do app. Só linhas que a Pinnacle cota (o valor é medido contra ela). Handicap
-// de escanteios do jogo fica num filtro à parte. Liga sem estatística de escanteios na API (USL Championship,
-// Liga de Expansión, Primera B…) entra só com os mercados de gols.
+// Varredura do dia: maior chance de ganho nas linhas principais do pré-jogo (consistency.js: escanteios 1T 4,
+// 4,5 e 5 e do jogo 8, 8,5 e 9, over ou under; gols 1T 1,5 e do jogo 1,5 e 2,5, só over; handicap de escanteios
+// do jogo) de todos os jogos por começar com odds da Pinnacle, pelo mesmo modelo do app. Só linhas que a
+// Pinnacle cota. Liga sem estatística de escanteios na API (USL Championship, Liga de Expansión, Primera B…)
+// entra só com os mercados de gols.
 //
 // Custo (o que manda no desenho):
 //   1. jogos do dia: 1 requisição; odds da Pinnacle de todos os mercados lidos: 1 por 10 jogos (nenhuma
@@ -10,19 +10,19 @@
 //   2. cada liga: ~60 requisições na primeira vez (3 temporadas com estatística), depois só o que é novo.
 //      Os escanteios do 1º tempo da liga inteira (1 requisição por jogo) NÃO são baixados: a média do
 //      1º tempo de cada time sai dos escanteios do jogo × fração do 1º tempo, e o total é ancorado na Pinnacle
-//   3. os 1,5×N jogos com mais valor nos escanteios do 1º tempo: escanteios do 1º tempo dos últimos 10 jogos
-//      de cada time (até 20 requisições por jogo na primeira vez; ficam guardados), que confirmam ou não o valor
+//   3. os 1,5×N melhores jogos nos escanteios do 1º tempo: escanteios do 1º tempo dos últimos 10 jogos de cada
+//      time (até 20 requisições por jogo na primeira vez; ficam guardados), que entram no histórico e na consistência
 // O orçamento de requisições é respeitado: ligas e históricos que não cabem ficam de fora e são listados.
 
 import { analyzeMatch, politicaE } from './model.js';
 import { collect } from './odds.js';
 import { recentGames } from './insights.js';
-import { FRIENDLIES, contraAlert, favorSummary, priceLines, rolesNow, seasonsFor } from './dossier.js';
+import { FRIENDLIES, byConsistency, contraAlert, favorSummary, isCandidate, priceLines, rolesNow, seasonsFor } from './dossier.js';
 import { favorFor } from './favoritism.js';
-import { MAIN_LINES, byValue, isMain, isUnder, isValueBet } from './consistency.js';
+import { HANDICAP, MAIN_LINES, isMainLine, underOk } from './consistency.js';
 
+export { HANDICAP };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
-export const HANDICAP = 'Handicap de escanteios';      // jogo inteiro, nas linhas da Pinnacle: filtro à parte
 export const SCAN_MARKETS = MAIN_MARKETS.concat(HANDICAP);
 const GOALS_ONLY = ['Total de gols 1T', 'Total de gols'];
 // MIN_GAMES: jogos-equivalentes (com o decaimento) de cada time na base — de gols para analisar o jogo,
@@ -50,15 +50,15 @@ async function teamPool(api, fixtures, S, onProgress) {
 }
 const r2 = x => Math.round(x * 100) / 100;
 
-// jogável: odd mínima na faixa operada (1,50–3,00), linha que o mercado oferece (não "favorito +x") e over
-// primeiro (under só quando é aposta de valor)
-const playable = l => l.odd_min >= 1.5 && politicaE(l.odd_min).factor > 0 && !l.inviable && (!isUnder(l.id) || isValueBet(l));
-// Melhor linha de um jogo: aposta de valor primeiro; senão a de mais valor jogável.
-// market: um mercado ou null (as linhas principais: escanteios 1T e do jogo, gols 1T e do jogo).
+// jogável: odd mínima na faixa operada (1,50–3,00), linha que o mercado oferece (não "favorito +x") e under
+// pela regra do over primeiro (nos totais de escanteios das linhas principais, over e under valem igual)
+const playable = l => l.odd_min >= 1.5 && politicaE(l.odd_min).factor > 0 && !l.inviable && underOk(l);
+// Melhor linha de um jogo: maior chance de ganho — candidata (âncora/sólida, preço que a casa paga) primeiro;
+// senão a mais consistente jogável. market: um mercado ou null (todos os da varredura).
 export function bestLine(lines, { market = null } = {}) {
-  const ms = market ? [market] : MAIN_MARKETS;
-  const pool = lines.filter(l => ms.includes(l.market) && playable(l)).sort(byValue);
-  return pool.find(isValueBet) || pool[0] || null;
+  const ms = market ? [market] : SCAN_MARKETS;
+  const pool = lines.filter(l => ms.includes(l.market) && playable(l)).sort(byConsistency);
+  return pool.find(isCandidate) || pool[0] || null;
 }
 
 // favor: calibração da base (favoritism.js): escanteios por gol de superioridade na liga.
@@ -81,9 +81,9 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null) {
   if (teamBase) alerts.push('base: jogos dos dois times em todas as competições (amostra menor que a de uma liga)');
   const names = { home: fx.home.name, away: fx.away.name }, contra = !noCorners && contraAlert(res.favor, names);
   if (contra) alerts.push(contra);
-  // só linhas com preço da Pinnacle: as principais e o handicap de escanteios que ela cota
-  const { priced } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market) && (isMain(l.id) || l.market === HANDICAP) });
-  const lines = priced;
+  // só as linhas principais com preço da Pinnacle (totais da lista e o handicap de escanteios que ela cota)
+  const { priced } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market) });
+  const lines = priced.filter(isMainLine);
   const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
   const a = res.anchors, h1 = !noCorners;
   return {
@@ -97,10 +97,10 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null) {
   };
 }
 
-// Ordem dos jogos: a melhor linha de cada um (no filtro pedido), apostas de valor primeiro, depois valor.
+// Ordem dos jogos: a melhor linha de cada um (no filtro pedido), candidatas primeiro, depois consistência.
 export function rankGames(games, opts = {}) {
   return games.map(g => ({ g, line: bestLine(g.lines, opts) })).filter(x => x.line)
-    .sort((a, b) => isValueBet(b.line) - isValueBet(a.line) || byValue(a.line, b.line));
+    .sort((a, b) => isCandidate(b.line) - isCandidate(a.line) || byConsistency(a.line, b.line));
 }
 
 // api: o mesmo conjunto do dossiê (dayFixtures, dayOdds, hasLeague, leagueMatches, attachHalfCorners, stats).
@@ -178,8 +178,8 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
     }
   }
 
-  // 2ª passada: histórico do 1º tempo dos dois times nos jogos com mais valor nos escanteios do 1º tempo
-  const short = rankGames(games, { market: 'Total escanteios 1T' }).filter(x => x.line.value_pct > 0).slice(0, Math.ceil(top * 1.5));
+  // 2ª passada: histórico do 1º tempo dos dois times nos jogos mais promissores nos escanteios do 1º tempo
+  const short = rankGames(games, { market: 'Total escanteios 1T' }).slice(0, Math.ceil(top * 1.5));
   let gi = 0;
   for (const { g } of short) {
     gi++;
@@ -200,13 +200,12 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
     } catch (e) { g.no_history = `histórico do 1º tempo falhou: ${e.message}`; }
   }
 
-  // Guardados: os N melhores de cada filtro da tela (as linhas principais e cada mercado), na ordem das
-  // linhas principais (jogo só com handicap jogável vai para o fim).
+  // Guardados: os N melhores de cada filtro da tela (todos os mercados e cada um), na ordem do filtro geral.
   const keep = new Set();
   for (const market of [null, ...SCAN_MARKETS]) for (const { g } of rankGames(games, { market }).slice(0, top)) keep.add(g);
   const pos = new Map(rankGames([...keep]).map((x, i) => [x.g, i]));
   const ranked = [...keep].sort((a, b) => (pos.get(a) ?? 1e9) - (pos.get(b) ?? 1e9));
-  // v 2: valor nas linhas principais (a tela avisa quando a varredura guardada é de antes)
-  return { v: 2, date, generated_at: new Date().toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
+  // v 3: chance de ganho nas linhas principais (a tela avisa quando a varredura guardada é de antes)
+  return { v: 3, date, generated_at: new Date().toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }
