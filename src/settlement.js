@@ -25,10 +25,11 @@ async function get(path, params) {
 
 // O jogo do ponto de vista do mandante, no formato que history() entende.
 export function gameOf(f, c1 = null) {
-  const ft = f.score?.fulltime || {};
+  const ft = f.score?.fulltime || {}, ht = f.score?.halftime || {};
   const hg = ft.home ?? f.goals.home, ag = ft.away ?? f.goals.away, s = statsOf(f);
   const side = i => (s ? [s[i], s[5 + i]] : null);
   return { t: f.fixture.timestamp * 1000, home: true, opp: f.teams.away.name, gf: hg, ga: ag,
+    g1: ht.home != null && ht.away != null ? [ht.home, ht.away] : null,
     corners: side(4), shots: side(3), sot: side(2), c1 };
 }
 

@@ -125,3 +125,21 @@ test('jogos ao vivo: uma consulta live=all por minuto, filtrada pelo time, com m
   assert.equal(calls.length, 1, 'uma consulta só dentro do minuto');
   assert.deepEqual(calls[0], { live: 'all' });
 });
+
+test('placar do 1º tempo: guardado nos jogos novos e completado uma vez nos antigos', async () => {
+  const now = Date.now();
+  const withHt = (f, h, a) => ({ ...f, score: { ...f.score, halftime: { home: h, away: a } } });
+  const list = [withHt(fx(1, now - 48 * H, 'FT'), 1, 0), withHt(fx(2, now - 72 * H, 'FT'), 0, 0)];
+  const mem = new Map(), calls = [];
+  mem.set('af:lg:5:2026', { t: now, next: null, m: { 2: { id: 2, t: now - 72 * H, h: 1, a: 2, hg: 1, ag: 0, s: null } } });   // guardado antes
+  const client = makeClient({
+    get: async (path, params) => { calls.push(path); return params.ids ? params.ids.split('-').map(Number).map(id => list.find(f => f.fixture.id === id)) : list; },
+    load: async k => mem.get(k) ?? null, save: async (k, v) => mem.set(k, v),
+  });
+  const ms = await client.leagueMatches(5, 2026);
+  assert.deepEqual([ms.find(m => m.id === 1).hh, ms.find(m => m.id === 1).ha], [1, 0]);
+  assert.deepEqual([ms.find(m => m.id === 2).hh, ms.find(m => m.id === 2).ha], [0, 0], 'jogo antigo completado pela lista');
+  const n = calls.length;
+  await client.leagueMatches(5, 2026);
+  assert.equal(calls.length, n, 'completado uma vez: depois volta ao cache');
+});

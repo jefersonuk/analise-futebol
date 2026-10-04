@@ -15,8 +15,8 @@ const DEBOUNCE = 4000;
 export const synced = key => SYNCED.test(key);
 export const pathOf = key => `cache/${key.replace(/[^\w.-]/g, '_')}.json`;
 
-// Junta duas cópias da mesma chave sem perder nada: jogos de um lado e do outro; estatística e
-// escanteios do 1º tempo de quem tiver; a data de atualização da cópia mais recente.
+// Junta duas cópias da mesma chave sem perder nada: jogos de um lado e do outro; estatística, placar do
+// 1º tempo e escanteios do 1º tempo de quem tiver; a data de atualização da cópia mais recente.
 export function merge(key, a, b) {
   if (!a) return b;
   if (!b) return a;
@@ -24,7 +24,11 @@ export function merge(key, a, b) {
     const m = { ...b.m };
     for (const [id, x] of Object.entries(a.m || {})) {
       const y = m[id];
-      m[id] = !y ? x : y.s === undefined && x.s !== undefined ? x : y;
+      if (!y) { m[id] = x; continue; }
+      let z = y;
+      if (y.s === undefined && x.s !== undefined) z = { ...z, s: x.s };
+      if (y.hh === undefined && x.hh !== undefined) z = { ...z, hh: x.hh, ha: x.ha };
+      m[id] = z;
     }
     const newer = (a.t || 0) >= (b.t || 0) ? a : b;
     return { t: newer.t, next: newer.next ?? null, m };

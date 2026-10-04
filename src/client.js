@@ -12,12 +12,15 @@ const HOUR = 3600e3, DAY = 24 * HOUR;
 const FINISHED = new Set(['FT', 'AET', 'PEN']);
 const DEAD = new Set(['CANC', 'ABD', 'AWD', 'WO']);   // não vão acontecer: não seguram o próximo refresh
 
+// Placar do 1º tempo (hh, ha); null quando a API não tem.
+const half = f => ({ hh: f.score?.halftime?.home ?? null, ha: f.score?.halftime?.away ?? null });
+
 function compact(f) {
   const ft = f.score?.fulltime || {};
   return {
     id: f.fixture.id, t: f.fixture.timestamp * 1000, lg: f.league.id, ln: f.league.name,
     h: f.teams.home.id, a: f.teams.away.id, hn: f.teams.home.name, an: f.teams.away.name,
-    hg: ft.home ?? f.goals.home, ag: ft.away ?? f.goals.away,
+    hg: ft.home ?? f.goals.home, ag: ft.away ?? f.goals.away, ...half(f),
   };
 }
 
@@ -61,15 +64,18 @@ export function makeClient({ get: rawGet, load, save }) {
   async function collection(key, params, onProgress) {
     const store = (await load(key)) || { t: 0, next: null, m: {} };
     const now = Date.now();
-    const due = !store.t
+    // jogos guardados antes do placar do 1º tempo: a lista (que traz o placar) é rebaixada uma vez
+    const noHalf = Object.values(store.m).some(m => m.hh === undefined);
+    const due = !store.t || noHalf
       || (store.next ? now > store.next + 2.5 * HOUR || now - store.t > DAY : now - store.t > 7 * DAY);
     if (due) {
       let next = null;
       for (const f of await get('/fixtures', params)) {
-        const st = f.fixture.status.short, t = f.fixture.timestamp * 1000;
-        if (FINISHED.has(st)) { if (!store.m[f.fixture.id]) store.m[f.fixture.id] = compact(f); }
+        const st = f.fixture.status.short, t = f.fixture.timestamp * 1000, m = store.m[f.fixture.id];
+        if (FINISHED.has(st)) { if (!m) store.m[f.fixture.id] = compact(f); else if (m.hh === undefined) Object.assign(m, half(f)); }
         else if (!DEAD.has(st)) next = next == null ? t : Math.min(next, t);
       }
+      for (const m of Object.values(store.m)) if (m.hh === undefined) Object.assign(m, { hh: null, ha: null });   // fora da lista: sem dado
       Object.assign(store, { t: now, next });
     } else stats.cache++;
     const pending = Object.values(store.m).filter(m => m.s === undefined).map(m => m.id);

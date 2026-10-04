@@ -29,3 +29,11 @@ test('liquida linhas da análise no resultado real', () => {
 test('sem escanteios do 1º tempo, a linha de 1º tempo fica sem liquidação', () => {
   assert.equal(settleLine('c1hA1.5', gameOf(f, null), 'Casa'), null);
 });
+
+test('gols do 1º tempo liquidados pelo placar do intervalo', () => {
+  const ht = gameOf({ ...f, score: { ...f.score, halftime: { home: 1, away: 1 } } }, null);
+  assert.deepEqual(ht.g1, [1, 1]);
+  assert.equal(settleLine('g1O1.5', ht, 'Casa').winner, 'A');
+  assert.equal(settleLine('g1U1.5', ht, 'Casa').winner, 'RED');
+  assert.equal(settleLine('g1O1.5', gameOf(f, null), 'Casa'), null, 'sem placar do intervalo, sem liquidação');
+});

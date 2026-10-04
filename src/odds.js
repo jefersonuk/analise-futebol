@@ -2,9 +2,9 @@
 // com a probabilidade sem margem (método power).
 
 export const PINNACLE = 4;
-// Mercados da API que o app lê (mapValue): 1X2, handicap asiático, gols, ambas marcam, escanteios do jogo,
-// handicap de escanteios, escanteios por time e total de escanteios do 1º tempo.
-export const BETS = [1, 4, 5, 8, 45, 50, 56, 57, 58, 77];
+// Mercados da API que o app lê (mapValue): 1X2, handicap asiático, gols (jogo e 1º tempo), ambas marcam,
+// escanteios do jogo, handicap de escanteios, escanteios por time e total de escanteios do 1º tempo.
+export const BETS = [1, 4, 5, 6, 8, 45, 50, 56, 57, 58, 77];
 
 const n = s => String(parseFloat(s));   // "2.50" -> "2.5", "-0" -> "0"
 
@@ -26,9 +26,9 @@ function mapValue(betId, value) {
       if (!(m = v.match(/^(Over|Under)\s*([\d.]+)$/))) return null;
       return { id: `c${betId === 57 ? 'H' : 'A'}${m[1] === 'Over' ? 'O' : 'U'}${n(m[2])}`, group: `${betId}:${n(m[2])}` };
     }
-    case 5: case 50: case 45: case 77: {   // 77 = total de escanteios do 1º tempo
+    case 5: case 50: case 6: case 45: case 77: {   // 6 = gols do 1º tempo; 77 = total de escanteios do 1º tempo
       if (!(m = v.match(/^(Over|Under)\s*([\d.]+)$/))) return null;
-      const pre = { 45: 'corners', 77: 'c1' }[betId] || 'g';
+      const pre = { 6: 'g1', 45: 'corners', 77: 'c1' }[betId] || 'g';
       return { id: `${pre}${m[1] === 'Over' ? 'O' : 'U'}${n(m[2])}`, group: `${betId}:${n(m[2])}` };
     }
     default: return null;

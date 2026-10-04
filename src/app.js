@@ -352,7 +352,7 @@ function renderDash() {
   renderOddsInfo();
   if (!state.dossier) { $('#dash').innerHTML = ''; return; }
   const teams = teamsHist();
-  $('#dashMode').innerHTML = [['Foco: gols + escanteios 1T', true], ['Todos os mercados', false]]
+  $('#dashMode').innerHTML = [['Foco: linhas principais (pré-jogo)', true], ['Todos os mercados', false]]
     .map(([t, f]) => `<button class="${state.focus === f ? 'on' : ''}" data-f="${f}">${t}</button>`).join('');
   for (const b of $('#dashMode').children) b.onclick = () => { state.focus = b.dataset.f === 'true'; renderDash(); };
   $('#dash').innerHTML = renderDashboard(pickDashboard(state.dossier, 5, { focus: state.focus, side }), teams);

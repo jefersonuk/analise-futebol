@@ -2,6 +2,8 @@
 // (mercados de foco, candidatas e as melhores linhas de cada mercado), para caber numa conversa sem
 // gastar o plano à toa. O texto começa com uma marca que a página do especialista reconhece.
 
+import { isMain } from './consistency.js';
+
 export const SPECIALIST_URL = 'https://claude.ai/artifact/T2QWDJ4U4zzFJSnQumKSBr';
 export const MARK = '#ESPECIALISTA-FUTEBOL v1';
 
@@ -34,8 +36,8 @@ export function briefGame(d) {
   };
 }
 
-// A varredura do dia: cada jogo com a linha do ranking, as alternativas e a melhor linha de cada mercado
-// da varredura (1º tempo, gols e escanteios do jogo).
+// A varredura do dia: cada jogo com a linha do ranking (a de mais valor nas linhas principais), as outras
+// linhas principais do jogo e a melhor de cada mercado (inclui o handicap de escanteios do jogo).
 export function briefScan(scan, ranked) {
   return {
     kind: 'varredura',
@@ -47,7 +49,7 @@ export function briefScan(scan, ranked) {
       alerts: g.alerts, odds_age_min: g.odds_age_min, pinnacle_1h: g.pinnacle_1h, expected_1h: g.expected_1h,
       share_1h: g.share_1h, c1_history_games: g.c1_known, no_history: g.no_history || null, no_corners: g.no_corners || null,
       top_line: slim(line),
-      other_lines: g.lines.filter(l => l.id !== line.id && l.market === line.market && l.odd_min >= 1.4 && l.odd_min <= 3).sort(byScore).slice(0, 3).map(slim),
+      other_lines: g.lines.filter(l => l.id !== line.id && isMain(l.id)).map(slim),
       best_by_market: Object.fromEntries(Object.entries(g.best || {}).filter(([, l]) => l && l.id !== line.id).map(([m, l]) => [m, slim(l)])),
     })),
     skipped: scan.skipped.map(s => `${s.fx.home.name} x ${s.fx.away.name} (${s.fx.league.name}): ${s.why}`),

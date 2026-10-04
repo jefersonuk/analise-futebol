@@ -125,3 +125,11 @@ test('linha com nome de time: o visitante do jogo de hoje, não o mando de um jo
   assert.equal(sideLabel('Casa: Mais de 4,5', 'São Bernardo', 'CRB'), 'São Bernardo: Mais de 4,5');
   assert.equal(sideLabel('Empate', 'São Bernardo', 'CRB'), 'Empate');
 });
+
+test('gols do 1º tempo: "Acima 1.5 1º tempo" e o rótulo do app', () => {
+  assert.equal(parseLine('Acima 1.5 1º tempo').id, 'g1O1.5');
+  assert.equal(parseLine('Abaixo 0.5 - 1º período').id, 'g1U0.5');
+  assert.equal(parseLine('Mais de 1,5', { market: 'Total de gols 1T' }).id, 'g1O1.5');
+  assert.equal(parseLine('Acima 4.5 1º período - escanteios').id, 'c1O4.5');   // escanteios do 1º tempo seguem iguais
+  assert.ok(parseLine('Casa: Mais de 0,5 1º tempo').error);                     // gols por time no 1º tempo: não calcula
+});

@@ -32,7 +32,7 @@ export function betsApp() {
 }
 
 const MARKET = {
-  'Total de gols': 'Total de Gols', 'Handicap asiático': 'Handicap Asiático', '1X2': '1X2 / Resultado',
+  'Total de gols': 'Total de Gols', 'Total de gols 1T': 'Total de Gols', 'Handicap asiático': 'Handicap Asiático', '1X2': '1X2 / Resultado',
   'Ambas marcam': 'Ambas Marcam', 'Total de escanteios': 'Escanteios', 'Escanteios por time': 'Escanteios',
   'Total escanteios 1T': 'Escanteios', 'Handicap escanteios 1T': 'Escanteios', 'Handicap de escanteios': 'Escanteios',
   'Resultado escanteios': 'Escanteios', 'Resultado escanteios 1T': 'Escanteios', 'Corrida de escanteios': 'Escanteios', 'Total de chutes': 'Total de Chutes',

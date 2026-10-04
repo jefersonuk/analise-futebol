@@ -5,7 +5,7 @@ import { METRICS, fit, observe, predict, prepare } from './ratings.js';
 export { METRICS };
 export const RHO = -0.13;          // correção Dixon-Coles para placares baixos
 const MAXG = 10;
-const VMR_CAP = { corners: 1.35, shots: 1.6, sot: 1.6, corners1h: 1.6 };
+const VMR_CAP = { corners: 1.35, shots: 1.6, sot: 1.6, corners1h: 1.6, goals1h: 1.3 };
 const ANCHOR_W = 0.8;   // peso da Pinnacle ao ancorar o total de escanteios do 1º tempo
 export const SHARE_1H = 0.472;   // fração dos escanteios no 1º tempo (Footiqo, 141 mil jogos) quando a liga não tem dado
 // Escanteios a mais do mandante por gol de superioridade esperada (mandante − visitante): diferença de
@@ -186,6 +186,10 @@ function buildLines(pred, phi, shift = [0, 0], derived = {}) {
       L = L.concat(handicapLines('ch', 'Handicap de escanteios', e, 5), resultLines('cx', 'Resultado escanteios', e, 'escanteios'),
         raceLines(d.h, d.a, phi[k]));
     }
+  }
+  if (pred.goals1h) {   // gols do 1º tempo: só o total (linhas de 0,5 em 0,5; o preço vem da Pinnacle no dossiê)
+    const x = v('goals1h');
+    L = L.concat(countLines('g1', 'Total de gols 1T', '', x.h + x.a, phi.goals1h, 3, Math.round(pred.goals1h.h + pred.goals1h.a)));
   }
   if (pred.corners1h) {
     const x = v('corners1h'), p = pred.corners1h, e = diffDist(x.h, x.a, phi.corners1hDiff);

@@ -58,19 +58,21 @@ test('handicap de escanteios 1T usa o saldo de escanteios do 1º tempo do time',
 
 import { pickDashboard } from '../src/dashboard.js';
 
-test('painel em foco: candidata de cada mercado, escada só na faixa 1,50–3,00', () => {
-  const L = (id, market, tier, score, odd) => ({ id, market, tier, consistency_score: score, odd_min: odd, politica_e: odd > 3 ? 'não entrar' : 'cheia', odd_min_vs_pinnacle_pct: 0, p_model_range: [0.5, 0.6] });
+test('painel em foco: linhas principais, apostas de valor primeiro e o motivo das outras', () => {
+  const L = (id, market, level, value, odd, extra = {}) => ({ id, market, value_level: level, value_pct: value, odd_min: odd,
+    politica_e: odd > 3 ? 'não entrar' : 'cheia', odd_min_vs_pinnacle_pct: 2, tier: 'sólida', consistency_score: 0.6, p_model_range: [0.5, 0.6], ...extra });
   const dossier = {
-    focus_markets: ['Total de gols', 'Handicap escanteios 1T'],
-    candidates_focus: ['gO1.5', 'c1hA1.5'], candidates: ['gO1.5'],
-    lines_with_pinnacle: [L('gO1.5', 'Total de gols', 'sólida', 0.6, 1.7), L('gO2.5', 'Total de gols', 'especulativa', 0.4, 2.2), L('1', '1X2', 'sólida', 0.6, 1.9)],
-    lines_anchored: [L('c1hA1.5', 'Handicap escanteios 1T', 'sólida', 0.6, 1.75), L('c1hA3', 'Handicap escanteios 1T', 'âncora', 0.9, 1.23), L('c1hA1', 'Handicap escanteios 1T', 'sólida', 0.55, 2.0)],
+    focus_markets: ['Total escanteios 1T', 'Total de escanteios', 'Total de gols 1T', 'Total de gols'],
+    candidates_focus: ['c1O4.5'], candidates: ['1'],
+    lines_with_pinnacle: [L('c1O4.5', 'Total escanteios 1T', 'confirmado', 3.1, 1.9), L('gO2.5', 'Total de gols', 'sem confirmação', 1.4, 2.1),
+      L('gO1.5', 'Total de gols', 'sem valor', -2, 1.3), L('gU2.5', 'Total de gols', 'sem valor', -1, 1.8), L('gO3', 'Total de gols', 'confirmado', 5, 2.6),
+      L('cornersO8.5', 'Total de escanteios', 'confirmado', 2.4, 1.7, { odd_min_vs_pinnacle_pct: 7 }), L('1', '1X2', 'sólida', 0, 1.9)],
+    lines_anchored: [L('c1O4', 'Total escanteios 1T', null, null, 1.6)],
   };
-  const side = id => id.replace(/-?[\d.]+$/, '');
-  const ids = pickDashboard(dossier, 5, { focus: true, side }).map(l => l.id);
-  assert.deepEqual(ids.slice(0, 3), ['gO1.5', 'c1hA1.5', 'c1hA1']);   // escada pula a odd 1,23
-  assert.ok(!ids.includes('1'));                                     // foco não mostra 1X2
-  assert.ok(pickDashboard(dossier, 5, { focus: false, side }).some(l => l.id === '1'));
+  const lines = pickDashboard(dossier, 5, { focus: true });
+  assert.deepEqual(lines.map(l => l.id), ['c1O4.5', 'cornersO8.5', 'gO2.5', 'gO1.5']);   // nem linha fora das principais (gO3), nem under sem valor, nem sem Pinnacle
+  assert.deepEqual(lines.map(l => l.outside ?? null), [null, 'preço difícil de achar', 'valor sem confirmação', 'sem valor']);
+  assert.ok(pickDashboard(dossier, 5, { focus: false }).some(l => l.id === '1'));
 });
 
 import { isUnder } from '../src/consistency.js';
@@ -140,4 +142,28 @@ test('acerto pelo papel: jogos no papel de hoje pesam 1, vizinho 0,6, oposto 0,3
   assert.ok(Math.abs(asZebra.wins / asZebra.n - 1.2 / 3.2) < 1e-9, 'como zebra: 4×0,3 de 4×0,3+2×1');
   assert.ok(Math.abs(asFav.wins / asFav.n - 4 / 4.6) < 1e-9, 'como favorito: 4 de 4+2×0,3');
   assert.equal(asZebra.role_now, 'zebra');
+});
+
+test('gols do 1º tempo: histórico pelo placar do intervalo, na ordem do placar', () => {
+  const gs = [{ t: 2, home: true, opp: 'B', gf: 3, ga: 1, g1: [2, 0] }, { t: 1, home: false, opp: 'C', gf: 1, ga: 1, g1: [0, 1] }, { t: 0, home: true, opp: 'D', gf: 0, ga: 0, g1: null }];
+  const h = history('g1O1.5', 'home', 'A', gs);
+  assert.deepEqual(h.bars.map(b => b.v), [1, 2]);   // jogo sem placar do intervalo fica de fora
+  assert.deepEqual(h.bars.map(b => b.res), ['lose', 'win']);
+  assert.equal(h.what, 'gols no 1º tempo');
+  assert.equal(h.calc(gs[1]), 'C 1 + 0 A');           // A jogou fora: mandante primeiro
+});
+
+import { valueOf } from '../src/consistency.js';
+
+test('valor: confirmado só com o modelo (pior cenário) e o histórico acima do mercado', () => {
+  const hits = (a, b) => [{ wins: a, n: 10 }, { wins: b, n: 10 }];
+  assert.equal(valueOf({ p: 0.56, q: 0.53, pLow: 0.54, hits: hits(7, 6) }).level, 'confirmado');
+  assert.equal(valueOf({ p: 0.56, q: 0.53, pLow: 0.5, hits: hits(7, 6) }).level, 'sem confirmação', 'pior cenário abaixo do mercado');
+  assert.equal(valueOf({ p: 0.56, q: 0.53, pLow: 0.54, hits: hits(9, 3) }).level, 'sem confirmação', 'um time 10 pp abaixo');
+  assert.equal(valueOf({ p: 0.56, q: 0.53, pLow: 0.54, hits: hits(4, 4) }).level, 'sem valor', 'histórico contra');
+  assert.equal(valueOf({ p: 0.535, q: 0.53, pLow: 0.6, hits: hits(9, 9) }).level, 'sem valor', 'menos de +1%');
+  assert.equal(valueOf({ p: 0.56, q: 0.53, pLow: 0.54, hits: [{ wins: 3, n: 4 }] }).level, 'sem confirmação', 'histórico curto');
+  const v = valueOf({ p: 0.36, q: 0.33, pLow: 0.34, hits: hits(5, 4) });   // odd ~3: valor é relativo ao preço, não ao acerto absoluto
+  assert.equal(v.level, 'confirmado');
+  assert.ok(Math.abs(v.value - 0.0909) < 1e-3);
 });

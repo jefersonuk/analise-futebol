@@ -53,3 +53,13 @@ test('escanteios da Pinnacle: handicap (56) e por time (57/58), formato real da 
   assert.equal(odds.get('cAU4.5'), 1.72);
   assert.ok(Math.abs(fair.get('cHO5.5') + fair.get('cHU5.5') - 1) < 1e-9);
 });
+
+test('gols do 1º tempo da Pinnacle (mercado 6), formato real da API', () => {
+  // FC Tulsa x Sacramento Republic, 03/10/2026 (valores reais da API)
+  const bets = [{ id: 6, values: [['Over 1.5', '3.40'], ['Under 1.5', '1.32'], ['Over 0.5', '1.47'], ['Under 0.5', '2.67']].map(([value, odd]) => ({ value, odd })) }];
+  const { odds, fair } = collect([{ id: 4, bets }]);
+  assert.equal(odds.get('g1O1.5'), 3.4);
+  assert.equal(odds.get('g1U0.5'), 2.67);
+  assert.ok(!odds.has('gO1.5'), 'não se mistura com os gols do jogo');
+  near(fair.get('g1O1.5') + fair.get('g1U1.5'), 1);
+});

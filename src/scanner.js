@@ -1,7 +1,8 @@
-// Varredura do dia: todos os jogos por começar com odds da Pinnacle, analisados pelo mesmo modelo do app.
-// A linha de cada jogo é a de escanteios do 1º tempo quando a Pinnacle cota o 1º tempo e há candidata
-// nele; senão, a mais consistente de gols e escanteios do jogo (totais e handicaps). Liga sem estatística
-// de escanteios na API (USL Championship, Liga de Expansión, Primera B…) entra só com os mercados de gols.
+// Varredura do dia: valor nas linhas principais do pré-jogo (consistency.js: escanteios 1T 4 e 4,5,
+// escanteios do jogo 8 e 8,5, gols 1T 1,5, gols do jogo 1,5 e 2,5) de todos os jogos por começar com odds da
+// Pinnacle, pelo mesmo modelo do app. Só linhas que a Pinnacle cota (o valor é medido contra ela). Handicap
+// de escanteios do jogo fica num filtro à parte. Liga sem estatística de escanteios na API (USL Championship,
+// Liga de Expansión, Primera B…) entra só com os mercados de gols.
 //
 // Custo (o que manda no desenho):
 //   1. jogos do dia: 1 requisição; odds da Pinnacle de todos os mercados lidos: 1 por 10 jogos (nenhuma
@@ -9,23 +10,21 @@
 //   2. cada liga: ~60 requisições na primeira vez (3 temporadas com estatística), depois só o que é novo.
 //      Os escanteios do 1º tempo da liga inteira (1 requisição por jogo) NÃO são baixados: a média do
 //      1º tempo de cada time sai dos escanteios do jogo × fração do 1º tempo, e o total é ancorado na Pinnacle
-//   3. os 1,5×N melhores jogos no 1º tempo: escanteios do 1º tempo dos últimos 10 jogos de cada time (até 20
-//      requisições por jogo na primeira vez; ficam guardados), que entram no histórico e na consistência
+//   3. os 1,5×N jogos com mais valor nos escanteios do 1º tempo: escanteios do 1º tempo dos últimos 10 jogos
+//      de cada time (até 20 requisições por jogo na primeira vez; ficam guardados), que confirmam ou não o valor
 // O orçamento de requisições é respeitado: ligas e históricos que não cabem ficam de fora e são listados.
 
 import { analyzeMatch, politicaE } from './model.js';
 import { collect } from './odds.js';
 import { recentGames } from './insights.js';
-import { FRIENDLIES, byConsistency, contraAlert, favorSummary, isCandidate, priceLines, rolesNow, seasonsFor } from './dossier.js';
+import { FRIENDLIES, contraAlert, favorSummary, priceLines, rolesNow, seasonsFor } from './dossier.js';
 import { favorFor } from './favoritism.js';
-import { underOk } from './consistency.js';
+import { MAIN_LINES, byValue, isMain, isUnder, isValueBet } from './consistency.js';
 
-export const H1_MARKETS = ['Total escanteios 1T', 'Handicap escanteios 1T'];
-export const GOAL_MARKETS = ['Total de gols', 'Handicap asiático'];
-export const CORNER_MARKETS = ['Total de escanteios', 'Handicap de escanteios'];
-export const ALL_MARKETS = H1_MARKETS.concat(GOAL_MARKETS, CORNER_MARKETS);
-export const EXTRA_MARKETS = ['Total de gols', 'Total de escanteios'];   // colunas da tabela
-export const H1 = '1T';   // filtro dos dois mercados do 1º tempo
+export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
+export const HANDICAP = 'Handicap de escanteios';      // jogo inteiro, nas linhas da Pinnacle: filtro à parte
+export const SCAN_MARKETS = MAIN_MARKETS.concat(HANDICAP);
+const GOALS_ONLY = ['Total de gols 1T', 'Total de gols'];
 // MIN_GAMES: jogos-equivalentes (com o decaimento) de cada time na base — de gols para analisar o jogo,
 // de escanteios para os mercados de escanteios (jogo e 1º tempo).
 const LEAGUE_COST = 70, TEAM_COST = 10, MIN_GAMES = 8;
@@ -51,21 +50,15 @@ async function teamPool(api, fixtures, S, onProgress) {
 }
 const r2 = x => Math.round(x * 100) / 100;
 
-// jogável: odd mínima na faixa operada, linha que o mercado oferece (não "favorito +x") e over primeiro
-// (under só âncora, como nas candidatas)
-const playable = l => l.odd_min >= 1.5 && politicaE(l.odd_min).factor > 0 && !l.inviable && underOk(l);
-// Melhor linha de um jogo: candidata (âncora/sólida) primeiro; senão a mais consistente jogável.
-// market: um mercado, H1 (os dois do 1º tempo) ou null (a do jogo: o 1º tempo quando há candidata nele,
-// senão a mais consistente de todos os mercados da varredura).
+// jogável: odd mínima na faixa operada (1,50–3,00), linha que o mercado oferece (não "favorito +x") e over
+// primeiro (under só quando é aposta de valor)
+const playable = l => l.odd_min >= 1.5 && politicaE(l.odd_min).factor > 0 && !l.inviable && (!isUnder(l.id) || isValueBet(l));
+// Melhor linha de um jogo: aposta de valor primeiro; senão a de mais valor jogável.
+// market: um mercado ou null (as linhas principais: escanteios 1T e do jogo, gols 1T e do jogo).
 export function bestLine(lines, { market = null } = {}) {
-  const pick = ms => {
-    const pool = lines.filter(l => ms.includes(l.market) && playable(l)).sort(byConsistency);
-    return pool.find(isCandidate) || pool[0] || null;
-  };
-  if (market === H1) return pick(H1_MARKETS);
-  if (market) return pick([market]);
-  const h1 = pick(H1_MARKETS);
-  return h1 && isCandidate(h1) ? h1 : pick(ALL_MARKETS);
+  const ms = market ? [market] : MAIN_MARKETS;
+  const pool = lines.filter(l => ms.includes(l.market) && playable(l)).sort(byValue);
+  return pool.find(isValueBet) || pool[0] || null;
 }
 
 // favor: calibração da base (favoritism.js): escanteios por gol de superioridade na liga.
@@ -80,7 +73,7 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null) {
   const noCorners = !cornersThin ? null : res.prep.coverage === 0
     ? 'só gols: a API não tem estatística de escanteios dos jogos desta base'
     : `só gols: ${cornersThin} com menos de ${MIN_GAMES} jogos com estatística de escanteios na base`;
-  const markets = noCorners ? GOAL_MARKETS : ALL_MARKETS;
+  const markets = noCorners ? GOALS_ONLY : SCAN_MARKETS;
   const now = rolesNow(res.favor);
   const teams = [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(res.prep, t.id), roleNow: now[role] }));
   const ageMin = oddsP.updatedAt ? Math.round((Date.now() - Date.parse(oddsP.updatedAt)) / 60e3) : null;
@@ -88,9 +81,10 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null) {
   if (teamBase) alerts.push('base: jogos dos dois times em todas as competições (amostra menor que a de uma liga)');
   const names = { home: fx.home.name, away: fx.away.name }, contra = !noCorners && contraAlert(res.favor, names);
   if (contra) alerts.push(contra);
-  const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market) });
-  const lines = priced.concat(anchored);
-  const best = Object.fromEntries(ALL_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
+  // só linhas com preço da Pinnacle: as principais e o handicap de escanteios que ela cota
+  const { priced } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market) && (isMain(l.id) || l.market === HANDICAP) });
+  const lines = priced;
+  const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
   const a = res.anchors, h1 = !noCorners;
   return {
     fx, teams, lines, best, alerts, odds_age_min: ageMin, team_base: teamBase, no_corners: noCorners,
@@ -103,11 +97,10 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null) {
   };
 }
 
-// Ordem dos jogos: a melhor linha de cada um (no filtro pedido), candidatas primeiro,
-// depois consistência.
+// Ordem dos jogos: a melhor linha de cada um (no filtro pedido), apostas de valor primeiro, depois valor.
 export function rankGames(games, opts = {}) {
   return games.map(g => ({ g, line: bestLine(g.lines, opts) })).filter(x => x.line)
-    .sort((a, b) => isCandidate(b.line) - isCandidate(a.line) || byConsistency(a.line, b.line));
+    .sort((a, b) => isValueBet(b.line) - isValueBet(a.line) || byValue(a.line, b.line));
 }
 
 // api: o mesmo conjunto do dossiê (dayFixtures, dayOdds, hasLeague, leagueMatches, attachHalfCorners, stats).
@@ -185,8 +178,8 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
     }
   }
 
-  // 2ª passada: histórico do 1º tempo dos dois times nos jogos mais promissores no 1º tempo
-  const short = rankGames(games, { market: H1 }).slice(0, Math.ceil(top * 1.5));
+  // 2ª passada: histórico do 1º tempo dos dois times nos jogos com mais valor nos escanteios do 1º tempo
+  const short = rankGames(games, { market: 'Total escanteios 1T' }).filter(x => x.line.value_pct > 0).slice(0, Math.ceil(top * 1.5));
   let gi = 0;
   for (const { g } of short) {
     gi++;
@@ -207,13 +200,13 @@ export async function scanDay(api, { date, top = 20, budget = 1500, banca = 4400
     } catch (e) { g.no_history = `histórico do 1º tempo falhou: ${e.message}`; }
   }
 
-  // Guardados: os N melhores de cada filtro da tela (o do jogo, o 1º tempo e cada mercado), na ordem do
-  // filtro do jogo.
+  // Guardados: os N melhores de cada filtro da tela (as linhas principais e cada mercado), na ordem das
+  // linhas principais (jogo só com handicap jogável vai para o fim).
   const keep = new Set();
-  for (const market of [null, H1, ...ALL_MARKETS]) for (const { g } of rankGames(games, { market }).slice(0, top)) keep.add(g);
-  // de cada jogo, só as linhas que a tela e o especialista mostram (odd mínima de 1,40 a 3,00, oferecida pelo mercado)
-  for (const g of keep) g.lines = g.lines.filter(l => !l.inviable && l.odd_min >= 1.4 && l.odd_min <= 3);
-  const ranked = rankGames([...keep]).map(x => x.g);
-  return { date, generated_at: new Date().toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
+  for (const market of [null, ...SCAN_MARKETS]) for (const { g } of rankGames(games, { market }).slice(0, top)) keep.add(g);
+  const pos = new Map(rankGames([...keep]).map((x, i) => [x.g, i]));
+  const ranked = [...keep].sort((a, b) => (pos.get(a) ?? 1e9) - (pos.get(b) ?? 1e9));
+  // v 2: valor nas linhas principais (a tela avisa quando a varredura guardada é de antes)
+  return { v: 2, date, generated_at: new Date().toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }

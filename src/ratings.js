@@ -1,7 +1,8 @@
 // Forças de ataque e defesa ajustadas pelo adversário (ponto fixo de Maher/Dixon-Coles),
 // com decaimento temporal, mando por liga e shrinkage por pseudo-jogos.
 //
-// Jogo compacto: { id, t, h, a, hg, ag, s, c1 }
+// Jogo compacto: { id, t, h, a, hg, ag, hh, ha, s, c1 }
+//   hh, ha = placar do 1º tempo (null/ausente quando a API não tem)
 //   s  = null (sem estatística) ou [dentroH, foraH, noGolH, totalH, escH, dentroA, foraA, noGolA, totalA, escA]
 //   c1 = escanteios do 1º tempo [mandante, visitante], ou null/ausente (a API só tem a partir de 2024)
 
@@ -16,6 +17,7 @@ export const METRICS = {
   sot:     { name: 'Chutes no gol', K: 6, idx: 2 },
   corners: { name: 'Escanteios',    K: 6, idx: 4 },
   corners1h: { name: 'Escanteios 1º tempo', K: 6 },
+  goals1h: { name: 'Gols 1º tempo', K: 10 },
 };
 
 const stat = (s, home, i) => s[(home ? 0 : 5) + i];
@@ -37,6 +39,7 @@ export function prepare(matches, refTime) {
 // Valor observado [casa, fora] de uma métrica num jogo, ou null se não houver dado.
 export function observe(key, m, xg) {
   if (key === 'corners1h') return m.c1 || null;
+  if (key === 'goals1h') return m.hh != null && m.ha != null ? [m.hh, m.ha] : null;   // placar real (sem xG por tempo)
   if (key === 'goals') {
     if (!m.s) return [m.hg, m.ag];
     return [BLEND * xg(m, true) + (1 - BLEND) * m.hg, BLEND * xg(m, false) + (1 - BLEND) * m.ag];

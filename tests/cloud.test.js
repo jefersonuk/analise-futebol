@@ -81,3 +81,11 @@ test('junção de listas de jogos: estatística de quem tiver, atualização mai
   assert.equal(m.t, 20);
   assert.equal(m.next, 99);
 });
+
+test('junção de listas de jogos: placar do 1º tempo de quem tiver', () => {
+  const a = { t: 30, next: null, m: { 1: { id: 1, s: [1], hh: 1, ha: 0 }, 2: { id: 2, s: null, hh: null, ha: null } } };
+  const b = { t: 20, next: null, m: { 1: { id: 1, s: [1] }, 2: { id: 2, s: null } } };   // outro aparelho, versão antiga
+  const m = merge('af:lg:1:2026', a, b);
+  assert.deepEqual([m.m[1].hh, m.m[1].ha], [1, 0]);
+  assert.equal(m.m[2].hh, null);
+});

@@ -24,7 +24,7 @@ const NUM = '([-+]?\\d+(?:\\.\\d+)?)';
 // Palavras que dizem ao leitor o mercado de uma linha do app (o rótulo sozinho, "Mais de 4,5", serve a
 // vários mercados). Vão no fim do texto: as regras de resultado olham o começo.
 const MARKET_HINT = {
-  '1X2': '', 'Handicap asiático': 'handicap', 'Total de gols': 'gols', 'Ambas marcam': 'ambas marcam',
+  '1X2': '', 'Handicap asiático': 'handicap', 'Total de gols': 'gols', 'Total de gols 1T': 'gols 1o tempo', 'Ambas marcam': 'ambas marcam',
   'Total de escanteios': 'escanteios', 'Escanteios por time': 'escanteios', 'Handicap de escanteios': 'handicap escanteios',
   'Resultado escanteios': 'escanteios', 'Corrida de escanteios': 'escanteios', 'Total de chutes': 'chutes',
   'Total de chutes no gol': 'chutes no gol', 'Total escanteios 1T': 'escanteios 1o tempo',
@@ -81,7 +81,8 @@ export function parseLine(text, { names = null, market = null } = {}) {
       if (half) return team ? { error: 'Escanteios por time no 1º tempo: o modelo não calcula.' } : { id: `c1${OU}${L}` };
       return { id: team ? `c${team}${OU}${L}` : `corners${OU}${L}` };
     }
-    if (half || team) return { error: 'Gols/chutes do 1º tempo ou por time: o modelo não calcula.' };
+    if (metric === 'goals' && half && !team) return { id: `g1${OU}${L}` };
+    if (half || team) return { error: 'Chutes do 1º tempo e gols ou chutes por time: o modelo não calcula.' };
     return { id: `${metric === 'goals' ? 'g' : metric}${OU}${L}` };
   }
 
@@ -130,6 +131,7 @@ export function verdict(line, odd) {
   const push = line.push_prob > 0.01 ? `; devolve a aposta em ${pct(line.push_prob)} dos jogos` : '';
   notes.push(`Acerta ${pct(p)} sem contar a devolução${push}. Odd justa ${odd2(line.fair_odd_blend)}, mínima ${odd2(line.odd_min)} `
     + `(${line.priced_by === 'pinnacle' ? `Pinnacle ${odd2(line.pinnacle_odd)} sem margem, misturada com o modelo` : line.priced_by}).`);
+  if (line.value_pct != null) notes.push(`Valor ${line.value_pct > 0 ? '+' : ''}${String(line.value_pct).replace('.', ',')}% contra a Pinnacle sem margem (${line.value_level}).`);
   const hs = [line.history?.home, line.history?.away].filter(h => h && h.n);
   const roleTxt = h => (h.role_now ? (h.by_role?.[h.role_now] ? `; como ${h.role_now}, como hoje: ${String(h.by_role[h.role_now].wins).replace('.', ',')}/${h.by_role[h.role_now].n}` : `; nenhum jogo como ${h.role_now}, como hoje`) : '');
   if (hs.length) notes.push(`Últimos jogos: ${hs.map(h => `${h.hits} (${h.what}${roleTxt(h)})`).join(' · ')}.`);
@@ -156,14 +158,14 @@ export function verdict(line, odd) {
 // ---- alternativas ----
 function opposite(id) {
   let m;
-  if ((m = id.match(/^(g|corners|shots|sot|c1|cH|cA)([OU])(.+)$/))) return `${m[1]}${m[2] === 'O' ? 'U' : 'O'}${m[3]}`;
+  if ((m = id.match(/^(g|g1|corners|shots|sot|c1|cH|cA)([OU])(.+)$/))) return `${m[1]}${m[2] === 'O' ? 'U' : 'O'}${m[3]}`;
   if ((m = id.match(/^(ah|c1h|ch)([HA])(.+)$/))) return `${m[1]}${m[2] === 'H' ? 'A' : 'H'}${-m[3]}`;
   return { bttsY: 'bttsN', bttsN: 'bttsY' }[id] || null;
 }
 
 // Lados (ou linhas) que expressam a mesma leitura do jogo em outro mercado.
 const RELATED = [
-  [/^gO/, ['bttsY']], [/^gU/, ['bttsN']], [/^bttsY$/, ['gO']], [/^bttsN$/, ['gU']],
+  [/^gO/, ['bttsY', 'g1O']], [/^gU/, ['bttsN', 'g1U']], [/^g1O/, ['gO']], [/^g1U/, ['gU']], [/^bttsY$/, ['gO']], [/^bttsN$/, ['gU']],
   [/^1$/, ['ahH']], [/^2$/, ['ahA']], [/^ahH/, ['1']], [/^ahA/, ['2']],
   [/^c1hH/, ['chH', 'c1x1', 'cHO']], [/^c1hA/, ['chA', 'c1x2', 'cAO']],
   [/^chH/, ['c1hH', 'cx1', 'crH']], [/^chA/, ['c1hA', 'cx2', 'crA']],

@@ -15,6 +15,7 @@ export function recentGames(prep, team, n = 10) {
       return {
         t: m.t, home, opp: home ? m.an : m.hn, league: m.ln || '',
         gf: home ? m.hg : m.ag, ga: home ? m.ag : m.hg,
+        g1: m.hh != null && m.ha != null ? (home ? [m.hh, m.ha] : [m.ha, m.hh]) : null,   // gols do 1º tempo, pró–contra
         xf: s ? prep.xg(m, home) : null, xa: s ? prep.xg(m, !home) : null,
         corners: pick(4), shots: pick(3), sot: pick(2),
         c1: m.c1 ? (home ? [m.c1[0], m.c1[1]] : [m.c1[1], m.c1[0]]) : null,

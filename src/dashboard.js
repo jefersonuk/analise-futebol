@@ -1,7 +1,7 @@
 // Painel: as 5 linhas de maior EV e como cada time se saiu nelas nos últimos 10 jogos.
 
 import { roleOf, settle } from './model.js';
-import { isUnder, rankScore, rankTier } from './consistency.js';
+import { byValue, isMain, isUnder, isValueBet, rankScore, rankTier } from './consistency.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const numBR = x => String(x).replace('.', ',');
@@ -28,6 +28,7 @@ function spec(id, role, teamName) {
   };
   const diffCalc = key => g => { const p = pairOf(key)(g); return p ? `${teamName} ${p[0]} − ${p[1]} ${g.opp}` : ''; };
   if ((m = id.match(/^g([OU])(.+)$/))) return { what: 'gols no jogo', value: g => g.gf + g.ga, calc: sumCalc('goals'), ...ou(m[1], +m[2]) };
+  if ((m = id.match(/^g1([OU])(.+)$/))) return { what: 'gols no 1º tempo', value: total('g1'), calc: sumCalc('g1'), ...ou(m[1], +m[2]) };
   if ((m = id.match(/^(corners|shots|sot)([OU])(.+)$/))) {
     const what = { corners: 'escanteios no jogo', shots: 'chutes no jogo', sot: 'chutes no gol no jogo' }[m[1]];
     return { what, value: total(m[1]), calc: sumCalc(m[1]), ...ou(m[2], +m[3]) };
@@ -127,7 +128,7 @@ function tipHtml(b, h, teamName, roleNow) {
     <div class="tip-metric ${RES[b.res].cls}"><span>${esc(h.what)}: ${calc ? `${esc(calc)} = ` : ''}<b>${b.v}</b> · a aposta vence ${esc(h.rule)}</span>
       <span>→ ${RES[b.res].label}</span></div>
     <table><tr><th></th><th>${esc(home)}</th><th>${esc(away)}</th></tr>
-      ${row('Escanteios', ord(g.corners))}${row('1º tempo', ord(g.c1))}${row('Chutes', ord(g.shots))}${row('No gol', ord(g.sot))}
+      ${row('Gols 1º tempo', ord(g.g1))}${row('Escanteios', ord(g.corners))}${row('Escanteios 1T', ord(g.c1))}${row('Chutes', ord(g.shots))}${row('No gol', ord(g.sot))}
       ${row('xG-proxy', g.xf != null ? ord([g.xf, g.xa]) : null, n1)}</table>
     <div class="tip-note">mandante · visitante, na ordem do placar</div>`;
 }
@@ -199,6 +200,7 @@ export function bindTooltips(root) {
 
 const pct = x => `${Math.round(x * 100)}%`;
 const odd2 = x => x.toFixed(2).replace('.', ',');
+const VALUE_CLS = { confirmado: 'ok', 'sem confirmação': 'mid', 'sem valor': 'no' };
 
 // Por que uma linha que entrou só para completar o painel não passou no filtro de candidatas.
 function outsideReason(l, ok = []) {
@@ -215,26 +217,38 @@ function outsideReason(l, ok = []) {
   return 'alternativa de linha';
 }
 
-// As n linhas do painel. Modo foco: as candidatas dos mercados de foco e, em seguida, a escada do
-// mesmo lado (outras linhas do mesmo mercado e lado, para comparar acerto × odd). Modo todos: uma
-// candidata por mercado. Se faltar, completa com as mais consistentes restantes, marcando o motivo.
-export function pickDashboard(dossier, n = 5, { focus = true, side = id => id } = {}) {
+// Por que uma linha principal não é aposta de valor.
+function valueReason(l) {
+  if (isValueBet(l)) return null;
+  if (l.value_level === 'sem valor') return 'sem valor';
+  if (l.value_level === 'sem confirmação') return 'valor sem confirmação';
+  if (l.odd_min < 1.5) return 'odd abaixo de 1,50';
+  if (l.politica_e === 'não entrar') return 'odd acima de 3,00';
+  if (l.odd_min_vs_pinnacle_pct > 5) return 'preço difícil de achar';
+  if (isUnder(l.id)) return 'under só com valor de +4%';
+  return 'fora do filtro';
+}
+
+// As n linhas do painel. Modo foco: as linhas principais do pré-jogo com preço da Pinnacle — apostas de
+// valor primeiro, depois as outras pela ordem de valor, com o motivo (under só quando é aposta). Modo
+// todos: uma candidata por mercado; se faltar, completa com as mais consistentes restantes, com o motivo.
+export function pickDashboard(dossier, n = 5, { focus = true } = {}) {
   const all = dossier.lines_with_pinnacle.concat(dossier.lines_anchored || []);
   const byId = new Map(all.map(l => [l.id, l]));
-  const pool = focus ? all.filter(l => dossier.focus_markets.includes(l.market)) : all;
-  const first = (focus ? dossier.candidates_focus : dossier.candidates).map(id => byId.get(id)).filter(Boolean).slice(0, n);
+  if (focus) {
+    const first = dossier.candidates_focus.map(id => byId.get(id)).filter(Boolean);
+    const rest = all.filter(l => isMain(l.id) && l.value_level && !l.inviable && !first.includes(l) && (!isUnder(l.id) || isValueBet(l)))
+      .sort(byValue).map(l => ({ ...l, outside: valueReason(l) }));
+    return first.concat(rest).slice(0, n);
+  }
+  const first = dossier.candidates.map(id => byId.get(id)).filter(Boolean).slice(0, n);
   const out = [...first], used = new Set(out.map(l => l.id));
   const better = (a, b) => rankTier(a) - rankTier(b) || rankScore(b) - rankScore(a);
   const add = (l, outside) => { if (out.length < n && !used.has(l.id)) { used.add(l.id); out.push(outside ? { ...l, outside } : l); } };
-  if (focus) {
-    const sides = new Set(first.map(l => side(l.id)));
-    pool.filter(l => sides.has(side(l.id)) && !l.inviable && l.odd_min >= 1.5 && l.politica_e !== 'não entrar').sort(better)
-      .forEach(l => add(l, outsideReason(l, dossier.candidates_focus)));
-  }
   const markets = new Set(out.map(l => l.market));
-  pool.filter(l => !l.inviable && l.odd_min >= 1.2 && (focus || !markets.has(l.market)))
+  all.filter(l => !l.inviable && l.odd_min >= 1.2 && !markets.has(l.market))
     .sort((a, b) => (a.odd_min < 1.5) - (b.odd_min < 1.5) || better(a, b))
-    .forEach(l => { if (focus || !markets.has(l.market)) { markets.add(l.market); add(l, outsideReason(l, [])); } });
+    .forEach(l => { if (!markets.has(l.market)) { markets.add(l.market); add(l, outsideReason(l, [])); } });
   return out;
 }
 
@@ -273,7 +287,8 @@ export function renderDashboard(lines, teams) {
     return `<article class="dash">
       <header><div><small class="muted">${esc(l.market)}</small><h3>${esc(l.line)}</h3></div>
         <div class="kpis">
-          <span class="tag ${tierCls}">${l.tier} · acerta ${pct(l.p_blend)}${l.hit_rate_last10 != null ? ` · últimos 10: ${pct(l.hit_rate_last10)}` : ''}</span>
+          ${l.value_pct != null ? `<span class="tag ${VALUE_CLS[l.value_level]}">valor ${l.value_pct > 0 ? '+' : ''}${numBR(l.value_pct)}% · ${l.value_level}</span>` : ''}
+          <span class="tag ${tierCls}">${l.tier} · acerta ${pct(l.p_blend)}${l.p_pinnacle != null ? ` (Pinnacle ${pct(l.p_pinnacle)})` : ''}${l.hit_rate_last10 != null ? ` · últimos 10: ${pct(l.hit_rate_last10)}` : ''}</span>
           <span>justa ${odd2(l.fair_odd_blend)}</span>
           <span><b>mínima ${odd2(l.odd_min)}</b> <span class="muted">${l.pinnacle_odd ? `(Pinnacle ${odd2(l.pinnacle_odd)})` : `(${esc(l.priced_by || 'só o modelo')})`}</span></span>
           <span>${l.entry_brl ? `entrada R$ ${l.entry_brl} · ${l.politica_e}` : `sem entrada · ${l.politica_e}`}</span>

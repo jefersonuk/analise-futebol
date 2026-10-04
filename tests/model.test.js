@@ -196,3 +196,18 @@ test('modelo contra o mercado: alerta quando o modelo dá os escanteios ao outro
   assert.ok(res.pred.corners.h < res.pred.corners.a);
   near(res.favor.diff, res.favor.diff_market, 1e-9);   // modelo na direção errada: só o mercado
 });
+
+test('gols do 1º tempo: modelo pelo placar do intervalo, linhas de 0,5 em 0,5', () => {
+  const season = new Date().getUTCFullYear();
+  const ms = leagueMatches(1, season).concat(leagueMatches(1, season - 1));
+  const res = analyzeMatch(ms, ms[0].h, ms[0].a, Date.now());
+  const g = res.pred.goals, g1 = res.pred.goals1h;
+  assert.ok(g1, 'previsão do 1º tempo');
+  const share = (g1.h + g1.a) / (g.h + g.a);
+  assert.ok(share > 0.3 && share < 0.6, `1º tempo = ${share} dos gols (demo: 45%)`);
+  const o15 = res.lines.find(l => l.id === 'g1O1.5');
+  assert.equal(o15.market, 'Total de gols 1T');
+  assert.ok(res.all.filter(l => l.market === 'Total de gols 1T').every(l => Math.abs(parseFloat(l.id.slice(3)) * 2 % 1) < 1e-9));
+  const noHalf = analyzeMatch(ms.map(m => ({ ...m, hh: null, ha: null })), ms[0].h, ms[0].a, Date.now());
+  assert.equal(noHalf.pred.goals1h, null, 'sem placar do intervalo não há linha do 1º tempo');
+});

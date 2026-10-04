@@ -37,11 +37,12 @@ function play(g) {
       goals: pois(r, 0.11 * inside + 0.03 * (tot - inside)) };
   };
   const h = side(H, A, 1.1), a = side(A, H, 0.9);
+  const c1 = [Math.round(h.cor * (0.38 + r() * 0.16)), Math.round(a.cor * (0.38 + r() * 0.16))];
+  const firstHalf = n => Array.from({ length: n }, () => r() < 0.45).filter(Boolean).length;   // cada gol no 1º tempo com 45%
   return {
     id: g.id, t: g.t, h: TEAMS[g.h].id, a: TEAMS[g.a].id, hn: TEAMS[g.h].name, an: TEAMS[g.a].name,
-    hg: h.goals, ag: a.goals,
-    s: [h.inside, h.out, h.sot, h.tot, h.cor, a.inside, a.out, a.sot, a.tot, a.cor],
-    c1: [Math.round(h.cor * (0.38 + r() * 0.16)), Math.round(a.cor * (0.38 + r() * 0.16))],
+    hg: h.goals, ag: a.goals, hh: firstHalf(h.goals), ha: firstHalf(a.goals),
+    s: [h.inside, h.out, h.sot, h.tot, h.cor, a.inside, a.out, a.sot, a.tot, a.cor], c1,
   };
 }
 
@@ -109,10 +110,11 @@ export function fixtureOdds(fixtureId) {
     ah.push({ value: `Home ${h}`, odd: odd(eff(settle(diff, h))) }, { value: `Away ${h}`, odd: odd(eff(settle(neg(diff), -h))) });
   for (const L of [1.5, 2.5, 3.5]) ou.push({ value: `Over ${L}`, odd: odd(eff(settle(tot, -L))) }, { value: `Under ${L}`, odd: odd(eff(settle(neg(tot), L))) });
   const muC = 5 * 1.1 * H.cor + 5 * 0.9 * A.cor, pc = dist(muC, 1, 60).map((p, k) => [k, p]);
-  for (let L = Math.round(muC) - 1.5; L <= Math.round(muC) + 1.5; L++)
-    co.push({ value: `Over ${L}`, odd: odd(eff(settle(pc, -L))) }, { value: `Under ${L}`, odd: odd(eff(settle(neg(pc), L))) });
-  const c1 = [], pc1 = dist(0.46 * muC, 1, 40).map((p, k) => [k, p]);
-  for (const L of [3.5, 4.5, 5.5]) c1.push({ value: `Over ${L}`, odd: odd(eff(settle(pc1, -L))) }, { value: `Under ${L}`, odd: odd(eff(settle(neg(pc1), L))) });
-  bets.push({ id: 4, values: ah }, { id: 5, values: ou }, { id: 45, values: co }, { id: 77, values: c1 });
+  const ouOf = (pmf, lines) => lines.flatMap(L => [{ value: `Over ${L}`, odd: odd(eff(settle(pmf, -L))) }, { value: `Under ${L}`, odd: odd(eff(settle(neg(pmf), L))) }]);
+  const rc = Math.round(muC);
+  co.push(...ouOf(pc, [...new Set([8, 8.5, rc - 1.5, rc - 0.5, rc + 0.5, rc + 1.5])]));
+  const c1 = ouOf(dist(0.46 * muC, 1, 40).map((p, k) => [k, p]), [3.5, 4, 4.5, 5.5]);
+  const { tot: tot1 } = scoreMatrix(0.45 * 1.1 * H.att * A.def, 0.45 * 0.9 * A.att * H.def, 0);   // gols do 1º tempo: 45% dos do jogo
+  bets.push({ id: 4, values: ah }, { id: 5, values: ou }, { id: 6, values: ouOf(tot1, [0.5, 1.5, 2.5]) }, { id: 45, values: co }, { id: 77, values: c1 });
   return { updatedAt: new Date(Date.now() - 40 * 60e3).toISOString(), fetchedAt: Date.now(), bookmakers: [{ id: 4, name: 'Pinnacle', bets }] };
 }
