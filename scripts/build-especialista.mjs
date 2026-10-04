@@ -5,6 +5,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,5 +25,9 @@ const safe = s => s.replace(/<\/script/gi, '<\\/script');
 const out = read('artifact/especialista.template.html')
   .replace('__METHOD__', () => safe(JSON.stringify(method)))
   .replace('__MARKDOWN__', () => safe(markdown));
+// A página não pode quebrar: confere a sintaxe do script (uma crase sem escape no texto da varredura já
+// derrubou a página uma vez) antes de gravar.
+const script = out.match(/<script>([\s\S]*?)<\/script>/g)?.pop()?.replace(/^<script>|<\/script>$/g, '');
+try { new vm.Script(script); } catch (e) { throw new Error(`artifact/especialista.html com erro de sintaxe: ${e.message}`); }
 fs.writeFileSync(path.join(ROOT, 'artifact/especialista.html'), out);
 console.log(`artifact/especialista.html: ${(out.length / 1024).toFixed(1)} KB`);
