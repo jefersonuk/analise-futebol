@@ -31,6 +31,8 @@ const probs = l => `${pct(l.p_blend)} <span class="muted">· ${l.p_pinnacle != n
 // contagem simples dos últimos jogos (o acerto pelo papel de hoje fica no valor e no gráfico)
 const hits = l => [l.history?.home, l.history?.away].map(x => (x && (x.raw?.n ?? x.n) ? (x.hits || `${nb(x.wins)}/${x.n}`) : '—')).join(' · ');
 const thr = l => parseFloat(l.id.match(/-?[\d.]+$/)?.[0]) || 0;
+// linha apagada: sem valor, ou com valor mas fora do que se aposta (odd, preço, under); valor sem confirmação fica à vista
+const weak = l => !isValueBet(l) && l.value_level !== 'sem confirmação';
 // Filtros: as linhas principais de cada jogo e cada mercado (handicap de escanteios do jogo só no filtro dele).
 const FILTERS = [['Melhor do jogo', null], ...SCAN_MARKETS.map(m => [SHORT[m], m])];
 
@@ -72,7 +74,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       : `${scan.with_odds} com odds da Pinnacle (${scan.with_1h} com escanteios do 1º tempo)`;
     const rows = ranked.map(({ g, line }, i) => {
       const gap = priceGap(line);
-      return `<tr data-go="${i}" class="${isValueBet(line) ? '' : 'weak'}"><td>${i + 1}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
+      return `<tr data-go="${i}" class="${weak(line) ? 'weak' : ''}"><td>${i + 1}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
         <td class="muted">${esc(g.fx.league.name)}</td><td>${esc(SHORT[line.market] || line.market)}: <b>${esc(line.line)}</b></td>
         <td>${valueTag(line)}${gap ? ` <span class="tag price" title="sem aposta: a odd mínima fica ${gapTxt(line)}; casa soft raramente paga mais de 5% acima">+${gap1(line)}% Pin</span>` : ''}</td>
         <td>${probs(line)}</td><td class="muted">${hits(line)}</td><td>${n2(line.fair_odd_blend)}</td><td><b>${n2(line.odd_min)}</b></td>
@@ -81,15 +83,14 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const cards = ranked.map(({ g, line }, i) => card(g, line, i)).join('');
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
       ${scan.skipped.map(s => `<li>${hour(s.fx.t)} ${esc(s.fx.home.name)} x ${esc(s.fx.away.name)} <span class="muted">(${esc(s.fx.league.name)}): ${esc(s.why)}</span></li>`).join('')}</ul></details>` : '';
-    const nBets = ranked.filter(x => isValueBet(x.line)).length;
+    const nBets = ranked.filter(x => isValueBet(x.line)).length, nWeak = ranked.filter(x => x.line.value_level === 'sem confirmação').length;
     const old = scan.v >= 2 ? '' : '<p class="msg">Varredura feita antes do valor nas linhas principais: toque em Varrer jogos de novo.</p>';
     out.innerHTML = `<p class="muted">Varredura de ${when}: ${scan.fixtures} jogos por começar, ${pool},
       ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>${old}
       <div class="chips" id="scanChips">${chips}</div>
-      ${ranked.length ? `<p class="muted"><b>${nBets} ${nBets === 1 ? 'aposta de valor' : 'apostas de valor'}</b> neste filtro. Valor = a nossa probabilidade
-        (Pinnacle sem margem + modelo) contra a da Pinnacle sem margem; confirmado = o pior cenário do modelo e o histórico dos dois
-        times (pelo papel de hoje) também acima do mercado. Apagados: sem aposta (valor sem confirmação, ou odd mínima mais de 5% acima
-        da Pinnacle).</p>` : ''}
+      ${ranked.length ? `<p class="muted"><b>${nBets} ${nBets === 1 ? 'aposta de valor' : 'apostas de valor'}</b> e ${nWeak} com valor sem confirmação neste filtro.
+        Valor = a nossa probabilidade (Pinnacle sem margem + modelo) contra a da Pinnacle sem margem; confirmado = o pior cenário do modelo e o
+        histórico dos dois times (pelo papel de hoje) também acima do mercado. Apagados: sem valor. Em qualquer linha, a casa precisa pagar a mínima.</p>` : ''}
       ${ranked.length ? `<div class="scroll"><table class="scanrank"><tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Linha</th><th>Valor</th>
         <th>Nossa · Pinnacle</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th></tr>${rows}</table></div>`
         : scan.v >= 2 ? '<p class="muted">Nenhum jogo com linha principal jogável (odd mínima 1,50–3,00) neste filtro.</p>' : ''}
@@ -118,7 +119,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const all = g.lines.filter(l => isMain(l.id) && (!isUnder(l.id) || isValueBet(l)))
       .sort((a, b) => MAIN_MARKETS.indexOf(a.market) - MAIN_MARKETS.indexOf(b.market) || thr(a) - thr(b)).concat(hcp ? [hcp] : []);
     const table = all.length ? `<div class="scroll"><table class="mainlines"><tr><th>Linha</th><th>Valor</th><th>Nossa · Pinnacle</th>
-      <th>Últ. 10</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th></tr>${all.map(l => `<tr class="${l.id === line.id ? 'on' : ''}${isValueBet(l) ? '' : ' weak'}">
+      <th>Últ. 10</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th></tr>${all.map(l => `<tr class="${l.id === line.id ? 'on' : ''}${weak(l) ? ' weak' : ''}">
         <td>${esc(SHORT[l.market])}: <b>${esc(l.line)}</b></td><td>${valueTag(l)}</td><td>${probs(l)}</td><td class="muted">${hits(l)}</td>
         <td>${n2(l.fair_odd_blend)}</td><td><b>${n2(l.odd_min)}</b></td><td class="muted">${n2(l.pinnacle_odd)}</td></tr>`).join('')}</table></div>` : '';
     return `<article class="scancard" id="scan-${i}" data-g="${i}">
