@@ -49,7 +49,8 @@ export function scoreMatrix(lh, la, rho = RHO) {
   return { diff: norm(diff), tot: norm(tot), btts: btts / z };
 }
 
-// Liquidação asiática da aposta "X + line > 0". Linhas de quarto = meia aposta em cada meia-linha.
+// Liquidação asiática da aposta "X + line > 0". Linhas de quarto = meia aposta em cada meia-linha (o app não
+// as oferece, mas a liquidação serve para ler o preço da Pinnacle e apostas registradas nelas).
 // Devolve probabilidades efetivas: EV = pWin·(odd−1) − pLose.
 export function settle(entries, line) {
   if (Math.round(line * 4) % 2 !== 0) {
@@ -82,11 +83,13 @@ function goalLines(lh, la) {
   add('1', '1X2', 'Casa vence', { pWin: home, pLose: 1 - home });
   add('X', '1X2', 'Empate', { pWin: draw, pLose: 1 - draw });
   add('2', '1X2', 'Fora vence', { pWin: away, pLose: 1 - away });
-  for (let h = -3; h <= 3; h += 0.25) {
+  // Linhas asiáticas fracionadas (,25 e ,75: metade da aposta em cada linha vizinha) ficam fora: o Jeferson
+  // não opera. Handicap e total de gols só em linha inteira (devolve no empate) e meia linha.
+  for (let h = -3; h <= 3; h += 0.5) {
     add(`ahH${h}`, 'Handicap asiático', `Casa ${fmt(h)}`, settle(diff, h));
     add(`ahA${-h}`, 'Handicap asiático', `Fora ${fmt(-h)}`, settle(neg(diff), -h));
   }
-  for (let ln = 0.5; ln <= 5.5; ln += 0.25) {
+  for (let ln = 0.5; ln <= 5.5; ln += 0.5) {
     add(`gO${ln}`, 'Total de gols', `Mais de ${num(ln)}`, settle(tot, -ln));
     add(`gU${ln}`, 'Total de gols', `Menos de ${num(ln)}`, settle(neg(tot), ln));
   }
