@@ -11,6 +11,7 @@ import { alternatives, makePricer, nearest, parseLine, renderMyLine, verdict } f
 import { initScan } from './scanview.js';
 import { bindSpecialist, briefGame } from './brief.js';
 import { livePlanOf } from './live.js';
+import { isQuarter } from './consistency.js';
 import { bindLive, renderLive } from './liveview.js';
 
 const $ = s => document.querySelector(s);
@@ -421,7 +422,9 @@ $('#myText').oninput = () => {
   if (p.error) return myMsg(p.error, true);
   if (!state.price(p.id)) {
     const near = nearest(state.price, p.id);
-    if (near && selectMy(near)) return myMsg(`Essa linha está fora do que o modelo calcula; selecionei a mais próxima: ${state.price(near).line}.`, true);
+    if (near && selectMy(near)) return myMsg(isQuarter(p.id)
+      ? `Linha asiática fracionada (,25/,75) fica fora do app; selecionei a vizinha: ${state.price(near).line}.`
+      : `Essa linha está fora do que o modelo calcula; selecionei a mais próxima: ${state.price(near).line}.`, true);
     return myMsg('O modelo não calcula essa linha para este jogo.', true);
   }
   selectMy(p.id);

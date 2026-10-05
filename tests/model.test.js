@@ -135,6 +135,7 @@ test('escanteios 1º tempo: total ancorado na Pinnacle e handicap coerente', () 
 import { diffDist, impliedCornerDiff, marketSupremacy, CORNERS_PER_GOAL } from '../src/model.js';
 import { inviableReason, priceLines, isCandidate } from '../src/dossier.js';
 import { recentGames } from '../src/insights.js';
+import { isQuarter } from '../src/consistency.js';
 
 test('handicap de escanteios da Pinnacle: a diferença implícita volta ao valor que gerou o preço', () => {
   for (const D of [-2.5, -0.8, 0, 1.3, 3]) {
@@ -210,4 +211,13 @@ test('gols do 1º tempo: modelo pelo placar do intervalo, linhas de 0,5 em 0,5',
   assert.ok(res.all.filter(l => l.market === 'Total de gols 1T').every(l => Math.abs(parseFloat(l.id.slice(3)) * 2 % 1) < 1e-9));
   const noHalf = analyzeMatch(ms.map(m => ({ ...m, hh: null, ha: null })), ms[0].h, ms[0].a, Date.now());
   assert.equal(noHalf.pred.goals1h, null, 'sem placar do intervalo não há linha do 1º tempo');
+});
+
+test('linhas asiáticas fracionadas (,25 e ,75) ficam fora: handicap e total de gols só em linha inteira e meia', () => {
+  assert.ok(isQuarter('ahH-0.75') && isQuarter('ahA1.25') && isQuarter('gO2.25') && isQuarter('c1O4.25'));
+  assert.ok(!isQuarter('ahH-0.5') && !isQuarter('ahA1') && !isQuarter('gO2.5') && !isQuarter('cornersO10') && !isQuarter('1'));
+  const season = new Date().getUTCFullYear(), ms = leagueMatches(1, season).concat(leagueMatches(1, season - 1));
+  const res = analyzeMatch(ms, ms[0].h, ms[0].a, Date.now());
+  assert.ok(res.all.length > 0 && !res.all.some(l => isQuarter(l.id)));
+  assert.ok(res.all.some(l => l.id === 'ahH-1') && res.all.some(l => l.id === 'ahA0.5') && res.all.some(l => l.id === 'gU3'));
 });

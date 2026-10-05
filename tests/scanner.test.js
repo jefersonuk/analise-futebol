@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
 import { GOAL_HANDICAP, HANDICAP, LIVE_1H, MAIN_MARKETS, SCAN_MARKETS, bestLine, brDate, pickGames, rankGames, scanDay } from '../src/scanner.js';
-import { isMain, isMainLine, isUnder, rankTier } from '../src/consistency.js';
+import { isMain, isMainLine, isQuarter, isUnder, rankTier } from '../src/consistency.js';
 import { isBet } from '../src/dossier.js';
 
 // Demo sem os escanteios do 1º tempo da liga (como na varredura real): só os dos times, sob demanda.
@@ -47,6 +47,7 @@ test('varredura: maior chance de ganho nas linhas principais, só com preço da 
   for (const id of ['c1O5', 'c1U4.5', 'cornersO9', 'cornersU8.5', 'g1O1.5', 'gO2.5']) assert.ok(lines.some(l => l.id === id), id);
   for (const m of MAIN_MARKETS.concat(HANDICAP, GOAL_HANDICAP)) assert.ok(lines.some(l => l.market === m), m);
   assert.ok(lines.filter(l => l.market === GOAL_HANDICAP).every(l => /^ah[HA]/.test(l.id)), 'handicap de gols = asiático da Pinnacle');
+  assert.ok(!lines.some(l => isQuarter(l.id)), 'sem linhas asiáticas fracionadas, mesmo com a Pinnacle cotando ,25 e ,75');
   // gols do 1º tempo vêm da Pinnacle (mercado 6) e do placar do 1º tempo dos jogos passados
   const g1 = lines.find(l => l.id === 'g1O1.5');
   assert.ok(g1 && g1.history.home.n > 0 && g1.history.home.what === 'gols no 1º tempo');

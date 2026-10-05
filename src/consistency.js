@@ -36,6 +36,8 @@ export const MAIN_LINES = { 'Total escanteios 1T': ['c1', [4, 4.5, 5, 5.5], 'OU'
   'Total de gols 1T': ['g1', [1.5], 'O'], 'Total de gols': ['g', [1.5, 2.5], 'O'] };
 const MAIN_IDS = new Set(Object.values(MAIN_LINES).flatMap(([k, ls, sides]) => ls.flatMap(L => [...sides].map(s => `${k}${s}${L}`))));
 export const isMain = id => MAIN_IDS.has(id);
+// Linha asiática fracionada (,25 ou ,75), que o app não oferece.
+export const isQuarter = id => { const m = String(id).match(/-?\d+(?:\.\d+)?$/); return !!m && Math.round(Math.abs(+m[0]) * 4) % 2 === 1; };
 export const HANDICAP = 'Handicap de escanteios';
 export const GOAL_HANDICAP = 'Handicap asiático';
 // Linha principal com preço da Pinnacle (direto, ou derivado do total que ela cota): um total da lista ou um
