@@ -137,7 +137,8 @@ export function verdict(line, odd) {
   if (hs.length) notes.push(`Últimos jogos: ${hs.map(h => `${h.hits} (${h.what}${roleTxt(h)})`).join(' · ')}.`);
   if (line.diff_pp != null && Math.abs(line.diff_pp) >= 5)
     notes.push(`O modelo ${line.diff_pp > 0 ? 'gosta mais' : 'gosta menos'} desta linha que a Pinnacle (${line.diff_pp > 0 ? '+' : ''}${String(line.diff_pp).replace('.', ',')} pp). O preço segue a Pinnacle.`);
-  if (line.priced_by !== 'pinnacle') notes.push('Sem odd da Pinnacle nesta linha: o preço é do modelo, por isso a odd mínima tem margem maior.');
+  if (line.derived) notes.push('A Pinnacle não cota esta linha: a chance sai do total que ela precifica em outra linha, misturada com o modelo; por isso a odd mínima tem margem de 5%.');
+  else if (line.priced_by !== 'pinnacle') notes.push('Sem odd da Pinnacle nesta linha: o preço é do modelo, por isso a odd mínima tem margem maior.');
   if (line.inviable) return { level: 'no', title: `Inviável: ${line.inviable}`, ev: null, notes };
   if (!(odd > 1)) return { level: 'info', title: `Procure odd ≥ ${odd2(line.odd_min)} (${line.tier})`, ev: null, notes };
 

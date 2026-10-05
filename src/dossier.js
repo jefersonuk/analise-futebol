@@ -4,12 +4,12 @@
 //
 // api: searchTeams, upcoming, leaguesOf, leagueMatches, fixtureOdds, injuries, standings, lastPlayed, quota
 
-import { CORNER_EDGE, DERIVED, FAV_EDGE, METRICS, analyzeMatch, ev, fairOdd, impliedTotal, roleOf, sideLabel, stakeFor } from './model.js';
+import { CORNER_EDGE, DERIVED, FAV_EDGE, METRICS, analyzeMatch, dist, ev, fairOdd, impliedTotal, roleOf, settle, sideLabel, stakeFor } from './model.js';
 import { rank } from './ratings.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { history } from './dashboard.js';
-import { GOAL_HANDICAP, HANDICAP, MAIN_LINES, ODD_FLOOR, consistency, isMainLine, rankScore, rankTier, underOk, valueOf } from './consistency.js';
+import { GOAL_HANDICAP, HANDICAP, MAIN_LINES, ODD_FLOOR, consistency, isMain, isMainLine, rankScore, rankTier, underOk, valueOf } from './consistency.js';
 import { HALF_FROM } from './client.js';
 import { favorFor } from './favoritism.js';
 import { buildContext, contextGames, lineContext } from './context.js';
@@ -179,7 +179,7 @@ export function modelEntry(l, { res, hi, banca, names = {}, context = null }) {
   const oddMin = (1 / pm) * (anchor ? 1.05 : 1.08);
   const c = consistency({ p: pm, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
   return { id: l.id, market: l.market, line: sideLabel(l.label, names.home, names.away), p_model: r(pm), p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
-    fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0, inviable,
+    fair_odd_model: r(fairOdd(l), 2), push_prob: r(1 - l.pWin - l.pLose) || 0, inviable, model_only: !anchor,
     priced_by: anchor ? `modelo ancorado no total ${DERIVED[l.market] === 'corners1h' ? '1T ' : ''}de escanteios da Pinnacle`
       : 'só o modelo (sem odd da Pinnacle nesta linha)',
     pinnacle_odd: null, p_pinnacle: null, diff_pp: null,
@@ -253,6 +253,17 @@ export function lineHistory(id, teams) {
 // Acerto simples dos últimos jogos dos dois times somados (o que o gráfico mostra).
 const rawRate = hi => { const xs = [hi.home, hi.away].filter(Boolean), n = xs.reduce((s, x) => s + x.raw.n, 0); return n ? xs.reduce((s, x) => s + x.raw.wins, 0) / n : null; };
 
+// Totais que a Pinnacle cota em outra linha: a chance de uma linha principal que ela não cota sai do total que
+// ela precifica no mercado (binomial negativa com a dispersão da liga; gols, Poisson). A régua continua sendo a
+// Pinnacle, só que derivada: a linha fica frágil (odd mínima × 1,05). Ex.: ela cota 10,5 escanteios e não 8,5.
+const TOTALS = { 'Total de gols': ['g', 'goals'], 'Total de gols 1T': ['g1', 'goals1h'], 'Total de escanteios': ['corners', 'corners'],
+  'Total escanteios 1T': ['c1', 'corners1h'] };
+function derivedP(id, T, phi) {
+  const m = id.match(/([OU])([\d.]+)$/), L = +m[2];
+  const e = dist(T, phi, Math.ceil(T * 3 + 25)).map((p, k) => [k, p]);
+  return cond(m[1] === 'O' ? settle(e, -L) : settle(e.map(([v, p]) => [-v, p]), L));
+}
+
 // Checagens de contexto (context.js) nas linhas dos mercados de foco, quando há contexto.
 const ctxOf = (l, context, p) => (context && FOCUS.includes(l.market) ? { context: lineContext(l.id, context, p) } : {});
 
@@ -272,6 +283,10 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
 
   const stake = (p, odd) => stakeFor(p, odd, banca);
 
+  const implied = Object.fromEntries(Object.entries(TOTALS).map(([m, [pre, k]]) => {
+    const phi = k === 'goals' ? 1 : res.phi[k] || 1, x = fair.size ? impliedTotal(fair, pre, phi) : null;
+    return [m, x && { ...x, phi }];
+  }));
   const priced = [], anchored = [], modelOnly = [];
   for (const l of res.lines) {
     if (only && !only(l)) continue;
@@ -291,10 +306,21 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
         fair_odd_blend: r(1 / pb, 2), fragile, odd_min: r(oddMin, 2),
         odd_min_vs_pinnacle_pct: r((oddMin / odd - 1) * 100, 1), ...stake(pb, oddMin),
         ev_model_at_pinnacle: r(e.mid), ev_model_worst: r(e.low), ...ctxOf(l, context, pb), history: hi });
-    } else if (res.anchors[DERIVED[l.market]] || !odds.size) {
+    } else if (implied[l.market] && isMain(l.id)) {
+      // linha principal que a Pinnacle não cota, num total que ela cota em outra linha
+      const x = implied[l.market], pd = derivedP(l.id, x.implied_total, x.phi), pb = blend(pd, pm, W_MODEL[l.market] ?? 0.1);
+      const oddMin = (1 / pb) * 1.05, c = cons(pb);
+      const v = valueOf({ p: pb, q: pd, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
+      priced.push({ ...base, priced_by: `derivada do total da Pinnacle (ela cota ${String(x.from_line).replace('.', ',')}; total ${x.implied_total.toFixed(2).replace('.', ',')})`,
+        derived: true, pinnacle_odd: null, p_pinnacle: r(pd), diff_pp: r((pm - pd) * 100, 1), p_blend: r(pb),
+        value_pct: r(v.value * 100, 1), value_level: v.level,
+        tier: c.tier, consistency_score: r(c.score), hit_rate_last10: r(rawRate(hi), 2), hit_rate_role: r(c.hit_rate, 2),
+        fair_odd_blend: r(1 / pb, 2), fragile: true, odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null, ...stake(pb, oddMin),
+        ev_model_at_pinnacle: null, ev_model_worst: null, ...ctxOf(l, context, pb), history: hi });
+    } else if (res.anchors[DERIVED[l.market]] || !odds.size || (isMain(l.id) && soft)) {
       // Sem preço na API para esta linha: mercado de escanteios derivado (handicap, quem tem mais, corrida)
-      // com o total ancorado na Pinnacle (margem 5%), ou, quando a Pinnacle ainda não publicou nada para o
-      // jogo, o modelo puro (margem 8%). Sempre frágil.
+      // com o total ancorado na Pinnacle (margem 5%), ou o modelo puro (margem 8%) quando a Pinnacle ainda não
+      // publicou nada para o jogo ou não cota escanteios nele (linhas principais). Sempre frágil.
       anchored.push(modelEntry(l, { res, hi, banca, names, context }));
     } else if (pm >= 0.35 && soft && odds.size) {
       const c = cons(pm);
@@ -312,7 +338,8 @@ export const isCandidate = l => l.tier !== 'especulativa' && l.odd_min >= ODD_FL
   && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5) && underOk(l) && !l.inviable;
 // Aposta: candidata cujo contexto do jogo não contradiz a linha (context.js). Com contexto contra, a
 // estatística sozinha não basta.
-export const isBet = l => isCandidate(l) && l.context?.verdict !== 'contra';
+// Linha só do modelo (sem a Pinnacle nem o total dela) só vira aposta se for âncora.
+export const isBet = l => isCandidate(l) && l.context?.verdict !== 'contra' && (!l.model_only || l.tier === 'âncora');
 // Ordem: nível (under um nível abaixo), não frágil antes de frágil, score (under com desconto), preço.
 export const byConsistency = (a, b) => rankTier(a) - rankTier(b) || a.fragile - b.fragile
   || rankScore(b) - rankScore(a) || (a.odd_min_vs_pinnacle_pct ?? 99) - (b.odd_min_vs_pinnacle_pct ?? 99);

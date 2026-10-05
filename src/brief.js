@@ -42,7 +42,8 @@ export function briefGame(d) {
 // Linha da varredura, enxuta para caber 20 jogos numa conversa: preço, consistência, acerto nos últimos 10
 // jogos de cada time e as checagens de contexto (com o texto só na linha da lista).
 const lean = (l, full = false) => l && {
-  id: l.id, market: l.market, line: l.line, tier: l.tier, p_blend: l.p_blend, p_pinnacle: l.p_pinnacle, fair_odd: l.fair_odd_blend,
+  id: l.id, market: l.market, line: l.line, price_source: l.priced_by === 'pinnacle' ? 'pinnacle' : l.derived ? 'derivada do total da Pinnacle' : 'só o modelo',
+  tier: l.tier, p_blend: l.p_blend, p_pinnacle: l.p_pinnacle, fair_odd: l.fair_odd_blend,
   odd_min: l.odd_min, pinnacle_odd: l.pinnacle_odd, odd_min_vs_pinnacle_pct: l.odd_min_vs_pinnacle_pct, value_pct: l.value_pct,
   fragile: l.fragile, inviable: l.inviable || undefined, entry_brl: l.entry_brl, politica_e: l.politica_e,
   last10: [l.history?.home, l.history?.away].map(t => (t ? `${t.hits} ${t.rule}` : '—')).join(' · '),
@@ -69,6 +70,7 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
     date: scan.date, window: scan.window ? { hours: scan.hours, from: new Date(scan.window.from).toISOString(), to: new Date(scan.window.to).toISOString() } : null,
     order: order === 'time' ? 'horário (o mais próximo primeiro)' : 'chance de ganho', filter: market === LIVE_1H ? 'ao vivo 1º tempo' : market || 'melhor do jogo',
     generated_at: scan.generated_at, fixtures: scan.fixtures, with_odds: scan.with_odds, with_1h: scan.with_1h ?? null,
+    asked_hours: scan.asked_hours ?? null, corners_report: scan.corners_report ?? null,
     games: ranked.map(({ g, line }, i) => {
       const top = line || bestLine(g.lines);
       return {

@@ -81,7 +81,7 @@ export function initEntry({ getLine, getFixture }) {
       ['Consistência', `${line.tier} · acerta ${pct(line.p_blend)}`],
       ['Preço justo', num(line.fair_odd_blend)],
       ['Odd mínima', `<b>${num(line.odd_min)}</b>`],
-      ['Pinnacle', line.pinnacle_odd ? num(line.pinnacle_odd) : 'sem odd (modelo ancorado)'],
+      ['Pinnacle', line.pinnacle_odd ? num(line.pinnacle_odd) : line.derived ? 'não cota esta linha (derivada do total dela)' : 'sem odd (modelo ancorado)'],
     ].map(([k, v]) => `<span class="muted">${k}</span><span>${v}</span>`).join('');
     $('#enHouse').innerHTML = app.houses.map((h, i) => `<option value="${i}">${esc(h.name)} — ${cash(h.value, h.currency)}${h.limited ? ' · ⊘ limitada' : ''}</option>`).join('')
       + '<option value="other">Outra casa…</option>';
