@@ -357,6 +357,14 @@ export function ev(line, odd) {
   return { mid: evOf(line, odd), low: Math.min(...line.sc.map(s => evOf(s, odd))) };
 }
 
+// Entrada pela fórmula do app, na odd mínima: ¼ Kelly, teto 300·min(1, p/0,70), fator da Política E.
+export function stakeFor(p, odd, banca) {
+  const evv = p * odd - 1, kelly = evv / (odd - 1), cap = 300 * Math.min(1, p / 0.7), pe = politicaE(odd);
+  const raw = Math.max(0, banca * kelly * 0.25);
+  return { ev_at_min: Math.round(evv * 1000) / 1000, kelly_quarter_brl: Math.round(raw), cap_brl: Math.round(cap), politica_e: pe.label,
+    entry_brl: Math.round(Math.min(raw, cap) * pe.factor) };
+}
+
 // Política E: fração da entrada pela faixa de odd.
 export function politicaE(odd) {
   if (odd < 2.1) return { label: 'cheia', factor: 1 };

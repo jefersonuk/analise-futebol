@@ -70,13 +70,13 @@ button:disabled { opacity: .5; cursor: default; }
 <div class="wrap">
   <header>
     <h1>Especialista Futebol</h1>
-    <p>Leitura de um jogo ou da varredura do dia a partir do dossiê do app de análise. Consistência primeiro, preço depois, com a Pinnacle como régua.</p>
+    <p>Leitura de um jogo ou da varredura das próximas horas a partir do dossiê do app de análise: estatística com contexto, consistência primeiro, preço depois, com a Pinnacle como régua, e o plano ao vivo dos escanteios do 1º tempo.</p>
   </header>
 
   <section class="panel" aria-labelledby="dossLabel">
     <span class="label" id="dossLabel">Dossiê</span>
     <ol class="steps" id="howto">
-      <li>No app de análise, toque em <b>🧠 Especialista</b> (no jogo ou na varredura do dia). O dossiê vai para a área de transferência.</li>
+      <li>No app de análise, toque em <b>🧠 Especialista</b> (no jogo ou na varredura). O dossiê vai para a área de transferência.</li>
       <li>Cole aqui (Ctrl+V, ⌘V ou toque longo → Colar) e toque em <b>Analisar</b>.</li>
     </ol>
     <textarea id="doss" spellcheck="false" placeholder="Cole aqui o dossiê copiado pelo app (começa com #ESPECIALISTA-FUTEBOL)"></textarea>
@@ -113,14 +113,16 @@ const METHOD = __METHOD__;
 const MARK = "#ESPECIALISTA-FUTEBOL v1";
 __MARKDOWN__
 
-const SCAN_METHOD = `Você é o mesmo analista descrito acima, agora diante da VARREDURA DO DIA do app: os jogos do dia com odds da Pinnacle, já ranqueados pela MAIOR CHANCE DE GANHO nas linhas principais do pré-jogo (escanteios 1T 4, 4,5 e 5 e do jogo 8, 8,5 e 9, over ou under; gols over 1,5 no 1º tempo e 1,5 e 2,5 no jogo; handicap de escanteios do jogo), só em linhas que a Pinnacle cota. A linha do ranking (\`top_line\`) é a candidata mais consistente do jogo ou, sem candidata, a mais consistente jogável.
+const SCAN_METHOD = `Você é o mesmo analista descrito acima, agora diante da VARREDURA do app: até 20 jogos das próximas horas (normalmente 4 horas; ver \`window\`), com odds da Pinnacle, na ORDEM DO HORÁRIO (\`order\`: o mais próximo primeiro). São os jogos de maior chance de ganho nas linhas principais do pré-jogo: escanteios do 1º tempo (4, 4,5 e 5), escanteios do jogo (8, 8,5 e 9), over ou under; gols over 1,5 no 1º tempo e 1,5 e 2,5 no jogo; handicap de gols (asiático) e handicap de escanteios do jogo — só em linhas que a Pinnacle cota. Mantenha a ordem do horário em toda a resposta: o Jeferson entra nos jogos na ordem em que eles começam.
 
-Campos de cada jogo: \`top_line\` (a linha do ranking, com tier, p_blend, p_pinnacle, value_pct (informativo), faixa do modelo, odd justa, odd mínima, entrada pela Política E e o histórico dos últimos 10 jogos de cada time na linha), \`other_lines\` (as outras linhas principais do jogo), \`best_by_market\` (a melhor linha de cada mercado: escanteios 1T, escanteios do jogo, gols 1T, gols do jogo e handicap de escanteios do jogo), \`no_corners\` (preenchido quando a base do jogo não tem estatística de escanteios na API: o jogo só tem mercados de gols), \`pinnacle_1h\` (linha e total de escanteios do 1º tempo que a Pinnacle precifica, e o do modelo; null quando ela não cota o 1º tempo), \`expected_1h\` (média esperada de cada time no 1º tempo), \`share_1h\` (fração dos escanteios do jogo no 1º tempo usada quando a liga não tem dado por tempo), \`c1_history_games\` (quantos dos últimos 10 jogos de cada time têm escanteio do 1º tempo), \`base\` (liga do jogo, ou jogos dos dois times em todas as competições — seleções e copas), \`alerts\`, \`odds_age_min\`.
+Campos de cada jogo: \`n\` (posição na lista), \`kickoff\`, \`favoritism\`, \`context\` (\`text\`: a leitura pronta — tabela e situação de cada time, gols na temporada em casa/fora, médias dos últimos 10 no mando de hoje, o que se espera do jogo pelo modelo e pela Pinnacle, confronto direto), \`top_line\` (a linha da lista: aposta, ou a mais consistente jogável; com nível, p_blend, p_pinnacle, odd justa, odd mínima, entrada pela Política E, acerto nos últimos 10 de cada time e as checagens de contexto com o texto), \`best_by_market\` (a melhor linha de cada mercado: escanteios 1T, escanteios do jogo, gols 1T, gols do jogo, handicap de escanteios e handicap de gols, com o veredito de cada checagem de contexto), \`live_1h\` (plano ao vivo dos escanteios do 1º tempo: escanteios esperados no 1º tempo, total da Pinnacle e a odd mínima do over 3, 3,5 e 4,5 aos 0', 5', 8' e 10' sem escanteio e com 1 escanteio, com a chance entre parênteses), \`no_corners\` (base sem estatística de escanteios: só gols), \`pinnacle_1h\`, \`expected_1h\`, \`c1_history_games\`, \`base\`, \`alerts\`, \`odds_age_min\`, \`no_h2h\`.
 
 Regras da varredura:
-- No máximo 6 apostas no dia, uma por jogo, e nunca duas que dependam da mesma hipótese (total de escanteios do jogo e do 1º tempo no mesmo sentido contam como uma).
-- Só linhas principais. Aposta = âncora ou sólida, odd mínima de 1,50 a 3,00 e até 5% acima da Pinnacle. Nos totais de escanteios, over e under valem igual; gols só over. Handicap de escanteios do 1º tempo não existe aqui (não tem valor).
-- \`no_corners\` preenchido: nunca recomende escanteios nesse jogo (não há histórico de escanteios para validar).
+- Analise TODOS os jogos da lista, na ordem do horário. Para cada um: contexto primeiro, depois os quatro mercados principais — escanteios 1T, escanteios do jogo, handicap de gols, total de gols — (e o handicap de escanteios quando for a melhor linha), depois o plano ao vivo.
+- Contexto não é enfeite: diga em que posição está cada time e o que ele disputa, quanto cada um marca e sofre por jogo no mando de hoje, quantos gols se esperam (modelo e Pinnacle) e o que o confronto direto mostra (com o tamanho da amostra). Diga se isso confirma ou contradiz a linha. Checagem de contexto \`contra\` na linha = sem aposta, mesmo com chance alta.
+- No máximo 6 apostas pré-jogo na lista, uma por jogo, e nunca duas que dependam da mesma hipótese (total de escanteios do jogo e do 1º tempo no mesmo sentido contam como uma).
+- Só linhas principais. Aposta = âncora ou sólida, odd mínima de 1,50 a 3,00, até 5% acima da Pinnacle e contexto que não seja contra. Nos totais de escanteios, over e under valem igual; gols só over. Handicap de escanteios do 1º tempo não existe aqui (não tem valor). Handicap "favorito +x" nunca.
+- \`no_corners\` preenchido: nunca recomende escanteios nesse jogo, nem o plano ao vivo.
 - Prefira âncora; sólida só sem alerta sério; especulativa nunca.
 - Over primeiro: em total de gols e de escanteios (jogo e 1º tempo), recomende o over; under só se for âncora e claramente mais consistente que o over do mesmo jogo, dizendo por quê.
 - value_pct mostra se a nossa chance está acima (+) ou abaixo (−) da Pinnacle: use para desempatar e para avisar quando a casa precisa pagar bem acima da Pinnacle.
@@ -128,25 +130,29 @@ Regras da varredura:
 - Histórico do 1º tempo com menos de 6 jogos em algum time, ou \`no_history\` preenchido: rebaixe a confiança.
 - Odds da Pinnacle com mais de 90 minutos: avise que o preço pode ter andado.
 - Escanteios dependem do placar provável: o time que deve sair atrás tende a gerar mais escanteios; use isso para validar o lado do handicap.
+- Plano ao vivo (escanteios do 1º tempo até os 10'): para cada jogo com \`live_1h\`, diga a linha de over que faz sentido (3, 3,5 ou 4,5), a odd mínima aos 5', 8' e 10' sem escanteio e com 1 escanteio, e se uma odd de 2,00 vale nesses pontos. Só entre com a odd da casa ≥ odd mínima do minuto. O plano vale com 0 a 0 e 11 contra 11; gol ou expulsão antes da entrada anulam. Destaque os 3 melhores jogos da lista para essa entrada (mais escanteios esperados no 1º tempo e contexto de pressão cedo).
 - A odd mínima já tem a margem; a entrada vem da Política E na odd tomada.
 
 Formato (horários de Brasília, vírgula decimal, sem JSON):
 
-## Varredura de <dd/mm>
+## Varredura <dd/mm>, <hh:mm> às <hh:mm>
 
-**Resumo:** <quantas apostas vale fazer hoje e quais, em duas frases>
+**Resumo:** <quantas apostas pré-jogo vale fazer e quais, e os 3 melhores jogos para a entrada ao vivo nos escanteios do 1º tempo, em duas ou três frases>
 
-| # | Jogo (hora) | Linha | Consistência | Justa | Mínima | Entrada | Confiança |
+| Hora | Jogo | Aposta pré-jogo | Consistência | Contexto | Mínima | Entrada | Ao vivo 1T (sem escanteio aos 10': mínima do +3,5) |
 |---|---|---|---|---|---|---|---|
 
+(uma linha por jogo, na ordem do horário; "sem aposta" quando não houver)
+
 ### Jogo a jogo
-Para cada aposta recomendada, 3 a 5 linhas: por que a linha é consistente (probabilidade, pior cenário, acerto nos últimos 10 de cada time), o que o placar provável faz com os escanteios, e o que mudaria a leitura.
+Um bloco por jogo, na ordem do horário: \`#### <hh:mm> <Mandante> x <Visitante> — <competição>\`, depois
+- **Contexto:** 2 ou 3 frases (tabela e motivação, gols por jogo de cada um no mando, esperado modelo × Pinnacle, confronto direto).
+- **Escanteios 1T · Escanteios · Handicap de gols · Gols:** uma linha por mercado — a melhor linha, chance, odd mínima e se o contexto confirma.
+- **Veredito:** a aposta (ou "sem aposta" e o motivo) e o que mudaria a leitura.
+- **Ao vivo 1T:** a entrada no over do 1º tempo até os 10', com as odds mínimas.
 
-### Ficaram de fora do topo
-Os jogos do ranking que você não recomendaria, com o motivo em uma linha cada.
-
-### Cuidados do dia
-Alertas gerais: odds velhas, bases pequenas, jogos de seleção, o que conferir antes de entrar.`;
+### Cuidados
+Alertas gerais: odds velhas, bases pequenas, jogos de seleção, o que conferir antes de entrar (escalações, clima, gol cedo no ao vivo).`;
 
 const $ = s => document.querySelector(s);
 const HIST_KEY = "especialista-historico";
@@ -171,6 +177,7 @@ function parse(text) {
 const hourBR = iso => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 function titleOf(v) {
   if (v.kind === "jogo") { const f = v.dossier.fixture; return `${f.home} x ${f.away} · ${f.competition} · ${hourBR(f.kickoff)}`; }
+  if (v.window) return `Varredura ${hourBR(v.window.from)} a ${new Date(v.window.to).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" })} · ${v.games.length} jogos`;
   return `Varredura de ${v.date.split("-").reverse().slice(0, 2).join("/")} · ${v.games.length} jogos`;
 }
 

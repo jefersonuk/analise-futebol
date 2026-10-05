@@ -46,12 +46,13 @@
 </section>
 
 <section class="card" id="scanSec">
-  <h2>🔎 Melhores do dia <span class="muted">valor nas linhas principais do pré-jogo: escanteios 1T 4 e 4,5 · escanteios 8 e 8,5 · gols 1T 1,5 · gols 1,5 e 2,5 (só onde a Pinnacle cota)</span></h2>
+  <h2>🔎 Varredura <span class="muted">até 20 jogos das próximas 4 horas, em ordem de horário: escanteios 1T · escanteios do jogo · handicap de gols · gols
+    (e handicap de escanteios), só onde a Pinnacle cota, com o contexto de cada jogo e o plano ao vivo dos escanteios do 1º tempo</span></h2>
   <div class="row">
     <select id="scanDate"></select>
     <label for="scanBudget">Limite de requisições</label>
     <input id="scanBudget" type="number" min="50" step="50" inputmode="numeric">
-    <button id="scanSpec" class="ghost" hidden title="Copia a varredura e abre o especialista no claude.ai">🧠 Especialista</button>
+    <button id="scanSpec" class="ghost" hidden title="Copia a varredura (os jogos na ordem da tela) e abre o especialista no claude.ai">🧠 Especialista</button>
     <button id="scanRun" class="primary">Varrer jogos</button>
   </div>
   <p id="scanMsg" class="msg" hidden></p>
@@ -71,6 +72,11 @@
     <h2>Leitura do confronto</h2>
     <ul id="insights" class="insights"></ul>
   </section>
+  <section class="card" id="ctxSec" hidden>
+    <h2>Contexto do jogo <span class="muted">tabela, médias de gols e escanteios no mando, o que se espera e o confronto direto</span></h2>
+    <ul id="ctx" class="insights"></ul>
+  </section>
+  <section class="card" id="liveSec" hidden><div id="live"></div></section>
   <section class="card">
     <div class="row head">
       <h2>Painel: 5 linhas mais consistentes <span class="muted">acerto primeiro, preço depois · últimos 10 jogos de cada time</span></h2>

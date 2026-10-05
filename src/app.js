@@ -10,6 +10,8 @@ import { favorFor } from './favoritism.js';
 import { alternatives, makePricer, nearest, parseLine, renderMyLine, verdict } from './myline.js';
 import { initScan } from './scanview.js';
 import { bindSpecialist, briefGame } from './brief.js';
+import { livePlanOf } from './live.js';
+import { bindLive, renderLive } from './liveview.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -243,6 +245,7 @@ $('#btnOdds').onclick = async () => {
   try {
     await refreshOdds();
     msg('');
+    renderContext();
     renderLines();
     renderRank();
     renderDash();
@@ -281,12 +284,27 @@ function render() {
   renderExpect();
   $('#insights').innerHTML = buildInsights(r, fx.home.id, fx.away.id, { home: fx.home.name, away: fx.away.name })
     .map(i => `<li class="${i.tone}">${esc(i.text)}</li>`).join('');
+  renderContext();
   renderChips();
   renderLines();
   renderRank();
   renderDash();
   renderMyForm();
   renderGames();
+}
+
+// Contexto do jogo (dossiê: tabela, médias no mando, esperado, confronto direto) e o plano ao vivo dos
+// escanteios do 1º tempo (refeito do modelo: vale também para análise guardada).
+function renderContext() {
+  const c = state.dossier?.context;
+  $('#ctxSec').hidden = !c;
+  $('#ctx').innerHTML = c ? c.text.map(t => `<li class="info">${esc(t)}</li>`).join('')
+    + (c.h2h.games.length ? `<li class="info"><details><summary>Confrontos diretos (${c.h2h.games.length})</summary><ul>
+      ${c.h2h.games.map(g => `<li>${esc(g)}</li>`).join('')}</ul></details></li>` : '') : '';
+  const plan = livePlanOf(state.result);
+  $('#liveSec').hidden = !plan;
+  $('#live').innerHTML = renderLive(plan);
+  bindLive($('#live'), { banca: BANCA });
 }
 
 function renderExpect() {

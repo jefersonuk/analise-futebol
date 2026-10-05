@@ -82,12 +82,19 @@ export const dayFixtures = () => nextRound().map(g => out(g, SEASON()));
 export const dayOdds = () => nextRound().map(g => { const o = fixtureOdds(g.id);
   return { fixture: g.id, league: { ...LEAGUE, season: SEASON() }, updatedAt: o.updatedAt, bookmakers: o.bookmakers }; });
 export const teamMatches = (teamId, season) => leagueMatches(1, season).filter(m => m.h === teamId || m.a === teamId);
+// Confrontos diretos: os jogos entre os dois nas duas últimas temporadas, sem estatística (como a API).
+export const headToHead = (a, b) => [SEASON(), SEASON() - 1].flatMap(s => leagueMatches(1, s))
+  .filter(m => (m.h === a && m.a === b) || (m.h === b && m.a === a)).sort((x, y) => y.t - x.t).slice(0, 10)
+  .map(({ s, c1, ...m }) => ({ ...m, lg: LEAGUE.id, ln: LEAGUE.name }));
 
 export function standings(leagueId, season) {
-  const tab = new Map(TEAMS.map(t => [t.id, { team: t.id, points: 0, played: 0, gd: 0 }]));
+  const split = () => ({ played: 0, gf: 0, ga: 0 });
+  const tab = new Map(TEAMS.map(t => [t.id, { team: t.id, points: 0, played: 0, gd: 0, gf: 0, ga: 0, home: split(), away: split() }]));
   for (const m of leagueMatches(leagueId, season)) {
     const h = tab.get(m.h), a = tab.get(m.a);
     h.played++; a.played++; h.gd += m.hg - m.ag; a.gd += m.ag - m.hg;
+    h.gf += m.hg; h.ga += m.ag; a.gf += m.ag; a.ga += m.hg;
+    h.home.played++; h.home.gf += m.hg; h.home.ga += m.ag; a.away.played++; a.away.gf += m.ag; a.away.ga += m.hg;
     if (m.hg > m.ag) h.points += 3; else if (m.hg < m.ag) a.points += 3; else { h.points++; a.points++; }
   }
   return [...tab.values()].sort((x, y) => y.points - x.points || y.gd - x.gd)
