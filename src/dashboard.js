@@ -201,6 +201,10 @@ export function bindTooltips(root) {
 const pct = x => `${Math.round(x * 100)}%`;
 const odd2 = x => x.toFixed(2).replace('.', ',');
 const VALUE_CLS = { confirmado: 'ok', 'sem confirmação': 'mid', 'sem valor': 'no' };
+const CTX_CLS = { 'a favor': 'ok', misto: 'mid', contra: 'no' };
+// Checagens de contexto da linha (context.js): mando, médias, confronto direto e tabela.
+const ctxRow = c => (c ? `<p class="ctxline"><span class="tag ${CTX_CLS[c.verdict] || ''}">contexto ${esc(c.verdict)}</span>
+  <small class="muted">${c.signals.map(x => `${esc(x.kind)} ${esc(x.verdict)}: ${esc(x.text)}`).join(' · ') || 'sem dados de contexto'}</small></p>` : '');
 
 // Por que uma linha que entrou só para completar o painel não passou no filtro de candidatas.
 function outsideReason(l, ok = []) {
@@ -211,6 +215,7 @@ function outsideReason(l, ok = []) {
     if (l.p_model_range[0] < 0.42) return 'pior cenário do modelo fraco';
     return 'acerto baixo';
   }
+  if (l.context?.verdict === 'contra') return 'contexto contra';
   if (l.odd_min < 1.5) return 'odd abaixo de 1,50';
   if (l.politica_e === 'não entrar') return 'odd acima de 3,00';
   if (l.odd_min_vs_pinnacle_pct > 5) return 'preço difícil de achar';
@@ -285,6 +290,7 @@ export function renderDashboard(lines, teams) {
           ${l.outside ? `<span class="tag no">${esc(l.outside)}</span>` : ''}
           <button class="enter" data-enter="${esc(l.id)}">➕ Entrar</button>
         </div></header>
+      ${ctxRow(l.context)}
       <div class="teams">${charts}</div></article>`;
   }).join('');
 }

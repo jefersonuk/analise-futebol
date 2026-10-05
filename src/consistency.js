@@ -27,15 +27,17 @@ export const ODD_FLOOR = 1.5;   // abaixo disso fica fora do núcleo (filtros do
 
 // ---- linhas principais do pré-jogo ----
 // As que têm odd para entrar antes do jogo (as mais baixas — escanteios 1T 3,5, jogo 7 — só pagam no ao
-// vivo): escanteios do 1º tempo 4, 4,5 e 5 e do jogo 8, 8,5 e 9, over ou under; gols do 1º tempo 1,5 e do
-// jogo 1,5 e 2,5, só over. O handicap de escanteios do jogo inteiro (linhas da Pinnacle) completa a lista.
+// vivo, e o plano ao vivo do 1º tempo está em live.js): escanteios do 1º tempo 4, 4,5 e 5 e do jogo 8, 8,5 e 9,
+// over ou under; gols do 1º tempo 1,5 e do jogo 1,5 e 2,5, só over. Os handicaps do jogo inteiro nas linhas
+// que a Pinnacle cota — de escanteios e de gols (asiático) — completam a lista.
 export const MAIN_LINES = { 'Total escanteios 1T': ['c1', [4, 4.5, 5], 'OU'], 'Total de escanteios': ['corners', [8, 8.5, 9], 'OU'],
   'Total de gols 1T': ['g1', [1.5], 'O'], 'Total de gols': ['g', [1.5, 2.5], 'O'] };
 const MAIN_IDS = new Set(Object.values(MAIN_LINES).flatMap(([k, ls, sides]) => ls.flatMap(L => [...sides].map(s => `${k}${s}${L}`))));
 export const isMain = id => MAIN_IDS.has(id);
 export const HANDICAP = 'Handicap de escanteios';
-// Linha principal com preço da Pinnacle: um total da lista ou um handicap de escanteios do jogo que ela cota.
-export const isMainLine = l => l.priced_by === 'pinnacle' && (isMain(l.id) || l.market === HANDICAP);
+export const GOAL_HANDICAP = 'Handicap asiático';
+// Linha principal com preço da Pinnacle: um total da lista ou um handicap do jogo (escanteios ou gols) que ela cota.
+export const isMainLine = l => l.priced_by === 'pinnacle' && (isMain(l.id) || l.market === HANDICAP || l.market === GOAL_HANDICAP);
 
 // Preferência do Jeferson: OVER em gols e escanteios. Under (e "ninguém chega a N", que é um under) só
 // quando é muito atrativo: só vira candidata se for âncora, e na ordem conta um nível abaixo e com

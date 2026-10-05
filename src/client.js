@@ -148,11 +148,20 @@ export function makeClient({ get: rawGet, load, save }) {
         team: r.team.id, player: r.player.name, type: r.player.type, reason: r.player.reason,
       }))),
 
-    standings: (leagueId, season) => cached(`af:std:${leagueId}:${season}`, 6 * HOUR, async () =>
-      ((await get('/standings', { league: leagueId, season }))[0]?.league.standings || []).flat().map(s => ({
-        team: s.team.id, rank: s.rank, points: s.points, played: s.all.played, gd: s.goalsDiff,
-        form: s.form, group: s.group, zone: s.description,
-      }))),
+    // Tabela, com gols pró e contra no total e em casa / fora (as médias da temporada de cada time).
+    standings: (leagueId, season) => cached(`af:std2:${leagueId}:${season}`, 6 * HOUR, async () =>
+      ((await get('/standings', { league: leagueId, season }))[0]?.league.standings || []).flat().map(s => {
+        const split = x => (x ? { played: x.played ?? null, gf: x.goals?.for ?? null, ga: x.goals?.against ?? null } : null);
+        return { team: s.team.id, rank: s.rank, points: s.points, played: s.all.played, gd: s.goalsDiff,
+          form: s.form, group: s.group, zone: s.description, gf: s.all.goals?.for ?? null, ga: s.all.goals?.against ?? null,
+          home: split(s.home), away: split(s.away) };
+      })),
+
+    // Confrontos diretos em qualquer competição (os 10 mais recentes encerrados, sem estatística: os
+    // escanteios vêm da base quando o jogo está nela). Só muda quando os dois se enfrentam: 3 dias.
+    headToHead: (a, b) => cached(`af:h2h:${Math.min(a, b)}-${Math.max(a, b)}`, 3 * DAY, async () =>
+      (await get('/fixtures/headtohead', { h2h: `${a}-${b}`, last: 10 }))
+        .filter(f => FINISHED.has(f.fixture.status.short)).map(compact)),
 
     // Escanteios do 1º tempo de cada jogo encerrado (1 requisição por jogo: o lote ?ids= não traz
     // estatística por tempo). Fica guardado por jogo; só os novos são baixados. Devolve os jogos com c1.

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
-import { HANDICAP, MAIN_MARKETS, SCAN_MARKETS, bestLine, rankGames, scanDay } from '../src/scanner.js';
+import { GOAL_HANDICAP, HANDICAP, LIVE_1H, MAIN_MARKETS, SCAN_MARKETS, bestLine, brDate, pickGames, rankGames, scanDay } from '../src/scanner.js';
 import { isMain, isMainLine, isUnder, rankTier } from '../src/consistency.js';
-import { isCandidate } from '../src/dossier.js';
+import { isBet } from '../src/dossier.js';
 
 // Demo sem os escanteios do 1º tempo da liga (como na varredura real): só os dos times, sob demanda.
 function demoApi({ noHalf = true } = {}) {
@@ -27,7 +27,7 @@ function demoApi({ noHalf = true } = {}) {
 test('varredura: maior chance de ganho nas linhas principais, só com preço da Pinnacle', async () => {
   const api = demoApi();
   const scan = await scanDay(api, { date: '2026-10-01', top: 5, budget: 5000 });
-  assert.equal(scan.v, 3);
+  assert.equal(scan.v, 4);
   assert.equal(scan.with_odds, 10);
   assert.equal(scan.with_1h, 10);
   // guardados: os 5 melhores de cada filtro da tela
@@ -35,18 +35,19 @@ test('varredura: maior chance de ganho nas linhas principais, só com preço da 
   assert.ok(scan.games.length > 0 && scan.games.every(g => filters.some(market => rankGames(scan.games, { market }).slice(0, 5).some(x => x.g === g))));
   const lines = scan.games.flatMap(g => g.lines);
   // só as linhas principais com preço da Pinnacle: escanteios 1T 4/4,5/5 e jogo 8/8,5/9 (over e under), gols 1T 1,5 e
-  // jogo 1,5/2,5 (só over) e o handicap de escanteios do jogo
+  // jogo 1,5/2,5 (só over) e os handicaps do jogo (escanteios e gols)
   assert.ok(lines.every(l => isMainLine(l) && l.priced_by === 'pinnacle'));
-  assert.ok(!lines.some(l => /^(c1[OU]3\.5|corners[OU]7|gU|g1U)/.test(l.id) || ['Handicap escanteios 1T', 'Handicap asiático'].includes(l.market)));
+  assert.ok(!lines.some(l => /^(c1[OU]3\.5|corners[OU]7|gU|g1U)/.test(l.id) || l.market === 'Handicap escanteios 1T'));
   for (const id of ['c1O5', 'c1U4.5', 'cornersO9', 'cornersU8.5', 'g1O1.5', 'gO2.5']) assert.ok(lines.some(l => l.id === id), id);
-  for (const m of MAIN_MARKETS.concat(HANDICAP)) assert.ok(lines.some(l => l.market === m), m);
+  for (const m of MAIN_MARKETS.concat(HANDICAP, GOAL_HANDICAP)) assert.ok(lines.some(l => l.market === m), m);
+  assert.ok(lines.filter(l => l.market === GOAL_HANDICAP).every(l => /^ah[HA]/.test(l.id)), 'handicap de gols = asiático da Pinnacle');
   // gols do 1º tempo vêm da Pinnacle (mercado 6) e do placar do 1º tempo dos jogos passados
   const g1 = lines.find(l => l.id === 'g1O1.5');
   assert.ok(g1 && g1.history.home.n > 0 && g1.history.home.what === 'gols no 1º tempo');
-  // ordem: candidatas primeiro; entre elas o nível nunca melhora ao descer (under de escanteios sem desconto)
-  const ranked = rankGames(scan.games), cands = ranked.map(x => isCandidate(x.line));
+  // ordem: apostas primeiro; entre elas o nível nunca melhora ao descer (under de escanteios sem desconto)
+  const ranked = rankGames(scan.games), cands = ranked.map(x => isBet(x.line));
   assert.deepEqual(cands, [...cands].sort((a, b) => b - a));
-  const tiers = ranked.filter(x => isCandidate(x.line)).map(x => rankTier(x.line));
+  const tiers = ranked.filter(x => isBet(x.line)).map(x => rankTier(x.line));
   assert.deepEqual(tiers, [...tiers].sort((a, b) => a - b));
   assert.ok(ranked.every(x => x.line.odd_min >= 1.5 && x.line.odd_min <= 3));
   assert.ok(api.halfAsked.length > 0 && api.halfAsked.every(s => /^tm\d+$/.test(s)));
@@ -67,7 +68,7 @@ test('sem escanteios do 1º tempo na Pinnacle: seguem escanteios do jogo e gols'
   assert.equal(base.halfAsked.length, 0, 'sem 1º tempo, nada de histórico do 1º tempo');
 });
 
-test('liga sem estatística de escanteios na API: o jogo entra só com os mercados de gols', async () => {
+test('liga sem estatística de escanteios na API: o jogo entra só com os mercados de gols (totais e handicap)', async () => {
   const base = demoApi();
   const api = { ...base, leagueMatches: (id, s) => base.leagueMatches(id, s).map(m => ({ ...m, s: null })) };
   const scan = await scanDay(api, { date: '2026-10-01', top: 5, budget: 5000 });
@@ -75,7 +76,8 @@ test('liga sem estatística de escanteios na API: o jogo entra só com os mercad
   assert.equal(scan.skipped.length, 0);
   for (const g of scan.games) {
     assert.match(g.no_corners, /não tem estatística de escanteios/);
-    assert.ok(g.lines.length && g.lines.every(l => ['Total de gols', 'Total de gols 1T'].includes(l.market)));
+    assert.ok(g.lines.length && g.lines.every(l => ['Total de gols', 'Total de gols 1T', GOAL_HANDICAP].includes(l.market)));
+    assert.equal(g.live1h, null, 'sem escanteios, sem plano ao vivo do 1º tempo');
     assert.equal(g.pinnacle_1h, null);
     assert.equal(g.alerts.length, 0, 'a falta de escanteios não deixa as linhas de gols frágeis');
   }
@@ -116,4 +118,42 @@ test('linha do jogo: candidata primeiro, depois a mais consistente; under de esc
   assert.equal(bestLine([hcp, o25], { market: 'Total de gols' }).id, 'gO2.5');
   assert.equal(bestLine([L('gO2.5', 'Total de gols', 'âncora', 0.7, { odd_min: 1.4 })]), null, 'odd mínima abaixo de 1,50 fica de fora');
   assert.equal(bestLine([L('gO2.5', 'Total de gols', 'âncora', 0.7, { odd_min: 3.4, politica_e: 'não entrar' })]), null, 'acima de 3,00 também');
+});
+
+test('próximas 4 horas: jogos da janela (virando o dia em Brasília), em ordem de horário, com contexto e plano ao vivo', async () => {
+  const base = demoApi(), asked = [], h2h = [];
+  // jogos da rodada espalhados de 15 em 15 minutos, do último para o primeiro
+  const round = demo.dayFixtures().map((f, i) => ({ ...f, t: f.t + (9 - i) * 15 * 60e3 }));
+  const first = Math.min(...round.map(f => f.t)), last = Math.max(...round.map(f => f.t));
+  const api = { ...base, dayFixtures: d => { asked.push(d); return round; },
+    headToHead: (a, b) => { h2h.push([a, b]); return demo.headToHead(a, b); } };
+  const now = first - 60 * 60e3;   // 1 h antes do primeiro: a janela de 4 h cobre a rodada
+  const scan = await scanDay(api, { hours: 4, now, top: 20, budget: 5000 });
+  assert.equal(scan.mode, 'janela');
+  assert.equal(scan.hours, 4);
+  assert.deepEqual(scan.window, { from: now + 10 * 60e3, to: now + 4 * 3600e3 });
+  assert.deepEqual(asked, [...new Set([brDate(now), brDate(now + 4 * 3600e3)])], 'as datas de Brasília que a janela cobre');
+  assert.equal(scan.fixtures, round.length);
+  assert.ok(last <= scan.window.to);
+  // os de maior chance, mostrados do mais próximo para o mais distante; pela chance, a ordem do ranking
+  const byTime = pickGames(scan.games, { top: 20 }).map(x => x.g.fx.t);
+  assert.deepEqual(byTime, [...byTime].sort((a, b) => a - b));
+  assert.deepEqual(pickGames(scan.games, { top: 3, order: 'chance' }).map(x => x.g), rankGames(scan.games).slice(0, 3).map(x => x.g));
+  for (const g of scan.games) {
+    assert.ok(g.context.text.some(t => t.startsWith('Tabela:')) && g.context.text.some(t => t.startsWith('Esperado:')));
+    assert.ok(g.h2h_api && g.context.h2h.n > 0, 'confronto direto da API nos jogos guardados');
+    assert.ok(g.live1h && g.live1h.anchored && g.live1h.tables.length === 3);
+    assert.ok(g.lines.every(l => l.context && ['a favor', 'misto', 'neutro', 'contra'].includes(l.context.verdict)));
+  }
+  assert.equal(new Set(h2h.map(String)).size, scan.games.length, 'um confronto direto por jogo guardado');
+  // ao vivo do 1º tempo: com o total da Pinnacle primeiro, depois os que mais devem ter escanteios no 1º tempo
+  const live = rankGames(scan.games, { market: LIVE_1H }).map(x => x.g.live1h.mu);
+  assert.deepEqual(live, [...live].sort((a, b) => b - a));
+});
+
+test('janela sem jogos: os jogos depois do fim da janela ficam de fora', async () => {
+  const round = demo.dayFixtures();
+  const scan = await scanDay(demoApi(), { hours: 4, now: Math.min(...round.map(f => f.t)) - 5 * 3600e3, budget: 5000 });
+  assert.equal(scan.fixtures, 0);
+  assert.equal(scan.games.length, 0);
 });
