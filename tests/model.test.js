@@ -179,6 +179,24 @@ test('favorito pelo 1X2 leva os escanteios: a divisão segue o mercado, o total 
   assert.ok(res.all.find(l => l.id === 'c1hA1.5').pWin > 0.75, 'e o favorito +1,5 no 1T fica com acerto alto (odd de mercado baixa)');
 });
 
+test('piso de acerto: sólida só com 60%+, âncora com 70%+ e, com odd da Pinnacle, odd mínima nunca abaixo de 1,50', () => {
+  const ms = cornersLeague(), h = ms[0].h, a = ms[1].a, t = ms[ms.length - 1].t + 864e5;
+  const fair = fairOf([...x12(6.302, 5.124, 1.509), ['gO1.5', 0.78], ['gU1.5', 0.22], ['gO2.5', 0.58], ['gU2.5', 0.42]]);
+  const odds = new Map([...fair].map(([id, p]) => [id, 1 / (p * 1.03)]));   // Pinnacle com 3% de margem
+  const res = analyzeMatch(ms, h, a, t, { fair });
+  const teams = [['home', h], ['away', a]].map(([role, id]) => ({ role, name: role, games: recentGames(res.prep, id) }));
+  const { priced, anchored } = priceLines(res, { odds, fair, alerts: [], teams });
+  const all = priced.concat(anchored);
+  assert.ok(all.filter(l => l.priced_by === 'pinnacle').every(l => l.odd_min >= 1.5));
+  assert.ok(all.filter(l => l.odd_min < 1.5).every(l => !isCandidate(l)), 'sem a Pinnacle, justa abaixo de 1,43 continua fora');
+  assert.ok(all.every(l => l.tier === 'especulativa' || l.p_blend >= 0.6), 'nada abaixo de 60% passa de especulativa');
+  assert.ok(all.every(l => l.tier !== 'âncora' || l.p_blend >= 0.7), 'âncora só com 70%+');
+  const o15 = priced.find(l => l.id === 'gO1.5'), o25 = priced.find(l => l.id === 'gO2.5');
+  assert.equal(o15.odd_min, 1.5, 'linha de ~78%: a justa fica perto de 1,28 e a mínima é o piso do núcleo');
+  assert.ok(o15.odd_min_vs_pinnacle_pct > 5 && !isCandidate(o15), 'e 1,50 fica longe demais da Pinnacle (1,25) para ser candidata');
+  assert.ok(o25.p_blend < 0.6 && o25.tier === 'especulativa' && !isCandidate(o25), 'over 2,5 a ~58% fica abaixo do piso');
+});
+
 test('jogo equilibrado: handicap positivo vale para os dois lados', () => {
   const ms = cornersLeague(), h = ms[0].h, a = ms[1].a, t = ms[ms.length - 1].t + 864e5;
   const res = analyzeMatch(ms, h, a, t, { fair: fairOf([...x12(2.6, 3.3, 2.75), ['gO2.5', 0.5], ['gU2.5', 0.5]]) });

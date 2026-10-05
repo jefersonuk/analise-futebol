@@ -40,7 +40,7 @@ function cornersLine(r) {
   if (!r) return '';
   const n = k => r[k] || 0, parts = [
     `<b>${n('aposta')} com aposta</b>`, n('jogável') && `${n('jogável')} com linha jogável sem aposta`,
-    n('fora da faixa') && `${n('fora da faixa')} com as linhas fora da faixa 1,50–3,00`, n('sem linha') && `${n('sem linha')} sem linha de escanteios`,
+    n('fora da faixa') && `${n('fora da faixa')} com as linhas abaixo de 60% de chance ou fora da faixa 1,50–3,00`, n('sem linha') && `${n('sem linha')} sem linha de escanteios`,
     n('sem estatística') && `${n('sem estatística')} sem estatística de escanteios na liga (só gols)`].filter(Boolean);
   const src = [n('preço pinnacle') && `${n('preço pinnacle')} com a Pinnacle`, n('preço derivada') && `${n('preço derivada')} pelo total da Pinnacle`,
     n('preço modelo') && `${n('preço modelo')} só pelo modelo`].filter(Boolean);
@@ -97,7 +97,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     $('#scanSpec').hidden = !scan?.games.length;
     if (!scan) { out.innerHTML = ''; return; }
     const top = scan.top || 20, live = market === LIVE_1H;
-    ranked = scan.v >= 3 ? pickGames(scan.games, { market, top, order }) : [];
+    ranked = scan.v >= 5 ? pickGames(scan.games, { market, top, order }) : [];
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const chips = FILTERS.map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
     const orders = [['Horário', 'time'], ['Chance de ganho', 'chance']].map(([t, o]) => `<button class="${order === o ? 'on' : ''}" data-o="${o}">${t}</button>`).join('');
@@ -127,22 +127,23 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
       ${scan.skipped.map(s => `<li>${hour(s.fx.t)} ${esc(s.fx.home.name)} x ${esc(s.fx.away.name)} <span class="muted">(${esc(s.fx.league.name)}): ${esc(s.why)}</span></li>`).join('')}</ul></details>` : '';
     const nBet = live ? 0 : ranked.filter(x => isBet(x.line)).length;
-    const old = scan.v >= 4 ? '' : '<p class="msg">Varredura feita antes do contexto e do plano ao vivo: toque em Varrer jogos de novo.</p>';
+    const old = scan.v >= 5 ? '' : '<p class="msg">Varredura feita antes do piso de 60% de acerto: toque em Varrer jogos de novo.</p>';
     const explain = live
       ? `<p class="muted">Jogos para a entrada ao vivo no over de escanteios do 1º tempo, dos que mais devem ter escanteios no 1º tempo (com o total
         da Pinnacle primeiro). Cada casa: odd mínima do Mais de 3,5 e a chance. Sem escanteio, a odd mínima sobe a cada minuto: entre só quando a casa
         pagar pelo menos ela. A grade completa e a calculadora estão em cada jogo.</p>`
       : `<p class="muted"><b>${nBet} ${nBet === 1 ? 'jogo com aposta' : 'jogos com aposta'}</b> neste filtro. Os ${ranked.length} de maior chance de ganho,
         ${order === 'time' ? 'em ordem de horário' : 'pela chance de ganho'}. Chance = a nossa probabilidade (Pinnacle sem margem + modelo, sem contar a devolução)
-        e, ao lado, a da Pinnacle; o histórico dos dois times entra no nível. Contexto = mando, médias, confronto direto e tabela confirmando a linha
-        (passe o mouse para ver). Apagados: sem aposta (especulativa, odd mínima mais de 5% acima da Pinnacle ou contexto contra).</p>`;
+        e, ao lado, a da Pinnacle; o histórico dos dois times entra no nível. Só aparecem linhas com chance ≥ 60% (piso); âncora = 70%+, o ideal.
+        Contexto = mando, médias, confronto direto e tabela confirmando a linha (passe o mouse para ver). Apagados: sem aposta (especulativa, odd mínima
+        mais de 5% acima da Pinnacle ou contexto contra).</p>`;
     out.innerHTML = `<p class="muted">Varredura de ${when}: ${span} · ${scan.fixtures} jogos por começar, ${pool},
       ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>${cornersLine(scan.corners_report)}${old}
       <div class="chips" id="scanChips">${chips}</div>
       <div class="chips" id="scanOrder"><span class="muted">Ordem:</span>${orders}</div>
       ${ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`
-        : scan.v >= 3 ? `<p class="muted">${live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
-          : 'Nenhum jogo com linha principal jogável (odd mínima 1,50–3,00) neste filtro.'}</p>` : ''}
+        : scan.v >= 5 ? `<p class="muted">${live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
+          : 'Nenhum jogo com linha principal jogável (chance ≥ 60%, odd mínima 1,50–3,00) neste filtro.'}</p>` : ''}
       ${skipped}${cards}`;
     bindTooltips(out);
     bindLive(out, { banca });

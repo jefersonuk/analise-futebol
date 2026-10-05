@@ -1,7 +1,7 @@
 // Painel: as 5 linhas de maior EV e como cada time se saiu nelas nos últimos 10 jogos.
 
 import { roleOf, settle } from './model.js';
-import { isMainLine, isUnder, rankScore, rankTier, underOk } from './consistency.js';
+import { HIT_MIN, isMainLine, isUnder, rankScore, rankTier, underOk } from './consistency.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const numBR = x => String(x).replace('.', ',');
@@ -211,9 +211,9 @@ function outsideReason(l, ok = []) {
   if (ok.includes(l.id)) return null;
   if (isUnder(l.id) && !underOk(l)) return 'under só se for âncora';
   if (l.tier === 'especulativa') {
-    if (l.hit_rate_last10 != null && l.hit_rate_last10 < 0.5) return 'histórico contra';
-    if (l.p_model_range[0] < 0.42) return 'pior cenário do modelo fraco';
-    return 'acerto baixo';
+    if (l.p_blend < HIT_MIN) return `acerta ${pct(l.p_blend)}: abaixo do piso de 60%`;
+    if (l.p_model_range[0] < HIT_MIN - 0.1) return 'pior cenário do modelo abaixo de 50%';
+    return 'histórico dos times abaixo de 60%';
   }
   if (l.context?.verdict === 'contra') return 'contexto contra';
   if (l.odd_min < 1.5) return 'odd abaixo de 1,50';

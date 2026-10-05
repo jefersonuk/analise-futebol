@@ -37,11 +37,16 @@ test('escanteios por time: do próprio time ou cedidos pelo adversário', () => 
 });
 
 
-test('consistência: acerto alto e estável vira âncora; histórico contra derruba para especulativa', () => {
-  assert.equal(consistency({ p: 0.64, pLow: 0.55, hits: [{ wins: 7, n: 10 }, { wins: 6, n: 10 }] }).tier, 'âncora');
-  assert.equal(consistency({ p: 0.64, pLow: 0.55, hits: [{ wins: 7, n: 10 }, { wins: 4, n: 10 }] }).tier, 'sólida');
-  assert.equal(consistency({ p: 0.6, pLow: 0.5, hits: [{ wins: 4, n: 10 }, { wins: 4, n: 10 }] }).tier, 'especulativa');
-  assert.equal(consistency({ p: 0.45, pLow: 0.35, hits: [{ wins: 9, n: 10 }, { wins: 9, n: 10 }] }).tier, 'especulativa');
+test('consistência: piso de 60% de acerto, âncora só com 70%+; histórico contra derruba para especulativa', () => {
+  const t = (p, pLow, a, b) => consistency({ p, pLow, hits: [{ wins: a, n: 10 }, { wins: b, n: 10 }] }).tier;
+  assert.equal(t(0.74, 0.65, 8, 7), 'âncora');
+  assert.equal(t(0.64, 0.55, 9, 8), 'sólida', 'abaixo de 70% nunca é âncora, por melhor que seja o histórico');
+  assert.equal(t(0.74, 0.65, 7, 5), 'sólida', 'um time abaixo de 6/10 tira da âncora');
+  assert.equal(t(0.74, 0.58, 8, 8), 'sólida', 'pior cenário abaixo de 60% tira da âncora');
+  assert.equal(t(0.58, 0.5, 9, 9), 'especulativa', 'abaixo do piso de 60%, por melhor que seja o histórico');
+  assert.equal(t(0.62, 0.55, 5, 5), 'especulativa', 'histórico de 50% puxa o acerto para baixo de 60%');
+  assert.equal(t(0.62, 0.48, 7, 7), 'especulativa', 'pior cenário abaixo de 50%');
+  assert.equal(t(0.45, 0.35, 9, 9), 'especulativa');
   const a = consistency({ p: 0.62, pLow: 0.52, hits: [{ wins: 8, n: 10 }, { wins: 8, n: 10 }] });
   const b = consistency({ p: 0.62, pLow: 0.52, hits: [{ wins: 5, n: 10 }, { wins: 5, n: 10 }] });
   assert.ok(a.score > b.score);
@@ -64,7 +69,7 @@ test('painel em foco: linhas principais com preço da Pinnacle, candidatas prime
   const dossier = {
     focus_markets: ['Total escanteios 1T', 'Total de escanteios', 'Total de gols 1T', 'Total de gols', 'Handicap de escanteios'],
     candidates_focus: ['cornersU8.5'], candidates: ['1'],
-    lines_with_pinnacle: [L('cornersU8.5', 'Total de escanteios', 'sólida', 0.62, 1.7), L('gO2.5', 'Total de gols', 'especulativa', 0.45, 2.1),
+    lines_with_pinnacle: [L('cornersU8.5', 'Total de escanteios', 'sólida', 0.62, 1.7), L('gO2.5', 'Total de gols', 'especulativa', 0.45, 2.1, { p_blend: 0.45 }),
       L('gO1.5', 'Total de gols', 'âncora', 0.8, 1.3), L('gU2.5', 'Total de gols', 'sólida', 0.6, 1.8), L('gO3', 'Total de gols', 'âncora', 0.7, 1.7),
       L('c1O4.5', 'Total escanteios 1T', 'sólida', 0.6, 1.9, { odd_min_vs_pinnacle_pct: 7 }), L('chA1.5', 'Handicap de escanteios', 'sólida', 0.58, 1.8),
       L('1', '1X2', 'sólida', 0.6, 1.9)],
@@ -73,7 +78,7 @@ test('painel em foco: linhas principais com preço da Pinnacle, candidatas prime
   const lines = pickDashboard(dossier, 5, { focus: true });
   // nem linha fora das principais (gO3), nem under de gols, nem linha sem preço da Pinnacle; odd abaixo de 1,50 por último
   assert.deepEqual(lines.map(l => l.id), ['cornersU8.5', 'c1O4.5', 'chA1.5', 'gO2.5', 'gO1.5']);
-  assert.deepEqual(lines.map(l => l.outside ?? null), [null, 'preço difícil de achar', 'alternativa de linha', 'acerto baixo', 'odd abaixo de 1,50']);
+  assert.deepEqual(lines.map(l => l.outside ?? null), [null, 'preço difícil de achar', 'alternativa de linha', 'acerta 45%: abaixo do piso de 60%', 'odd abaixo de 1,50']);
   assert.ok(pickDashboard(dossier, 5, { focus: false }).some(l => l.id === '1'));
 });
 

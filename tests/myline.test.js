@@ -69,7 +69,7 @@ test('minha linha: preço, veredito e alternativas no jogo da demo', async () =>
   const teams = [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(result.prep, t.id) }));
   const price = makePricer({ dossier, result, teams, banca: 44000 });
 
-  const g = price(dossier.lines_with_pinnacle.find(l => /^g[OU]/.test(l.id) && l.odd_min >= 1.5 && l.odd_min <= 2.5).id);
+  const g = price(dossier.lines_with_pinnacle.find(l => /^g[OU]/.test(l.id) && l.p_blend >= 0.6 && l.odd_min <= 2.5).id);
   assert.equal(g.priced_by, 'pinnacle');
   const race = price('crN9');   // sem odd na API: derivado do total de escanteios ancorado na Pinnacle
   assert.match(race.priced_by, /ancorado/);
@@ -82,10 +82,23 @@ test('minha linha: preço, veredito e alternativas no jogo da demo', async () =>
   const v = verdict(g, g.odd_min + 0.01);
   assert.ok(['ok', 'mid'].includes(v.level));
   assert.ok(v.ev > 0);
+  // abaixo do piso de 60% de acerto não é aposta, nem com odd acima da mínima
+  const low = price(dossier.lines_with_pinnacle.find(l => /^g[OU]/.test(l.id) && l.p_blend < 0.6 && l.odd_min <= 3).id);
+  assert.equal(verdict(low, null).level, 'no');
+  assert.equal(verdict(low, low.odd_min + 0.01).level, 'no');
+  assert.match(verdict(low, low.odd_min + 0.01).title, /abaixo do piso de 60%/);
 
   const { alts, best } = alternatives(price, g, dossier);
-  assert.ok(alts.some(a => a.kind === 'escada' && a.l.id.slice(0, 2) === g.id.slice(0, 2)));
+  assert.ok(alts.filter(a => a.kind === 'escada').every(a => a.l.id.slice(0, 2) === g.id.slice(0, 2)));
+  // escada nos escanteios (a Pinnacle cota várias linhas): a de mais chance que só cabe no núcleo pelo piso e fica
+  // longe da Pinnacle não entra
+  const c = price(dossier.lines_with_pinnacle.find(l => /^cornersO/.test(l.id) && l.p_blend >= 0.6 && l.odd_min > 1.5 && l.odd_min <= 2.5).id);
+  const ca = alternatives(price, c, dossier).alts;
+  assert.ok(ca.some(a => a.kind === 'escada'), 'escada nos escanteios');
+  assert.ok(!ca.some(a => a.l.odd_min <= 1.5 && a.l.odd_min_vs_pinnacle_pct > 5), 'piso fora do alcance da casa soft não é alternativa');
   assert.ok(alts.every(a => a.l.odd_min >= 1.5 && a.l.odd_min <= 3));
+  assert.ok(alts.filter(a => a.kind !== 'melhor do jogo').every(a => a.l.p_blend >= 0.6), 'alternativas só com acerto ≥ 60%');
+  assert.ok(alternatives(price, low, dossier).alts.every(a => a.l.p_blend >= 0.6), 'nem o outro lado abaixo do piso');
   assert.ok(!alts.some(a => a.l.id === g.id));
   if (best) assert.notEqual(best.id, g.id);
 

@@ -1,29 +1,40 @@
 // Consistência primeiro, preço depois: uma linha só interessa se acerta com frequência e de forma
 // estável; o EV entra como filtro (odd mínima), não como critério de ordenação.
-// Níveis calibrados para a faixa de odd que o Jeferson opera (1,50–2,09 no núcleo): âncora ≈ odd justa
-// até ~1,67; sólida até ~1,92.
+// Piso de acerto (regra do Jeferson, out/2026): nas odds baixas do núcleo (1,50–2,09) só fica de pé quem
+// acerta 60%+ — nada abaixo disso vira aposta; o ideal é 70%. Nas 34 apostas da análise (02–05/10/2026)
+// acerto de 50% a odd média 1,79 (empate em 57%): as que tinham chance ≥ 60%, odd ≥ mínima e preço da
+// Pinnacle acertaram 64%; o resto, 41%.
+//   âncora (ideal):   chance ≥ 70%, pior cenário ≥ 60%, histórico encolhido ≥ 70% e cada time com 6/10+
+//   sólida (piso):    chance ≥ 60%, pior cenário ≥ 50%, histórico encolhido ≥ 60%
+//   especulativa:     o resto — nunca aposta
 //
 //   p        probabilidade de ganhar (sem push): p_blend quando há Pinnacle, senão a do modelo
 //   pLow     pior cenário do modelo (−1 erro-padrão)
 //   hits     histórico dos dois times na linha: [{ wins, n }] (meia vitória conta 0,5)
 
 const PRIOR = 10;   // o histórico de 10 jogos é encolhido para p com peso de 10 jogos
+export const HIT_MIN = 0.6, HIT_IDEAL = 0.7;
 
 export function consistency({ p, pLow, hits = [] }) {
   const wins = hits.reduce((s, h) => s + h.wins, 0), n = hits.reduce((s, h) => s + h.n, 0);
   const hitShrunk = (wins + PRIOR * p) / (n + PRIOR);
   const score = 0.5 * p + 0.25 * pLow + 0.25 * hitShrunk;
   // âncora exige histórico de verdade: os dois times com 5+ jogos na linha e 60%+ de acerto
-  const eachTeamOk = hits.length > 0 && hits.every(h => h.n >= 5 && h.wins / h.n >= 0.6);
-  const bothOk = n < 10 || wins / n >= 0.5;   // o histórico somado não pode contradizer a linha
-  const tier = p >= 0.6 && pLow >= 0.5 && eachTeamOk ? 'âncora'
-    : p >= 0.52 && pLow >= 0.42 && bothOk ? 'sólida'
+  const eachTeamOk = hits.length > 0 && hits.every(h => h.n >= 5 && h.wins / h.n >= HIT_MIN);
+  const tier = p >= HIT_IDEAL && pLow >= HIT_IDEAL - 0.1 && hitShrunk >= HIT_IDEAL && eachTeamOk ? 'âncora'
+    : p >= HIT_MIN && pLow >= HIT_MIN - 0.1 && hitShrunk >= HIT_MIN ? 'sólida'
       : 'especulativa';
   return { score, tier, hit_rate: n ? wins / n : null };
 }
 
 export const TIER_ORDER = { 'âncora': 0, 'sólida': 1, 'especulativa': 2 };
-export const ODD_FLOOR = 1.5;   // abaixo disso fica fora do núcleo (filtros do surebet.com começam em 1,50)
+// Abaixo disso fica fora do núcleo (filtros do surebet.com começam em 1,50). Nas linhas com odd da Pinnacle é o
+// piso da odd a tomar, não um corte da linha: numa linha de 70%+ a odd justa fica abaixo de 1,43, e a mínima passa a
+// ser o próprio 1,50 (candidata se isso ficar até 5% acima da Pinnacle). Sem a odd dela, a linha ainda é cortada.
+export const ODD_FLOOR = 1.5;
+// A mínima só está no núcleo por causa do piso e o piso fica mais de 5% acima da Pinnacle: nenhuma casa soft paga
+// (ex.: Menos de 3,5 gols a 80%, Pinnacle 1,24). Não é jogável — nem como alternativa.
+export const floorOutOfReach = l => l.odd_min <= ODD_FLOOR + 1e-9 && l.odd_min_vs_pinnacle_pct > 5;
 
 // ---- linhas principais do pré-jogo ----
 // As que têm odd para entrar antes do jogo (as mais baixas — escanteios 1T 3,5, jogo 7 — só pagam no ao

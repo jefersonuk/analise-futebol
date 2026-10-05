@@ -4,7 +4,7 @@
 
 import { politicaE } from './model.js';
 import { renderDashboard } from './dashboard.js';
-import { isUnder, rankScore, rankTier } from './consistency.js';
+import { HIT_MIN, floorOutOfReach, isUnder, rankScore, rankTier } from './consistency.js';
 import { lineHistory, modelEntry, side, teamNames } from './dossier.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -140,16 +140,19 @@ export function verdict(line, odd) {
   if (line.derived) notes.push('A Pinnacle não cota esta linha: a chance sai do total que ela precifica em outra linha, misturada com o modelo; por isso a odd mínima tem margem de 5%.');
   else if (line.priced_by !== 'pinnacle') notes.push('Sem odd da Pinnacle nesta linha: o preço é do modelo, por isso a odd mínima tem margem maior.');
   if (line.inviable) return { level: 'no', title: `Inviável: ${line.inviable}`, ev: null, notes };
-  if (!(odd > 1)) return { level: 'info', title: `Procure odd ≥ ${odd2(line.odd_min)} (${line.tier})`, ev: null, notes };
+  const below = !(p >= HIT_MIN) && `Acerta ${pct(p)}: abaixo do piso de 60%, não é aposta`;
+  if (!(odd > 1)) return below ? { level: 'no', title: below, ev: null, notes }
+    : { level: 'info', title: `Procure odd ≥ ${odd2(line.odd_min)} (${line.tier})`, ev: null, notes };
 
   const ev = p * odd - 1, pe = politicaE(odd);
   if (line.pinnacle_odd && odd > line.pinnacle_odd) notes.push(`Sua odd é maior que a da própria Pinnacle (${odd2(line.pinnacle_odd)}).`);
   let level, title;
   if (line.inviable) { level = 'no'; title = `Inviável: ${line.inviable}`; }
   else if (pe.factor === 0) { level = 'no'; title = 'Não entrar: odd acima de 3,00 (Política E)'; }
+  else if (below) { level = 'no'; title = below; }
   else if (odd < line.fair_odd_blend) { level = 'no'; title = `Sem valor: a odd justa é ${odd2(line.fair_odd_blend)}`; }
   else if (odd < line.odd_min) { level = 'mid'; title = `Preço curto: o valor fica dentro da margem de erro (mínima ${odd2(line.odd_min)})`; }
-  else if (line.tier === 'especulativa') { level = 'mid'; title = 'Tem preço, mas acerta pouco ou de forma instável (especulativa)'; }
+  else if (line.tier === 'especulativa') { level = 'mid'; title = 'Tem preço, mas o pior cenário ou o histórico dos times fica abaixo do piso de 60% (especulativa)'; }
   else if (isUnder(line.id) && line.tier !== 'âncora') { level = 'mid'; title = 'Under sólida: pela sua regra, under só entra se for âncora; veja o over nas alternativas'; }
   else if (odd < 1.5) { level = 'mid'; title = `Tem valor (${line.tier}), mas a odd está abaixo de 1,50, fora do seu núcleo`; }
   else { level = 'ok'; title = `Entrar: linha ${line.tier}, odd acima da mínima · entrada ${pe.label} (Política E)`; }
@@ -176,7 +179,8 @@ const RELATED = [
   [/^cHO/, ['chH', 'crH']], [/^cAO/, ['chA', 'crA']], [/^cHU/, ['cornersU', 'chA']], [/^cAU/, ['cornersU', 'chH']],
 ];
 
-const playable = l => l && !l.inviable && l.odd_min >= 1.5 && l.odd_min <= 3;
+// jogável: acerto ≥ 60% (piso) e odd mínima na faixa operada, que uma casa soft alcance quando é o próprio piso
+const playable = l => l && !l.inviable && l.p_blend >= HIT_MIN && l.odd_min >= 1.5 && l.odd_min <= 3 && !floorOutOfReach(l);
 const better = (a, b) => rankTier(a) - rankTier(b) || a.fragile - b.fragile || rankScore(b) - rankScore(a);
 
 export function alternatives(price, chosen, dossier) {
@@ -198,7 +202,7 @@ export function alternatives(price, chosen, dossier) {
   // 2. o outro lado, quando ele é o favorito
   const o = opposite(chosen.id) && price(opposite(chosen.id));
   if (o && isUnder(chosen.id) && playable(o)) add(o, 'outro lado', `over, a sua preferência (${o.tier}, acerta ${pct(o.p_blend)})`);
-  else if (o && o.p_blend > chosen.p_blend + 0.02) add(o, 'outro lado', `o outro lado acerta mais (${pct(o.p_blend)})`);
+  else if (o && playable(o) && o.p_blend > chosen.p_blend + 0.02) add(o, 'outro lado', `o outro lado acerta mais (${pct(o.p_blend)})`);
   // 3. a mesma leitura em outro mercado: a linha mais consistente de cada lado relacionado
   for (const [re, keys] of RELATED) {
     if (!re.test(chosen.id)) continue;
@@ -222,7 +226,7 @@ export function renderMyLine({ line, v, alts, best, teams, odd }) {
   const ev = v.ev != null ? ` <span class="${v.ev > 0 ? 'pos' : 'neg'}">EV ${v.ev >= 0 ? '+' : ''}${pct(v.ev)} @ ${odd2(odd)}</span>` : '';
   const sug = best ? `<p class="sug">⭐ Mais consistente entre as opções: <b>${esc(best.market)} — ${esc(best.line)}</b>
     (${best.tier}, acerta ${pct(best.p_blend)}, mínima ${odd2(best.odd_min)}) <button class="ghost" data-analyze="${esc(best.id)}">Analisar</button></p>`
-    : '<p class="sug">⭐ Entre as alternativas jogáveis (odd 1,50–3,00), a sua linha já é a mais consistente.</p>';
+    : '<p class="sug">⭐ Entre as alternativas jogáveis (acerto ≥ 60%, odd 1,50–3,00), a sua linha já é a mais consistente.</p>';
   const rows = alts.map(({ l, kind, why }) => `<tr>
     <td class="muted">${kind}</td><td>${esc(l.market)}</td><td>${esc(l.line)}</td>
     <td><span class="tag ${l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no'}">${l.tier}</span></td>
@@ -234,5 +238,5 @@ export function renderMyLine({ line, v, alts, best, teams, odd }) {
     <h3 class="alt-h">Alternativas</h3>${sug}
     ${rows ? `<div class="scroll"><table class="alts"><tr><th>Tipo</th><th>Mercado</th><th>Linha</th><th>Nível</th><th>Acerta</th>
       <th>Justa</th><th>Mínima</th><th>Pinnacle</th><th>Por quê</th><th></th></tr>${rows}</table></div>`
-    : '<p class="muted">Nenhuma alternativa jogável (odd mínima entre 1,50 e 3,00) para esta linha.</p>'}`;
+    : '<p class="muted">Nenhuma alternativa jogável (acerto ≥ 60%, odd mínima entre 1,50 e 3,00) para esta linha.</p>'}`;
 }

@@ -26,7 +26,7 @@ import { collect } from './odds.js';
 import { recentGames } from './insights.js';
 import { FRIENDLIES, byConsistency, contraAlert, favorSummary, isBet, priceLines, rolesNow, seasonsFor } from './dossier.js';
 import { favorFor } from './favoritism.js';
-import { GOAL_HANDICAP, HANDICAP, MAIN_LINES, isMain, isMainLine, underOk } from './consistency.js';
+import { GOAL_HANDICAP, HANDICAP, HIT_MIN, MAIN_LINES, floorOutOfReach, isMain, isMainLine, underOk } from './consistency.js';
 import { buildContext } from './context.js';
 import { livePlanOf } from './live.js';
 
@@ -67,9 +67,10 @@ async function teamPool(api, fixtures, S, onProgress) {
 }
 const r2 = x => Math.round(x * 100) / 100;
 
-// jogável: odd mínima na faixa operada (1,50–3,00), linha que o mercado oferece (não "favorito +x") e under
-// pela regra do over primeiro (nos totais de escanteios das linhas principais, over e under valem igual)
-const playable = l => l.odd_min >= 1.5 && politicaE(l.odd_min).factor > 0 && !l.inviable && underOk(l);
+// jogável: acerto ≥ 60% (piso do Jeferson: abaixo disso a linha nem aparece), odd mínima na faixa operada
+// (1,50–3,00) e que uma casa soft alcance quando é o próprio piso, linha que o mercado oferece (não "favorito +x")
+// e under pela regra do over primeiro (nos totais de escanteios das linhas principais, over e under valem igual)
+const playable = l => l.p_blend >= HIT_MIN && l.odd_min >= 1.5 && !floorOutOfReach(l) && politicaE(l.odd_min).factor > 0 && !l.inviable && underOk(l);
 // Melhor linha de um jogo: maior chance de ganho — aposta (candidata âncora/sólida, preço que a casa paga, sem
 // contexto contra) primeiro; senão a mais consistente jogável. market: um mercado ou null (todos os da varredura).
 export function bestLine(lines, { market = null } = {}) {
@@ -294,11 +295,12 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   const keep = keepOf();
   const pos = new Map(rankGames([...keep]).map((x, i) => [x.g, i]));
   const ranked = [...keep].sort((a, b) => (pos.get(a) ?? 1e9) - (pos.get(b) ?? 1e9));
-  // v 4: janela de horas, contexto e plano ao vivo do 1º tempo (a tela avisa quando a varredura guardada é de antes)
+  // v 5: piso de 60% de acerto e odd mínima com piso de 1,50 (v 4: janela de horas, contexto e plano ao vivo do
+  // 1º tempo); a tela avisa quando a varredura guardada é de antes
   // resumo dos escanteios: por que um jogo tem ou não tem linha de escanteios na lista
   const cornersReport = games.reduce((o, g) => { const k = g.corners?.status || 'sem linha'; o[k] = (o[k] || 0) + 1; return o; }, {});
   for (const g of games) if (g.corners?.source && g.corners.status !== 'sem linha') cornersReport[`preço ${g.corners.source}`] = (cornersReport[`preço ${g.corners.source}`] || 0) + 1;
-  return { v: 4, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
+  return { v: 5, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
     generated_at: new Date(now).toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }

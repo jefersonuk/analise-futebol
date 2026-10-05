@@ -298,7 +298,9 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
     if (odd && pp != null) {
       const pb = x12[l.id] ?? blend(pp, pm, W_MODEL[l.market] ?? 0.1), e = ev(l, odd), diff = (pm - pp) * 100;
       const fragile = alerts.length > 0 || Math.abs(diff) >= (soft ? 10 : 5);
-      const oddMin = (1 / pb) * (fragile ? 1.05 : 1.03), c = cons(pb);
+      // odd mínima: justa + margem de segurança, nunca abaixo do núcleo (1,50). Só aqui, onde a odd da Pinnacle
+      // diz se a casa soft paga isso (até 5% acima dela); sem ela, linha de 70%+ com justa abaixo de 1,43 fica de fora.
+      const oddMin = Math.max(ODD_FLOOR, (1 / pb) * (fragile ? 1.05 : 1.03)), c = cons(pb);
       const v = valueOf({ p: pb, q: pp, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
       priced.push({ ...base, priced_by: 'pinnacle', pinnacle_odd: odd, p_pinnacle: r(pp), diff_pp: r(diff, 1), p_blend: r(pb),
         value_pct: r(v.value * 100, 1), value_level: v.level,
@@ -332,8 +334,8 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
   return { priced, anchored, modelOnly };
 }
 
-// Candidata (consistência primeiro, preço depois): âncora/sólida, odd mínima ≥ 1,50 e permitida pela
-// Política E, que uma casa soft consegue pagar (até ~5% acima da Pinnacle), e under só se for âncora.
+// Candidata (consistência primeiro, preço depois): âncora/sólida (acerto ≥ 60%), odd mínima ≥ 1,50 e permitida
+// pela Política E, que uma casa soft consegue pagar (até ~5% acima da Pinnacle), e under só se for âncora.
 export const isCandidate = l => l.tier !== 'especulativa' && l.odd_min >= ODD_FLOOR && l.politica_e !== 'não entrar'
   && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5) && underOk(l) && !l.inviable;
 // Aposta: candidata cujo contexto do jogo não contradiz a linha (context.js). Com contexto contra, a
@@ -515,13 +517,13 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     method: { blend_weight_model: W_MODEL, blend: 'log-linear p ∝ p_pinnacle^(1−w)·p_modelo^w, normalizado nas pernas complementares',
       probabilities: 'condicionais ao não-push (como a Pinnacle precifica)',
       fragile: 'algum alerta de qualidade, ou |diff_pp| ≥ 5 (1X2/AH/gols/BTTS) ou ≥ 10 (escanteios/chutes)',
-      odd_min: 'fair_odd_blend × 1,03 (× 1,05 se frágil); linhas só do modelo: fair_odd_model × 1,08',
+      odd_min: 'fair_odd_blend × 1,03 (× 1,05 se frágil); nas linhas com odd da Pinnacle, nunca abaixo de 1,50 (piso do núcleo: em linha de 70%+ a mínima é o próprio 1,50, e ela só é candidata se isso ficar até 5% acima da Pinnacle); linhas só do modelo: fair_odd_model × 1,08',
       entry: `¼ Kelly sobre banca de R$ ${banca} com p_blend na odd mínima, teto 300·min(1, p/0,70), × fator da Política E dessa odd`,
       odds_cache: 'odds da Pinnacle com até 10 minutos de cache',
       over_first: 'preferência por over em gols e escanteios: under só é candidata se for âncora e, na ordem, conta um nível abaixo e com 0,05 a menos no score',
-      consistency: 'score = 0,5·p + 0,25·p_pior_cenário + 0,25·acerto_10_jogos_encolhido (10 jogos de peso para p); '
-        + 'âncora: p ≥ 0,60, pior cenário ≥ 0,50 e cada time ≥ 6/10; sólida: p ≥ 0,52, pior cenário ≥ 0,42 e acerto somado ≥ 50%; resto especulativa',
-      candidates: 'âncora/sólida, odd mínima ≥ 1,50 e permitida pela Política E, até 5% acima da Pinnacle, sem contexto contra; ordem: nível, não frágil, score, preço',
+      consistency: 'piso de acerto 60%, ideal 70%; score = 0,5·p + 0,25·p_pior_cenário + 0,25·acerto_10_jogos_encolhido (10 jogos de peso para p); '
+        + 'âncora (ideal): p ≥ 0,70, pior cenário ≥ 0,60, acerto encolhido ≥ 0,70 e cada time ≥ 6/10; sólida (piso): p ≥ 0,60, pior cenário ≥ 0,50 e acerto encolhido ≥ 0,60; resto especulativa (nunca aposta)',
+      candidates: 'âncora/sólida (acerto ≥ 60%), odd mínima permitida pela Política E e até 5% acima da Pinnacle, sem contexto contra; ordem: nível, não frágil, score, preço',
       main_lines: 'linhas principais do pré-jogo: escanteios 1T 4, 4,5 e 5 e do jogo 8, 8,5 e 9 (over ou under), gols 1T 1,5 e do jogo 1,5 e 2,5 (só over) e os handicaps do jogo (escanteios e gols) nas linhas da Pinnacle; as mais baixas só pagam no ao vivo (live_1h)',
       context: 'checagens de cada linha de foco: mando (acerto nos últimos 10 do mandante em casa + do visitante fora; a favor se ≥ p − 5 pp, contra se ≤ min(50%, p − 20 pp); 8+ jogos), médias (total ou saldo pelas médias dos dois times no mando de hoje — temporada pela tabela ou últimos 10 — contra a linha: gols ±0,3, gols 1T ±0,2, escanteios ±0,8, escanteios 1T ±0,4), confronto direto (acerto nos confrontos dos últimos 5 anos, 3+ jogos, mesmos cortes do mando) e, nos handicaps, tabela (4+ posições); veredito contra = 2+ contra e mais contra que a favor (tira a linha das candidatas)',
       live_1h: 'escanteios do 1º tempo ao vivo: binomial negativa do total 1T (μ ancorado na Pinnacle, φ da liga) como mistura gama–Poisson; c escanteios até o minuto m atualizam o ritmo do jogo (forma r + c, taxa r/μ + m/47) e o resto do tempo segue binomial negativa; 47 min com ritmo uniforme (conservador para o over); odd mínima = justa × 1,05 (× 1,08 sem o total 1T da Pinnacle); vale com 0 a 0 e 11 contra 11',

@@ -27,7 +27,7 @@ function demoApi({ noHalf = true } = {}) {
 test('varredura: maior chance de ganho nas linhas principais, só com preço da Pinnacle', async () => {
   const api = demoApi();
   const scan = await scanDay(api, { date: '2026-10-01', top: 5, budget: 5000 });
-  assert.equal(scan.v, 4);
+  assert.equal(scan.v, 5);
   assert.equal(scan.with_odds, 10);
   assert.equal(scan.with_1h, 10);
   // guardados: os 5 melhores de cada filtro da tela (inclui o ao vivo do 1º tempo)
@@ -57,6 +57,8 @@ test('varredura: maior chance de ganho nas linhas principais, só com preço da 
   const tiers = ranked.filter(x => isBet(x.line)).map(x => rankTier(x.line));
   assert.deepEqual(tiers, [...tiers].sort((a, b) => a - b));
   assert.ok(ranked.every(x => x.line.odd_min >= 1.5 && x.line.odd_min <= 3));
+  assert.ok(ranked.every(x => x.line.p_blend >= 0.6), 'piso de 60% de acerto na linha do jogo');
+  assert.ok(!ranked.some(x => x.line.odd_min <= 1.5 && x.line.odd_min_vs_pinnacle_pct > 5), 'piso de 1,50 fora do alcance não entra');
   assert.ok(api.halfAsked.length > 0 && api.halfAsked.every(s => /^tm\d+$/.test(s)));
 });
 
@@ -120,7 +122,7 @@ test('seleções e copas: sem histórico na liga, a base vira os jogos dos times
 
 test('linha do jogo: candidata primeiro, depois a mais consistente; under de escanteios das linhas principais vale igual', () => {
   const L = (id, market, tier, score, extra = {}) => ({ id, market, tier, consistency_score: score, odd_min: 1.7, politica_e: 'cheia',
-    fragile: false, odd_min_vs_pinnacle_pct: 2, ...extra });
+    fragile: false, odd_min_vs_pinnacle_pct: 2, p_blend: 0.65, ...extra });
   const o25 = L('gO2.5', 'Total de gols', 'sólida', 0.58), u85 = L('cornersU8.5', 'Total de escanteios', 'sólida', 0.62);
   assert.equal(bestLine([o25, u85]).id, 'cornersU8.5', 'under de escanteios sólida, sem desconto, com mais chance');
   assert.equal(bestLine([o25, { ...u85, odd_min_vs_pinnacle_pct: 7 }]).id, 'gO2.5', 'preço difícil perde a vez para a candidata');
@@ -129,6 +131,7 @@ test('linha do jogo: candidata primeiro, depois a mais consistente; under de esc
   assert.equal(bestLine([hcp, o25], { market: 'Total de gols' }).id, 'gO2.5');
   assert.equal(bestLine([L('gO2.5', 'Total de gols', 'âncora', 0.7, { odd_min: 1.4 })]), null, 'odd mínima abaixo de 1,50 fica de fora');
   assert.equal(bestLine([L('gO2.5', 'Total de gols', 'âncora', 0.7, { odd_min: 3.4, politica_e: 'não entrar' })]), null, 'acima de 3,00 também');
+  assert.equal(bestLine([L('gO2.5', 'Total de gols', 'especulativa', 0.5, { p_blend: 0.58 })]), null, 'abaixo de 60% de acerto nem aparece');
 });
 
 test('próximas 4 horas: jogos da janela (virando o dia em Brasília), em ordem de horário, com contexto e plano ao vivo', async () => {
