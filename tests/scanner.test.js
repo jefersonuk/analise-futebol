@@ -30,13 +30,19 @@ test('varredura: maior chance de ganho nas linhas principais, só com preço da 
   assert.equal(scan.v, 4);
   assert.equal(scan.with_odds, 10);
   assert.equal(scan.with_1h, 10);
-  // guardados: os 5 melhores de cada filtro da tela
-  const filters = [null, ...SCAN_MARKETS];
+  // guardados: os 5 melhores de cada filtro da tela (inclui o ao vivo do 1º tempo)
+  const filters = [null, ...SCAN_MARKETS, LIVE_1H];
   assert.ok(scan.games.length > 0 && scan.games.every(g => filters.some(market => rankGames(scan.games, { market }).slice(0, 5).some(x => x.g === g))));
   const lines = scan.games.flatMap(g => g.lines);
   // só as linhas principais com preço da Pinnacle: escanteios 1T 4/4,5/5 e jogo 8/8,5/9 (over e under), gols 1T 1,5 e
   // jogo 1,5/2,5 (só over) e os handicaps do jogo (escanteios e gols)
-  assert.ok(lines.every(l => isMainLine(l) && l.priced_by === 'pinnacle'));
+  assert.ok(lines.every(l => isMainLine(l)));
+  // linha principal que a Pinnacle não cota, num total que ela cota: chance tirada do total dela, frágil (× 1,05)
+  const derived = lines.filter(l => l.derived);
+  assert.ok(derived.length > 0 && derived.every(l => l.fragile && l.pinnacle_odd == null && l.p_pinnacle > 0
+    && Math.abs(l.odd_min - l.fair_odd_blend * 1.05) < 0.02 && /^derivada do total da Pinnacle/.test(l.priced_by)));
+  assert.ok(lines.some(l => /^corners[OU](9\.5|10|10\.5|11)$/.test(l.id)), 'escanteios acima de 9 para os jogos de muitos escanteios');
+  assert.ok(Object.keys(scan.corners_report).length > 0);
   assert.ok(!lines.some(l => /^(c1[OU]3\.5|corners[OU]7|gU|g1U)/.test(l.id) || l.market === 'Handicap escanteios 1T'));
   for (const id of ['c1O5', 'c1U4.5', 'cornersO9', 'cornersU8.5', 'g1O1.5', 'gO2.5']) assert.ok(lines.some(l => l.id === id), id);
   for (const m of MAIN_MARKETS.concat(HANDICAP, GOAL_HANDICAP)) assert.ok(lines.some(l => l.market === m), m);
@@ -53,7 +59,7 @@ test('varredura: maior chance de ganho nas linhas principais, só com preço da 
   assert.ok(api.halfAsked.length > 0 && api.halfAsked.every(s => /^tm\d+$/.test(s)));
 });
 
-test('sem escanteios do 1º tempo na Pinnacle: seguem escanteios do jogo e gols', async () => {
+test('sem escanteios do 1º tempo na Pinnacle: o 1º tempo sai do modelo, e seguem escanteios do jogo e gols', async () => {
   const base = demoApi();
   const no77 = () => demo.dayOdds().map(o => ({ ...o, bookmakers: o.bookmakers.map(b => ({ ...b, bets: b.bets.filter(x => x.id !== 77) })) }));
   const scan = await scanDay({ ...base, dayOdds: no77 }, { date: '2026-10-01', top: 5, budget: 5000 });
@@ -62,10 +68,14 @@ test('sem escanteios do 1º tempo na Pinnacle: seguem escanteios do jogo e gols'
   assert.ok(scan.games.length > 0);
   for (const g of scan.games) {
     assert.equal(g.pinnacle_1h, null);
-    assert.ok(g.lines.every(l => l.market !== 'Total escanteios 1T'), 'sem o total 1T da Pinnacle não há linha do 1º tempo');
+    // sem a Pinnacle no 1º tempo: as linhas do 1º tempo saem só do modelo (× 1,08) e só viram aposta se forem âncora
+    const c1 = g.lines.filter(l => l.market === 'Total escanteios 1T');
+    assert.ok(c1.every(l => l.model_only && l.fragile && Math.abs(l.odd_min - l.fair_odd_blend * 1.08) < 0.02));
+    assert.ok(c1.filter(isBet).every(l => l.tier === 'âncora'));
   }
+  assert.ok(scan.games.some(g => g.lines.some(l => l.market === 'Total escanteios 1T')), 'escanteios do 1º tempo pelo modelo');
   assert.ok(scan.games.some(g => g.lines.some(l => l.market === 'Total de gols 1T')), 'gols do 1º tempo continuam');
-  assert.equal(base.halfAsked.length, 0, 'sem 1º tempo, nada de histórico do 1º tempo');
+  assert.ok(base.halfAsked.every(x => /^tm\d+$/.test(x)), 'histórico do 1º tempo só dos times (as linhas do 1T do modelo usam)');
 });
 
 test('liga sem estatística de escanteios na API: o jogo entra só com os mercados de gols (totais e handicap)', async () => {
@@ -128,9 +138,9 @@ test('próximas 4 horas: jogos da janela (virando o dia em Brasília), em ordem 
   const api = { ...base, dayFixtures: d => { asked.push(d); return round; },
     headToHead: (a, b) => { h2h.push([a, b]); return demo.headToHead(a, b); } };
   const now = first - 60 * 60e3;   // 1 h antes do primeiro: a janela de 4 h cobre a rodada
-  const scan = await scanDay(api, { hours: 4, now, top: 20, budget: 5000 });
+  const scan = await scanDay(api, { hours: 4, now, top: 5, budget: 5000 });
   assert.equal(scan.mode, 'janela');
-  assert.equal(scan.hours, 4);
+  assert.equal(scan.hours, 4, 'jogos suficientes nas 4 horas: a janela não cresce');
   assert.deepEqual(scan.window, { from: now + 10 * 60e3, to: now + 4 * 3600e3 });
   assert.deepEqual(asked, [...new Set([brDate(now), brDate(now + 4 * 3600e3)])], 'as datas de Brasília que a janela cobre');
   assert.equal(scan.fixtures, round.length);
@@ -151,9 +161,30 @@ test('próximas 4 horas: jogos da janela (virando o dia em Brasília), em ordem 
   assert.deepEqual(live, [...live].sort((a, b) => b - a));
 });
 
-test('janela sem jogos: os jogos depois do fim da janela ficam de fora', async () => {
-  const round = demo.dayFixtures();
-  const scan = await scanDay(demoApi(), { hours: 4, now: Math.min(...round.map(f => f.t)) - 5 * 3600e3, budget: 5000 });
-  assert.equal(scan.fixtures, 0);
-  assert.equal(scan.games.length, 0);
+test('poucas opções nas 4 horas: a janela cresce de 4 em 4 horas até 12', async () => {
+  const round = demo.dayFixtures(), first = Math.min(...round.map(f => f.t));
+  // rodada daqui a 5 h: as 4 horas estão vazias, 8 horas pegam a rodada inteira
+  const later = await scanDay(demoApi(), { hours: 4, now: first - 5 * 3600e3, top: 5, budget: 5000 });
+  assert.equal(later.asked_hours, 4);
+  assert.equal(later.hours, 8);
+  assert.equal(later.window.to, first - 5 * 3600e3 + 8 * 3600e3);
+  assert.equal(later.fixtures, round.length);
+  // pedindo 20 jogos, os 10 da rodada são poucos: vai até 12 horas
+  assert.equal((await scanDay(demoApi(), { hours: 4, now: first - 3600e3, top: 20, budget: 5000 })).hours, 12);
+  // nada em 12 horas: fica vazio
+  const none = await scanDay(demoApi(), { hours: 4, now: first - 13 * 3600e3, budget: 5000 });
+  assert.equal(none.hours, 12);
+  assert.equal(none.fixtures, 0);
+  assert.equal(none.games.length, 0);
+});
+
+test('Pinnacle sem escanteios no jogo: as linhas de escanteios saem do modelo (aposta só se for âncora)', async () => {
+  const noCorners = () => demo.dayOdds().map(o => ({ ...o, bookmakers: o.bookmakers.map(b => ({ ...b, bets: b.bets.filter(x => ![45, 56, 57, 58, 77].includes(x.id)) })) }));
+  const scan = await scanDay({ ...demoApi(), dayOdds: noCorners }, { date: '2026-10-01', top: 10, budget: 5000 });
+  const corners = scan.games.flatMap(g => g.lines).filter(l => /escanteios/i.test(l.market));
+  assert.ok(corners.length > 0, 'escanteios continuam como opção');
+  assert.ok(corners.every(l => l.model_only && l.fragile && Math.abs(l.odd_min - l.fair_odd_blend * 1.08) < 0.02));
+  assert.ok(corners.filter(isBet).every(l => l.tier === 'âncora'));
+  assert.ok(scan.corners_report['preço modelo'] > 0);
+  assert.ok(rankGames(scan.games, { market: 'Total de escanteios' }).length > 0);
 });

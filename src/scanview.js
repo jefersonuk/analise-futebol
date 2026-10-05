@@ -31,7 +31,21 @@ const ctxContra = l => isCandidate(l) && l.context?.verdict === 'contra';
 const SHORT = { 'Total escanteios 1T': 'Escanteios 1T', 'Total de escanteios': 'Escanteios', 'Total de gols 1T': 'Gols 1T',
   'Total de gols': 'Gols', [HANDICAP]: 'Handicap esc.', [GOAL_HANDICAP]: 'Handicap gols' };
 const signed = x => `${x > 0 ? '+' : ''}${nb(x)}`;
-const tierTag = l => `<span class="tag ${l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no'}">${l.tier}</span>`;
+const tierTag = l => `<span class="tag ${l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no'}">${l.tier}</span>${srcTag(l)}`;
+// de onde vem o preço quando não é a odd da Pinnacle na própria linha
+const srcTag = l => (l.derived ? ` <span class="tag" title="${esc(l.priced_by)}: a Pinnacle não cota esta linha; a chance sai do total que ela precifica (margem de 5%)">derivada</span>`
+  : l.model_only ? ' <span class="tag mid" title="a Pinnacle não cota este mercado neste jogo: preço só do modelo, margem de 8%, aposta só se for âncora">só modelo</span>' : '');
+// Resumo dos escanteios da varredura: quantos jogos têm aposta, linha jogável, linhas fora da faixa ou nada.
+function cornersLine(r) {
+  if (!r) return '';
+  const n = k => r[k] || 0, parts = [
+    `<b>${n('aposta')} com aposta</b>`, n('jogável') && `${n('jogável')} com linha jogável sem aposta`,
+    n('fora da faixa') && `${n('fora da faixa')} com as linhas fora da faixa 1,50–3,00`, n('sem linha') && `${n('sem linha')} sem linha de escanteios`,
+    n('sem estatística') && `${n('sem estatística')} sem estatística de escanteios na liga (só gols)`].filter(Boolean);
+  const src = [n('preço pinnacle') && `${n('preço pinnacle')} com a Pinnacle`, n('preço derivada') && `${n('preço derivada')} pelo total da Pinnacle`,
+    n('preço modelo') && `${n('preço modelo')} só pelo modelo`].filter(Boolean);
+  return `<p class="muted">Escanteios nos jogos analisados: ${parts.join(' · ')}${src.length ? ` · preço: ${src.join(', ')}` : ''}.</p>`;
+}
 // contexto do jogo na linha: a favor / misto / neutro / contra, com as checagens no quadro do mouse
 const CTX_CLS = { 'a favor': 'ok', misto: 'mid', contra: 'no' };
 const ctxTag = l => (l.context ? `<span class="tag ${CTX_CLS[l.context.verdict] || ''}" title="${esc(contextLine(l.context))}">${l.context.verdict}</span>` : '—');
@@ -52,7 +66,7 @@ const started = g => Date.now() > g.fx.t;
 
 export function initScan({ api, openEntry, analyzeFixture, banca }) {
   let scan = null, market = null, order = 'time', ranked = [];
-  $('#scanDate').innerHTML = [['Próximas 4 horas', WINDOW], ['Hoje (dia todo)', dayStr(0)], ['Amanhã', dayStr(1)]]
+  $('#scanDate').innerHTML = [['Próximas 4 horas (amplia até 12 h se faltar jogo)', WINDOW], ['Hoje (dia todo)', dayStr(0)], ['Amanhã', dayStr(1)]]
     .map(([t, v]) => `<option value="${v}">${t}${v === WINDOW ? '' : ` (${v.split('-').reverse().slice(0, 2).join('/')})`}</option>`).join('');
   $('#scanBudget').value = localStorage.getItem(BUDGET_KEY) || 1500;
   const msg = (text, err = false) => { const el = $('#scanMsg'); el.hidden = !text; el.textContent = text || ''; el.classList.toggle('err', err); };
@@ -90,7 +104,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     // varredura guardada pela versão anterior (só jogos com o 1º tempo na Pinnacle) não tem with_1h
     const pool = scan.with_1h == null ? `${scan.with_odds} com escanteios do 1º tempo na Pinnacle`
       : `${scan.with_odds} com odds da Pinnacle (${scan.with_1h} com escanteios do 1º tempo)`;
-    const span = scan.window ? `próximas ${scan.hours} horas (${hour(scan.window.from)} a ${hour(scan.window.to)})` : 'o dia inteiro';
+    const span = !scan.window ? 'o dia inteiro' : `próximas ${scan.hours} horas (${hour(scan.window.from)} a ${hour(scan.window.to)})`
+      + (scan.asked_hours && scan.hours > scan.asked_hours ? ` — janela ampliada: poucos jogos com odds nas ${scan.asked_hours} primeiras horas` : '');
     const rows = ranked.map(({ g, line }, i) => {
       const go = `data-go="${i}"`, kick = `${hour(g.fx.t)}${started(g) ? ' <span class="tag mid">começou</span>' : ''}`;
       const game = `<td>${i + 1}</td><td>${kick}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td><td class="muted">${esc(g.fx.league.name)}</td>`;
@@ -122,7 +137,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         e, ao lado, a da Pinnacle; o histórico dos dois times entra no nível. Contexto = mando, médias, confronto direto e tabela confirmando a linha
         (passe o mouse para ver). Apagados: sem aposta (especulativa, odd mínima mais de 5% acima da Pinnacle ou contexto contra).</p>`;
     out.innerHTML = `<p class="muted">Varredura de ${when}: ${span} · ${scan.fixtures} jogos por começar, ${pool},
-      ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>${old}
+      ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>${cornersLine(scan.corners_report)}${old}
       <div class="chips" id="scanChips">${chips}</div>
       <div class="chips" id="scanOrder"><span class="muted">Ordem:</span>${orders}</div>
       ${ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`

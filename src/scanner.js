@@ -26,7 +26,7 @@ import { collect } from './odds.js';
 import { recentGames } from './insights.js';
 import { FRIENDLIES, byConsistency, contraAlert, favorSummary, isBet, priceLines, rolesNow, seasonsFor } from './dossier.js';
 import { favorFor } from './favoritism.js';
-import { GOAL_HANDICAP, HANDICAP, MAIN_LINES, isMainLine, underOk } from './consistency.js';
+import { GOAL_HANDICAP, HANDICAP, MAIN_LINES, isMain, isMainLine, underOk } from './consistency.js';
 import { buildContext } from './context.js';
 import { livePlanOf } from './live.js';
 
@@ -37,9 +37,14 @@ export const LIVE_1H = 'live1h';   // filtro da tela: jogos para a entrada ao vi
 const GOALS_ONLY = ['Total de gols 1T', 'Total de gols', GOAL_HANDICAP];
 const TZ = 'America/Sao_Paulo';
 export const brDate = t => new Date(t).toLocaleDateString('sv-SE', { timeZone: TZ });   // AAAA-MM-DD em Brasília
-// MIN_GAMES: jogos-equivalentes (com o decaimento) de cada time na base — de gols para analisar o jogo,
-// de escanteios para os mercados de escanteios (jogo e 1º tempo).
-const LEAGUE_COST = 70, TEAM_COST = 10, MIN_GAMES = 8;
+// MIN_GAMES: jogos-equivalentes (com o decaimento) de cada time na base para analisar o jogo (gols);
+// MIN_CORNERS: com estatística de escanteios, para os mercados de escanteios (jogo e 1º tempo) — menor, porque
+// as forças encolhem para a média da liga e o total vem ancorado na Pinnacle quando ela cota (time promovido
+// com 6–7 jogos na liga já tem escanteios).
+const LEAGUE_COST = 70, TEAM_COST = 10, MIN_GAMES = 8, MIN_CORNERS = 6;
+// Janela de horas: com menos de 1,5 × N jogos com odds nas horas pedidas, a janela cresce de 4 em 4 horas até
+// MAX_HOURS, para a lista ter opções (de manhã e em dia de semana, 4 horas têm poucos jogos).
+const MAX_HOURS = 12, STEP_HOURS = 4;
 const DAY = 864e5;
 // Liga sem histórico suficiente dos times (seleções, copas, base, feminino, 2ª fase): a base passa a ser
 // os jogos dos times em todas as competições (3 temporadas, até 4 anos), juntando todos os times do mesmo
@@ -80,12 +85,12 @@ export function bestLine(lines, { market = null } = {}) {
 function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extra = {}) {
   const { odds, fair } = collect(oddsP.bookmakers);
   const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t, { fair, share1hBelow: 0.5, favor });
-  const thin = k => [fx.home, fx.away].filter(t => (res.fits[k]?.games.get(t.id) || 0) < MIN_GAMES).map(t => t.name).join(' e ');
+  const thin = (k, min = MIN_GAMES) => [fx.home, fx.away].filter(t => (res.fits[k]?.games.get(t.id) || 0) < min).map(t => t.name).join(' e ');
   if (!res.lines.length || thin('goals')) return { skip: `${thin('goals') || 'os times'} com menos de ${MIN_GAMES} jogos na base`, thin: true };
-  const cornersThin = thin('corners');
+  const cornersThin = thin('corners', MIN_CORNERS);
   const noCorners = !cornersThin ? null : res.prep.coverage === 0
     ? 'só gols: a API não tem estatística de escanteios dos jogos desta base'
-    : `só gols: ${cornersThin} com menos de ${MIN_GAMES} jogos com estatística de escanteios na base`;
+    : `só gols: ${cornersThin} com menos de ${MIN_CORNERS} jogos com estatística de escanteios na base`;
   const markets = noCorners ? GOALS_ONLY : SCAN_MARKETS;
   const now = rolesNow(res.favor);
   const teams = [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(res.prep, t.id), roleNow: now[role] }));
@@ -95,9 +100,10 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
   const names = { home: fx.home.name, away: fx.away.name }, contra = !noCorners && contraAlert(res.favor, names);
   if (contra) alerts.push(contra);
   const context = buildContext({ rows: res.prep.rows, fx, table: extra.table || [], extra: extra.h2h || [], res, fair });
-  // só as linhas principais com preço da Pinnacle (totais da lista e os handicaps que ela cota)
-  const { priced } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market), context });
-  const lines = priced.filter(isMainLine);
+  // as linhas principais: com preço da Pinnacle (direto ou derivado do total que ela cota) e, nos escanteios
+  // que ela não cota neste jogo, só do modelo (margem de 8%; só vira aposta se for âncora)
+  const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market), context });
+  const lines = priced.filter(isMainLine).concat(anchored.filter(l => isMain(l.id)));
   const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
   const a = res.anchors, h1 = !noCorners;
   return {
@@ -110,7 +116,20 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
     expected_1h: h1 && res.pred.corners1h ? { home: r2(res.pred.corners1h.h), away: r2(res.pred.corners1h.a) } : null,
     context: context.ctx, h2h_api: !!extra.h2h,
     live1h: h1 ? livePlanOf(res) : null,
+    corners: cornersStatus(lines, noCorners),
   };
+}
+
+// Escanteios no jogo, para o resumo da varredura: de onde vem o preço das linhas e se alguma é jogável/aposta.
+const CORNER_MARKETS = ['Total escanteios 1T', 'Total de escanteios', HANDICAP];
+function cornersStatus(lines, noCorners) {
+  if (noCorners) return { status: 'sem estatística' };
+  const ls = lines.filter(l => CORNER_MARKETS.includes(l.market));
+  const src = l => (l.priced_by === 'pinnacle' ? 'pinnacle' : l.derived ? 'derivada' : 'modelo');
+  const by = ls.reduce((o, l) => ({ ...o, [src(l)]: (o[src(l)] || 0) + 1 }), {});
+  const playableLs = ls.filter(playable);
+  return { status: !ls.length ? 'sem linha' : !playableLs.length ? 'fora da faixa' : playableLs.some(isBet) ? 'aposta' : 'jogável',
+    source: by.pinnacle ? 'pinnacle' : by.derivada ? 'derivada' : by.modelo ? 'modelo' : null };
 }
 
 // Ordem dos jogos pela chance de ganho: a melhor linha de cada um (no filtro pedido), apostas primeiro, depois
@@ -134,16 +153,33 @@ export function pickGames(games, { market = null, top = 20, order = 'time' } = {
 export async function scanDay(api, { date = null, hours = null, now = Date.now(), top = 20, budget = 1500, banca = 44000, onProgress = () => {} }) {
   const used = (() => { const s0 = api.stats().api; return () => api.stats().api - s0; })();
   const skipped = [];
-  const from = now + 10 * 60e3, to = hours ? now + hours * 3600e3 : Infinity;
-  // a janela pode virar o dia (em Brasília): busca as duas datas
-  const dates = hours ? [...new Set([brDate(now), brDate(to)])] : [date];
-  onProgress(hours ? `Buscando os jogos das próximas ${hours} horas…` : 'Buscando os jogos do dia…');
-  const seen = new Set(), fixtures = [];
-  for (const d of dates) for (const f of await api.dayFixtures(d)) if (f.t > from && f.t <= to && !seen.has(f.id)) { seen.add(f.id); fixtures.push(f); }
-  onProgress(`${fixtures.length} jogos ainda por começar. Buscando as odds da Pinnacle…`);
-  // todos os mercados que o app lê, de todos os jogos da data (1 requisição por 10 jogos)
-  const odds = new Map();
-  for (const d of dates) for (const o of await api.dayOdds(d)) if (o.bookmakers.some(b => b.bets?.length)) odds.set(o.fixture, o);
+  const from = now + 10 * 60e3;
+  // Jogos e odds da Pinnacle (todos os mercados que o app lê, 1 requisição por 10 jogos) de cada data em
+  // Brasília que a janela cobre: ela pode virar o dia.
+  const byDate = new Map(), odds = new Map();
+  const loadDate = async d => {
+    if (byDate.has(d)) return;
+    onProgress(`Buscando os jogos e as odds da Pinnacle de ${d.split('-').reverse().slice(0, 2).join('/')}…`);
+    byDate.set(d, await api.dayFixtures(d));
+    for (const o of await api.dayOdds(d)) if (o.bookmakers.some(b => b.bets?.length)) odds.set(o.fixture, o);
+  };
+  const inWindow = to => {
+    const seen = new Set();
+    return [...byDate.values()].flat().filter(f => f.t > from && f.t <= to && !seen.has(f.id) && seen.add(f.id));
+  };
+  let span = hours, to = Infinity, fixtures;
+  if (hours) {
+    // poucas opções nas horas pedidas: a janela cresce até MAX_HOURS
+    for (;;) {
+      to = now + span * 3600e3;
+      for (const d of new Set([brDate(now), brDate(to)])) await loadDate(d);
+      fixtures = inWindow(to);
+      if (fixtures.filter(f => odds.has(f.id)).length >= Math.ceil(top * 1.5) || span >= Math.max(hours, MAX_HOURS)) break;
+      span = Math.min(span + STEP_HOURS, Math.max(hours, MAX_HOURS));
+    }
+  } else { await loadDate(date); fixtures = inWindow(to); }
+  const dates = [...byDate.keys()];
+  onProgress(`${fixtures.length} jogos ainda por começar${span > hours ? ` (janela ampliada para ${span} horas)` : ''}. Montando as ligas…`);
   const pool = fixtures.filter(f => odds.has(f.id));
   const has1h = f => odds.get(f.id).bookmakers.some(b => b.bets.some(x => x.id === 77));
   const oddsOf = fx => odds.get(fx.id);
@@ -259,7 +295,10 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   const pos = new Map(rankGames([...keep]).map((x, i) => [x.g, i]));
   const ranked = [...keep].sort((a, b) => (pos.get(a) ?? 1e9) - (pos.get(b) ?? 1e9));
   // v 4: janela de horas, contexto e plano ao vivo do 1º tempo (a tela avisa quando a varredura guardada é de antes)
-  return { v: 4, mode: hours ? 'janela' : 'dia', date: dates[0], hours, window: hours ? { from, to } : null,
+  // resumo dos escanteios: por que um jogo tem ou não tem linha de escanteios na lista
+  const cornersReport = games.reduce((o, g) => { const k = g.corners?.status || 'sem linha'; o[k] = (o[k] || 0) + 1; return o; }, {});
+  for (const g of games) if (g.corners?.source && g.corners.status !== 'sem linha') cornersReport[`preço ${g.corners.source}`] = (cornersReport[`preço ${g.corners.source}`] || 0) + 1;
+  return { v: 4, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
     generated_at: new Date(now).toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }
