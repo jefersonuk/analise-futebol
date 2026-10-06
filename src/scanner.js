@@ -29,6 +29,7 @@ import { favorFor } from './favoritism.js';
 import { GOAL_HANDICAP, HANDICAP, HIT_MIN, MAIN_LINES, floorOutOfReach, isMain, isMainLine, underOk } from './consistency.js';
 import { buildContext } from './context.js';
 import { livePlanOf } from './live.js';
+import { hardGame } from './hard.js';
 
 export { GOAL_HANDICAP, HANDICAP };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
@@ -100,10 +101,13 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
   if (teamBase) alerts.push('base: jogos dos dois times em todas as competições (amostra menor que a de uma liga)');
   const names = { home: fx.home.name, away: fx.away.name }, contra = !noCorners && contraAlert(res.favor, names);
   if (contra) alerts.push(contra);
+  // jogo difícil de analisar (base/reservas, ou ligas diferentes sem jogos entre elas): só over de gols da Pinnacle
+  const hard = hardGame({ fx, rows: res.prep.rows });
+  if (hard) alerts.push(`jogo difícil de analisar: ${hard.reasons.join('; ')}`);
   const context = buildContext({ rows: res.prep.rows, fx, table: extra.table || [], extra: extra.h2h || [], res, fair });
   // as linhas principais: com preço da Pinnacle (direto ou derivado do total que ela cota) e, nos escanteios
   // que ela não cota neste jogo, só do modelo (margem de 8%; só vira aposta se for âncora)
-  const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market), context });
+  const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market), context, hard });
   const lines = priced.filter(isMainLine).concat(anchored.filter(l => isMain(l.id)));
   const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
   const a = res.anchors, h1 = !noCorners;
@@ -116,7 +120,7 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
     share_1h: h1 && a.corners1hShare ? r2(a.corners1hShare.share) : null,
     expected_1h: h1 && res.pred.corners1h ? { home: r2(res.pred.corners1h.h), away: r2(res.pred.corners1h.a) } : null,
     context: context.ctx, h2h_api: !!extra.h2h,
-    live1h: h1 ? livePlanOf(res) : null,
+    hard, live1h: h1 && !hard ? livePlanOf(res) : null,
     corners: cornersStatus(lines, noCorners),
   };
 }
@@ -295,12 +299,13 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   const keep = keepOf();
   const pos = new Map(rankGames([...keep]).map((x, i) => [x.g, i]));
   const ranked = [...keep].sort((a, b) => (pos.get(a) ?? 1e9) - (pos.get(b) ?? 1e9));
-  // v 5: piso de 60% de acerto e odd mínima com piso de 1,50 (v 4: janela de horas, contexto e plano ao vivo do
-  // 1º tempo); a tela avisa quando a varredura guardada é de antes
   // resumo dos escanteios: por que um jogo tem ou não tem linha de escanteios na lista
   const cornersReport = games.reduce((o, g) => { const k = g.corners?.status || 'sem linha'; o[k] = (o[k] || 0) + 1; return o; }, {});
   for (const g of games) if (g.corners?.source && g.corners.status !== 'sem linha') cornersReport[`preço ${g.corners.source}`] = (cornersReport[`preço ${g.corners.source}`] || 0) + 1;
-  return { v: 5, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
+  // v 6: jogo difícil de analisar (base/reservas, ligas diferentes); v 5: piso de 60% de acerto e odd mínima com
+  // piso de 1,50; v 4: janela de horas, contexto e plano ao vivo do 1º tempo. A tela avisa quando a varredura
+  // guardada é de antes
+  return { v: 6, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
     generated_at: new Date(now).toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }

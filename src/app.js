@@ -276,7 +276,9 @@ function render() {
   const live = fx.live ? `🔴 Jogo em andamento (${fx.live.elapsed ?? '?'}', ${fx.live.goals[0] ?? 0}–${fx.live.goals[1] ?? 0} quando você buscou): `
     + 'esta é a análise pré-jogo; as linhas valem para o jogo inteiro desde o apito inicial e não levam em conta placar, minuto nem odds ao vivo. ' : '';
   const fav = favorSummary(r.favor, { home: fx.home.name, away: fx.away.name });
-  $('#basis').textContent = `${live}${fav ? `${fav[0].toUpperCase()}${fav.slice(1)}. ` : ''}${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
+  const hard = state.dossier?.hard_game ? `⚠️ Jogo difícil de analisar (${state.dossier.hard_game.reasons.join('; ')}): `
+    + 'só over de gols com a odd da Pinnacle, com metade da entrada; escanteios, handicap e plano ao vivo ficam de fora. ' : '';
+  $('#basis').textContent = `${hard}${live}${fav ? `${fav[0].toUpperCase()}${fav.slice(1)}. ` : ''}${cup}Base: ${r.prep.rows.length} jogos de ${fx.base.name} (${fx.seasons.join(', ')}), `
     + `peso decrescente com o tempo (meia-vida ≈ 1 ano), ${(r.prep.coverage * 100).toFixed(0)}% com estatística de chutes, `
     + `${(r.prep.coverage1h * 100).toFixed(0)}% com escanteios do 1º tempo (a API só tem desde 2024).`
     + (r.anchors.corners1h ? ` Total de escanteios do 1º tempo ancorado na Pinnacle: modelo ${num(r.anchors.corners1h.model_total)} → `
@@ -302,7 +304,7 @@ function renderContext() {
   $('#ctx').innerHTML = c ? c.text.map(t => `<li class="info">${esc(t)}</li>`).join('')
     + (c.h2h.games.length ? `<li class="info"><details><summary>Confrontos diretos (${c.h2h.games.length})</summary><ul>
       ${c.h2h.games.map(g => `<li>${esc(g)}</li>`).join('')}</ul></details></li>` : '') : '';
-  const plan = livePlanOf(state.result);
+  const plan = state.dossier?.hard_game ? null : livePlanOf(state.result);   // jogo difícil: sem plano ao vivo
   $('#liveSec').hidden = !plan;
   $('#live').innerHTML = renderLive(plan);
   bindLive($('#live'), { banca: BANCA });
