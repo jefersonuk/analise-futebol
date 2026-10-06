@@ -108,7 +108,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       + (scan.asked_hours && scan.hours > scan.asked_hours ? ` — janela ampliada: poucos jogos com odds nas ${scan.asked_hours} primeiras horas` : '');
     const rows = ranked.map(({ g, line }, i) => {
       const go = `data-go="${i}"`, kick = `${hour(g.fx.t)}${started(g) ? ' <span class="tag mid">começou</span>' : ''}`;
-      const game = `<td>${i + 1}</td><td>${kick}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td><td class="muted">${esc(g.fx.league.name)}</td>`;
+      const hardTag = g.hard ? ` <span class="tag no" title="${esc(g.hard.reasons.join('; '))}">difícil</span>` : '';
+      const game = `<td>${i + 1}</td><td>${kick}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}${hardTag}</td><td class="muted">${esc(g.fx.league.name)}</td>`;
       if (live) {
         const p = g.live1h;
         return `<tr ${go}>${game}<td>${n2(p.mu)}${p.anchored ? ` <span class="muted">· Pin ${n2(p.pinnacle_total)}</span>` : ' <span class="muted">· modelo</span>'}</td>
@@ -127,7 +128,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
       ${scan.skipped.map(s => `<li>${hour(s.fx.t)} ${esc(s.fx.home.name)} x ${esc(s.fx.away.name)} <span class="muted">(${esc(s.fx.league.name)}): ${esc(s.why)}</span></li>`).join('')}</ul></details>` : '';
     const nBet = live ? 0 : ranked.filter(x => isBet(x.line)).length;
-    const old = scan.v >= 5 ? '' : '<p class="msg">Varredura feita antes do piso de 60% de acerto: toque em Varrer jogos de novo.</p>';
+    const old = scan.v >= 6 ? '' : `<p class="msg">Varredura feita antes ${scan.v >= 5 ? 'da regra de jogo difícil (base/reservas, ligas diferentes)' : 'do piso de 60% de acerto'}: toque em Varrer jogos de novo.</p>`;
     const explain = live
       ? `<p class="muted">Jogos para a entrada ao vivo no over de escanteios do 1º tempo, dos que mais devem ter escanteios no 1º tempo (com o total
         da Pinnacle primeiro). Cada casa: odd mínima do Mais de 3,5 e a chance. Sem escanteio, a odd mínima sobe a cada minuto: entre só quando a casa
@@ -152,6 +153,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   function card(g, line, i) {
     const top = line || bestLine(g.lines), p = g.pinnacle_1h, e = g.expected_1h;
     const facts = [
+      g.hard ? `<b>⚠️ jogo difícil de analisar</b> (${esc(g.hard.reasons.join('; '))}): só over de gols com a odd da Pinnacle, com metade da entrada` : '',
       !top ? '<b>sem linha principal jogável</b> (odd mínima 1,50–3,00)'
         : isBet(top) ? `<b>aposta</b>: ${esc(SHORT[top.market])} ${esc(top.line)} acerta ${pct(top.p_blend)} (Pinnacle ${top.p_pinnacle != null ? pct(top.p_pinnacle) : '—'}), procure odd ≥ ${n2(top.odd_min)}`
           + `${top.context ? ` · contexto ${top.context.verdict}` : ''}`

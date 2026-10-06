@@ -14,6 +14,7 @@ import { HALF_FROM } from './client.js';
 import { favorFor } from './favoritism.js';
 import { buildContext, contextGames, lineContext } from './context.js';
 import { livePlanOf } from './live.js';
+import { applyHard, hardGame } from './hard.js';
 
 export { stakeFor };
 
@@ -270,8 +271,9 @@ const ctxOf = (l, context, p) => (context && FOCUS.includes(l.market) ? { contex
 // Preço de cada linha do modelo: com Pinnacle (mistura log-linear, odd mínima ×1,03/×1,05), ancorada
 // ou só do modelo (modelEntry), e as linhas de mercado soft sem preço (model_only). Usado pelo dossiê
 // e pela varredura do dia. teams: [{ role, name, games }]; only: filtro opcional de linhas;
-// context: { ctx, games, names } de buildContext (checagens de contexto nas linhas de foco).
-export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000, only = null, context = null }) {
+// context: { ctx, games, names } de buildContext (checagens de contexto nas linhas de foco);
+// hard: jogo difícil de analisar (hard.js) — só over de gols com a odd da Pinnacle, com metade da entrada.
+export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000, only = null, context = null, hard = null }) {
   const hist = l => lineHistory(l.id, teams);
   const names = teamNames(teams);
   const g1x2 = ['1', 'X', '2'];
@@ -331,7 +333,8 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
           odd_min_model_only: r(fairOdd(l) * 1.08, 2), history: hi });
     }
   }
-  return { priced, anchored, modelOnly };
+  const h = l => applyHard(l, hard);
+  return { priced: priced.map(h), anchored: anchored.map(h), modelOnly };
 }
 
 // Candidata (consistência primeiro, preço depois): âncora/sólida (acerto ≥ 60%), odd mínima ≥ 1,50 e permitida
@@ -341,7 +344,8 @@ export const isCandidate = l => l.tier !== 'especulativa' && l.odd_min >= ODD_FL
 // Aposta: candidata cujo contexto do jogo não contradiz a linha (context.js). Com contexto contra, a
 // estatística sozinha não basta.
 // Linha só do modelo (sem a Pinnacle nem o total dela) só vira aposta se for âncora.
-export const isBet = l => isCandidate(l) && l.context?.verdict !== 'contra' && (!l.model_only || l.tier === 'âncora');
+// Jogo difícil de analisar (hard.js): a linha bloqueada não é aposta.
+export const isBet = l => isCandidate(l) && l.context?.verdict !== 'contra' && (!l.model_only || l.tier === 'âncora') && !l.blocked;
 // Ordem: nível (under um nível abaixo), não frágil antes de frágil, score (under com desconto), preço.
 export const byConsistency = (a, b) => rankTier(a) - rankTier(b) || a.fragile - b.fragile
   || rankScore(b) - rankScore(a) || (a.odd_min_vs_pinnacle_pct ?? 99) - (b.odd_min_vs_pinnacle_pct ?? 99);
@@ -370,9 +374,13 @@ export function repriceDossier(dossier, res, oddsP, teams, banca = 44000) {
   const c = dossier.context, ids = { home: dossier.teams?.home?.id, away: dossier.teams?.away?.id };
   const context = c && ids.home && ids.away ? { ctx: c, names: { home: fx.home.name, away: fx.away.name },
     games: contextGames(res.prep.rows, ids.home, ids.away, Date.parse(dossier.fixture.kickoff), c.h2h_extra || []) } : null;
-  const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams, banca, context });
+  // jogo difícil: o guardado; análise de antes da regra recalcula pela base
+  const hard = dossier.hard_game !== undefined ? dossier.hard_game : ids.home && ids.away ? hardGame({ rows: res.prep.rows,
+    fx: { home: { id: ids.home, name: fx.home.name }, away: { id: ids.away, name: fx.away.name }, league: { name: dossier.fixture.competition } } }) : null;
+  if (hard && !alerts.some(a => a.startsWith('jogo difícil'))) alerts.push(`jogo difícil de analisar (${hard.reasons.join('; ')}): só over de gols com a odd da Pinnacle, com metade da entrada`);
+  const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams, banca, context, hard });
   return { ...dossier, data_quality: { ...dossier.data_quality, alerts }, lines_with_pinnacle: priced, lines_anchored: anchored,
-    live_1h: livePlanOf(res),
+    hard_game: hard, live_1h: hard ? null : livePlanOf(res),
     model_only_lines: modelOnly, ...pickCandidates(priced, anchored),
     favoritism: res.favor && { summary: favorSummary(res.favor, { home: fx.home.name, away: fx.away.name }), ...res.favor } };
 }
@@ -423,6 +431,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   if (lg.national && fx.league.id === FRIENDLIES) alerts.push('amistoso: rotação e intensidade imprevisíveis');
   const contra = contraAlert(res.favor, { home: fx.home.name, away: fx.away.name });
   if (contra) alerts.push(contra);
+  const hard = hardGame({ fx, rows: res.prep.rows });
+  if (hard) alerts.push(`jogo difícil de analisar (${hard.reasons.join('; ')}): só over de gols com a odd da Pinnacle, com metade da entrada`);
   if (!odds.size) alerts.push('sem odds da Pinnacle: não há régua de preço');
   else if (oddsAgeMin > ODDS_STALE_MIN) alerts.push(`odds da Pinnacle com ${oddsAgeMin} min de idade (a API atualiza a cada ~3 h): confira o preço atual antes de entrar`);
 
@@ -474,7 +484,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     { role: 'away', name: fx.away.name, games: recent[fx.away.id], roleNow: now.away }];
   const h2hExtra = val(6, []);
   const context = buildContext({ rows: res.prep.rows, fx, table, extra: h2hExtra, res, fair });
-  const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams: teamsHist, banca, context });
+  const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams: teamsHist, banca, context, hard });
   const { candidatesFocus, candidates } = pickCandidates(priced, anchored);
 
   const imp = (prefix, phi) => {
@@ -506,7 +516,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     favoritism: res.favor && { summary: favorSummary(res.favor, { home: fx.home.name, away: fx.away.name }),
       ...Object.fromEntries(Object.entries(res.favor).map(([k, v]) => [k, typeof v === 'number' ? r(v, 2) : v])) },
     context: { ...context.ctx, h2h_extra: h2hExtra.map(({ id, t, h, a, hg, ag, hh, ha, ln }) => ({ id, t, h, a, hg, ag, hh, ha, ln })) },
-    live_1h: livePlanOf(res),
+    hard_game: hard,
+    live_1h: hard ? null : livePlanOf(res),
     focus_markets: FOCUS,
     candidates_focus: candidatesFocus,
     candidates,

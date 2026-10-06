@@ -17,7 +17,8 @@ const SEND = 'Registrar no app de apostas';
 // (pior cenário ou histórico abaixo do piso) ou odd abaixo da mínima pedem um segundo toque. Nas apostas da
 // análise de 02–05/10/2026, as que passavam nessa regra acertaram 64%; as outras, 41%.
 const belowFloor = line => !(line.p_blend >= HIT_MIN);
-const offRule = (line, odd) => [line.tier === 'especulativa' && 'linha especulativa (pior cenário ou histórico dos times abaixo do piso)',
+const offRule = (line, odd) => [line.blocked && 'jogo difícil de analisar (só over de gols com a odd da Pinnacle)',
+  line.tier === 'especulativa' && 'linha especulativa (pior cenário ou histórico dos times abaixo do piso)',
   odd < line.odd_min && `odd abaixo da mínima ${num(line.odd_min)}`].filter(Boolean);
 
 // getLine(id): linha da análise aberta; getFixture(): jogo da análise aberta.
@@ -47,6 +48,7 @@ export function initEntry({ getLine, getFixture }) {
     const { line } = entry, odd = parseFloat($('#enOdd').value), stake = parseFloat($('#enStake').value), h = house();
     const cur = h?.currency || 'BRL', r = rateOf(cur), out = [];
     if (belowFloor(line)) out.push(`<span class="neg"><b>Acerta ${pct(line.p_blend)}: abaixo do piso de 60%.</b> Esta linha não entra.</span>`);
+    else if (line.blocked) out.push('<span class="neg">Jogo difícil de analisar (base/reservas ou ligas diferentes): aqui só over de gols com a odd da Pinnacle.</span>');
     else if (line.tier === 'especulativa') out.push('<span class="neg">Linha especulativa: o pior cenário ou o histórico dos times fica abaixo do piso de 60%.</span>');
     else if (line.p_blend < HIT_IDEAL) out.push('<span class="muted">Acerto acima do piso (60%) e abaixo do ideal (70%).</span>');
     if (odd > 1) {

@@ -209,6 +209,7 @@ const ctxRow = c => (c ? `<p class="ctxline"><span class="tag ${CTX_CLS[c.verdic
 // Por que uma linha que entrou só para completar o painel não passou no filtro de candidatas.
 function outsideReason(l, ok = []) {
   if (ok.includes(l.id)) return null;
+  if (l.blocked) return 'jogo difícil: só over de gols da Pinnacle';
   if (isUnder(l.id) && !underOk(l)) return 'under só se for âncora';
   if (l.tier === 'especulativa') {
     if (l.p_blend < HIT_MIN) return `acerta ${pct(l.p_blend)}: abaixo do piso de 60%`;
@@ -287,6 +288,7 @@ export function renderDashboard(lines, teams) {
           <span><b>mínima ${odd2(l.odd_min)}</b> <span class="muted">${l.pinnacle_odd ? `(Pinnacle ${odd2(l.pinnacle_odd)})` : `(${esc(l.priced_by || 'só o modelo')})`}</span></span>
           <span>${l.entry_brl ? `entrada R$ ${l.entry_brl} · ${l.politica_e}` : `sem entrada · ${l.politica_e}`}</span>
           ${l.fragile ? '<span class="tag">frágil</span>' : ''}
+          ${l.reduced ? '<span class="tag mid" title="jogo difícil de analisar">metade da entrada</span>' : ''}
           ${l.outside ? `<span class="tag no">${esc(l.outside)}</span>` : ''}
           <button class="enter" data-enter="${esc(l.id)}">➕ Entrar</button>
         </div></header>

@@ -45,7 +45,8 @@ const lean = (l, full = false) => l && {
   id: l.id, market: l.market, line: l.line, price_source: l.priced_by === 'pinnacle' ? 'pinnacle' : l.derived ? 'derivada do total da Pinnacle' : 'só o modelo',
   tier: l.tier, p_blend: l.p_blend, p_pinnacle: l.p_pinnacle, fair_odd: l.fair_odd_blend,
   odd_min: l.odd_min, pinnacle_odd: l.pinnacle_odd, odd_min_vs_pinnacle_pct: l.odd_min_vs_pinnacle_pct, value_pct: l.value_pct,
-  fragile: l.fragile, inviable: l.inviable || undefined, entry_brl: l.entry_brl, politica_e: l.politica_e,
+  fragile: l.fragile, inviable: l.inviable || undefined, blocked: l.blocked || undefined, reduced: l.reduced || undefined,
+  entry_brl: l.entry_brl, politica_e: l.politica_e,
   last10: [l.history?.home, l.history?.away].map(t => (t ? `${t.hits} ${t.rule}` : '—')).join(' · '),
   context: l.context && `${l.context.verdict}: ${l.context.signals.map(x => (full ? `${x.kind} ${x.verdict} (${x.text})` : `${x.kind} ${x.verdict}`)).join('; ')}`,
 };
@@ -77,7 +78,7 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
         n: i + 1,
         kickoff: new Date(g.fx.t).toISOString(), competition: g.fx.league.name, home: g.fx.home.name, away: g.fx.away.name,
         base: g.team_base ? 'jogos dos dois times em todas as competições' : 'liga do jogo',
-        alerts: g.alerts, odds_age_min: g.odds_age_min, favoritism: g.favor_text || null, pinnacle_1h: g.pinnacle_1h, expected_1h: g.expected_1h,
+        hard: g.hard ? g.hard.reasons : null, alerts: g.alerts, odds_age_min: g.odds_age_min, favoritism: g.favor_text || null, pinnacle_1h: g.pinnacle_1h, expected_1h: g.expected_1h,
         c1_history_games: g.c1_known, no_history: g.no_history || null, no_corners: g.no_corners || null, no_h2h: g.no_h2h || null,
         context: leanCtx(g.context),
         top_line: lean(top, true),
