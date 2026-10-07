@@ -188,3 +188,9 @@ table.livegrid td .muted { font-size: 11px; }
 table.scanrank.livelist :is(td, th):nth-child(n+5) { text-align: right; }
 #scanOrder { align-items: center; }
 table.livegrid :is(td, th):nth-child(n+2) { text-align: right; }
+
+/* entrada manual */
+dialog#entryDlg label.chk { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--text); margin: 12px 0 0; cursor: pointer; }
+dialog#entryDlg label.chk input { width: auto; margin: 2px 0 0; }
+dialog#entryDlg #enLineMsg { margin: 4px 0 0; }
+dialog#entryDlg .facts[hidden] { display: none; }

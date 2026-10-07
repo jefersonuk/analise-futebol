@@ -1,5 +1,6 @@
 // Conferência de uma aposta registrada a partir da análise: busca o jogo na API-Football, liquida a
 // linha (mesma regra asiática do modelo e dos gráficos) e mede o CLV contra a última odd da Pinnacle.
+// Também acompanha os jogos ao vivo (placar, minuto, escanteios e como a linha está agora).
 // Usado pela aba "⚽ Análise" do app de apostas (mesmo endereço: lê a chave da API do localStorage).
 
 import { history } from './dashboard.js';
@@ -72,4 +73,71 @@ export async function checkBet(meta, oddTaken) {
   }
   return { status: 'encerrado', winner: r.winner, detail: `${score} · ${r.what}: ${r.value} (linha ${r.threshold})`,
     clv, closingFair };
+}
+
+// ---- ao vivo ----
+const FIRST_HALF = new Set(['1H']);
+const PAST_HT = new Set(['2H', 'ET', 'BT', 'P', 'FT', 'AET', 'PEN']);
+export const LIVE = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'SUSP', 'INT', 'LIVE']);
+
+// Escanteios [mandante, visitante] da estatística do jogo (ao vivo, mesmo sem chutes), ou null.
+function cornersOf(f) {
+  const by = Object.fromEntries((f.statistics || []).map(t => [t.team.id, t.statistics || []]));
+  const c = id => by[id]?.find(x => x.type === 'Corner Kicks');
+  const h = c(f.teams.home.id), a = c(f.teams.away.id);
+  return h || a ? [Number(h?.value) || 0, Number(a?.value) || 0] : null;
+}
+
+// Jogo como está agora, no formato de gameOf (placar atual; 1º tempo quando já se sabe).
+function liveGame(f, c1) {
+  const ht = f.score?.halftime || {}, st = f.fixture.status.short, corners = cornersOf(f), s = statsOf(f);
+  const side = i => (s ? [s[i], s[5 + i]] : null);
+  const firstHalfNow = FIRST_HALF.has(st) || st === 'HT';
+  return { t: f.fixture.timestamp * 1000, home: true, opp: f.teams.away.name, gf: f.goals.home ?? 0, ga: f.goals.away ?? 0,
+    g1: firstHalfNow ? [f.goals.home ?? 0, f.goals.away ?? 0] : ht.home != null && ht.away != null ? [ht.home, ht.away] : null,
+    corners, shots: side(3), sot: side(2), c1 };
+}
+
+// Os jogos das apostas, ao vivo ou recém-terminados: 1 requisição para até 20 jogos (/fixtures?ids= traz placar,
+// minuto e estatística). c1: escanteios do 1º tempo já conhecidos por jogo (não mudam depois do intervalo);
+// needC1: jogos com aposta no 1º tempo — passado o intervalo, busca uma vez a estatística por tempo.
+// Devolve Map(fixtureId -> { status, long, elapsed, extra, goals, ht, corners, c1, finished, cancelled, home, away, game }).
+export async function liveFixtures(ids, { needC1 = new Set(), c1 = new Map() } = {}) {
+  if (!apiKey()) throw new Error('sem a chave da API-Football: abra o app de análise e salve a chave em ⚙️ Chave');
+  const uniq = [...new Set(ids.filter(Boolean))], out = new Map();
+  for (let i = 0; i < uniq.length; i += 20) {
+    for (const f of await get('/fixtures', { ids: uniq.slice(i, i + 20).join('-') })) {
+      const id = f.fixture.id, st = f.fixture.status.short;
+      let k1 = c1.get(id) ?? null;
+      if (FIRST_HALF.has(st) || st === 'HT') k1 = cornersOf(f);   // até o intervalo, todo escanteio é do 1º tempo
+      else if (!k1 && needC1.has(id) && PAST_HT.has(st)) {
+        try {
+          const s = await get('/fixtures/statistics', { fixture: id, half: 'true' });
+          const by = Object.fromEntries(s.map(t => [t.team.id, t.statistics_1h || []]));
+          const c = t => Number(by[t]?.find(x => x.type === 'Corner Kicks')?.value) || 0;
+          if (s.some(t => t.statistics_1h?.length)) k1 = [c(f.teams.home.id), c(f.teams.away.id)];
+        } catch { /* sem estatística por tempo: a linha do 1º tempo espera a conferência */ }
+      }
+      out.set(id, { status: st, long: f.fixture.status.long, elapsed: f.fixture.status.elapsed, extra: f.fixture.status.extra ?? null,
+        goals: [f.goals.home ?? 0, f.goals.away ?? 0], ht: [f.score?.halftime?.home ?? null, f.score?.halftime?.away ?? null],
+        corners: cornersOf(f), c1: k1, finished: FINISHED.has(st), cancelled: NO_MATCH.has(st), live: LIVE.has(st),
+        home: f.teams.home.name, away: f.teams.away.name, game: liveGame(f, k1) });
+    }
+  }
+  return out;
+}
+
+// A linha com o jogo como está agora: o valor, o resultado se o jogo acabasse agora, se já está decidida
+// (over que já bateu, under que já estourou, linha do 1º tempo depois do intervalo, jogo encerrado) e,
+// no over que ainda não bateu, quantos faltam.
+export function liveLine(lineId, info) {
+  if (!lineId || !info) return null;
+  const h = history(lineId, 'home', info.home, [info.game]), bar = h?.bars[0];
+  if (!bar) return null;
+  const now = WINNER[bar.res], firstHalf = /^(g1|c1)/.test(lineId);
+  const over = /^(g|g1|corners|c1|c[HA]|shots|sot)O/.test(lineId), under = /^(g|g1|corners|c1|c[HA]|shots|sot)U/.test(lineId);
+  const decided = info.finished || (firstHalf && (info.status === 'HT' || PAST_HT.has(info.status)));
+  const locked = decided || (over && now === 'A') || (under && now === 'RED');
+  const need = over && !locked ? Math.floor(h.threshold) + 1 - bar.v : null;
+  return { value: bar.v, threshold: h.threshold, what: h.what, now, locked, need };
 }
