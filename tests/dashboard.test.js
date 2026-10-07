@@ -63,38 +63,44 @@ test('handicap de escanteios 1T usa o saldo de escanteios do 1º tempo do time',
 
 import { pickDashboard } from '../src/dashboard.js';
 
-test('painel em foco: linhas principais com preço da Pinnacle, candidatas primeiro e o motivo das outras', () => {
+test('painel em foco: só over nas linhas principais (com chutes e 1X2), candidatas primeiro e o motivo das outras', () => {
   const L = (id, market, tier, score, odd, extra = {}) => ({ id, market, tier, consistency_score: score, odd_min: odd, priced_by: 'pinnacle',
     politica_e: odd > 3 ? 'não entrar' : 'cheia', odd_min_vs_pinnacle_pct: 2, p_model_range: [0.5, 0.6], ...extra });
   const dossier = {
-    focus_markets: ['Total escanteios 1T', 'Total de escanteios', 'Total de gols 1T', 'Total de gols', 'Handicap de escanteios'],
-    candidates_focus: ['cornersU8.5'], candidates: ['1'],
-    lines_with_pinnacle: [L('cornersU8.5', 'Total de escanteios', 'sólida', 0.62, 1.7), L('gO2.5', 'Total de gols', 'especulativa', 0.45, 2.1, { p_blend: 0.45 }),
-      L('gO1.5', 'Total de gols', 'âncora', 0.8, 1.3), L('gU2.5', 'Total de gols', 'sólida', 0.6, 1.8), L('gO3', 'Total de gols', 'âncora', 0.7, 1.7),
-      L('c1O4.5', 'Total escanteios 1T', 'sólida', 0.6, 1.9, { odd_min_vs_pinnacle_pct: 7 }), L('chA1.5', 'Handicap de escanteios', 'sólida', 0.58, 1.8),
-      L('1', '1X2', 'sólida', 0.6, 1.9)],
-    lines_anchored: [L('c1O4', 'Total escanteios 1T', 'âncora', 0.8, 1.6, { priced_by: 'modelo' }), L('chA3', 'Handicap de escanteios', 'âncora', 0.8, 1.6, { priced_by: 'modelo' })],
+    focus_markets: ['Total escanteios 1T', 'Total de escanteios', 'Total de gols 1T', 'Total de gols', 'Handicap asiático', 'Total de chutes', 'Total de chutes no gol', '1X2'],
+    candidates_focus: ['cornersO8.5'], candidates: ['1'],
+    lines_with_pinnacle: [L('cornersO8.5', 'Total de escanteios', 'sólida', 0.62, 1.7), L('gO2.5', 'Total de gols', 'especulativa', 0.45, 2.1, { p_blend: 0.45 }),
+      L('gO1.5', 'Total de gols', 'âncora', 0.8, 1.3), L('gU2.5', 'Total de gols', 'âncora', 0.9, 1.8), L('cornersU9.5', 'Total de escanteios', 'âncora', 0.9, 1.7),
+      L('gO3', 'Total de gols', 'âncora', 0.7, 1.7), L('c1O4.5', 'Total escanteios 1T', 'sólida', 0.6, 1.9, { odd_min_vs_pinnacle_pct: 7 }),
+      L('chA1.5', 'Handicap de escanteios', 'âncora', 0.9, 1.8), L('1', '1X2', 'sólida', 0.6, 1.9)],
+    lines_anchored: [L('c1O4', 'Total escanteios 1T', 'âncora', 0.8, 1.6, { priced_by: 'modelo' }),
+      L('shotsO22.5', 'Total de chutes', 'âncora', 0.75, 1.6, { priced_by: 'só o modelo (sem odd da Pinnacle nesta linha)', model_only: true })],
   };
   const lines = pickDashboard(dossier, 5, { focus: true });
-  // nem linha fora das principais (gO3), nem under de gols, nem linha sem preço da Pinnacle; odd abaixo de 1,50 por último
-  assert.deepEqual(lines.map(l => l.id), ['cornersU8.5', 'c1O4.5', 'chA1.5', 'gO2.5', 'gO1.5']);
-  assert.deepEqual(lines.map(l => l.outside ?? null), [null, 'preço difícil de achar', 'alternativa de linha', 'acerta 45%: abaixo do piso de 60%', 'odd abaixo de 1,50']);
-  assert.ok(pickDashboard(dossier, 5, { focus: false }).some(l => l.id === '1'));
+  // nem under (mesmo âncora), nem handicap de escanteios, nem linha fora das principais (gO3); chutes do modelo e 1X2 entram;
+  // odd abaixo de 1,50 por último
+  assert.deepEqual(lines.map(l => l.id), ['cornersO8.5', 'shotsO22.5', 'c1O4.5', '1', 'gO2.5']);
+  assert.deepEqual(lines.map(l => l.outside ?? null), [null, 'alternativa de linha', 'preço difícil de achar', 'alternativa de linha', 'acerta 45%: abaixo do piso de 60%']);
+  const all = pickDashboard(dossier, 5, { focus: false });
+  assert.ok(all.some(l => l.id === '1') && !all.some(l => isUnder(l.id)), 'todos os mercados: sem under');
 });
 
-import { isUnder } from '../src/consistency.js';
-import { byConsistency, isCandidate } from '../src/dossier.js';
+import { isCornerSide, isUnder } from '../src/consistency.js';
+import { isCandidate } from '../src/dossier.js';
 
-test('preferência por over: under só se for âncora e passa na frente só se for claramente melhor', () => {
+test('só over: under nunca é candidata, em gols, escanteios ou chutes', () => {
   const L = (id, tier, score) => ({ id, tier, consistency_score: score, fragile: true, odd_min: 1.6, politica_e: 'cheia', odd_min_vs_pinnacle_pct: null });
-  assert.ok(isUnder('gU2.5') && isUnder('c1U4.5') && isUnder('cornersU9.5') && isUnder('cAU4.5') && isUnder('crN9'));
-  assert.ok(!isUnder('gO2.5') && !isUnder('c1hH-0.5') && !isUnder('shotsU20.5'));
-  assert.equal(isCandidate(L('gU2.5', 'sólida', 0.7)), false, 'under sólida não é candidata');
-  assert.equal(isCandidate(L('gU2.5', 'âncora', 0.7)), true);
-  // under âncora com score parecido fica atrás do over sólido
-  assert.deepEqual([L('gU2.5', 'âncora', 0.64), L('gO2.5', 'sólida', 0.62)].sort(byConsistency).map(l => l.id), ['gO2.5', 'gU2.5']);
-  // under âncora muito melhor passa na frente
-  assert.deepEqual([L('gO2.5', 'sólida', 0.6), L('gU2.5', 'âncora', 0.72)].sort(byConsistency).map(l => l.id), ['gU2.5', 'gO2.5']);
+  assert.ok(isUnder('gU2.5') && isUnder('c1U4.5') && isUnder('cornersU9.5') && isUnder('cAU4.5') && isUnder('crN9') && isUnder('shotsU20.5') && isUnder('sotU7.5'));
+  assert.ok(!isUnder('gO2.5') && !isUnder('c1hH-0.5') && !isUnder('shotsO20.5') && !isUnder('1'));
+  for (const id of ['gU2.5', 'cornersU9.5', 'shotsU20.5']) for (const t of ['sólida', 'âncora']) assert.equal(isCandidate(L(id, t, 0.8)), false, `${id} ${t}`);
+  assert.equal(isCandidate(L('gO2.5', 'sólida', 0.7)), true);
+  // escanteios: só o over do total (e por time); handicap, quem tem mais e corrida ficam fora
+  for (const id of ['chH-1.5', 'c1hA0.5', 'cx1', 'c1x2', 'crH5', 'crA9']) {
+    assert.ok(isCornerSide(id), id);
+    assert.equal(isCandidate(L(id, 'âncora', 0.9)), false, id);
+  }
+  for (const id of ['cornersO9.5', 'c1O4.5', 'cHO5.5', 'cAO4.5', 'ahH-0.5', '1']) assert.ok(!isCornerSide(id), id);
+  assert.equal(isCandidate(L('cHO5.5', 'sólida', 0.7)), true);
 });
 
 test('caso real: Corinthians 0–1 Santos (30/08/2026), escanteios 8–1, 1º tempo 2–1, visto pelo Santos', () => {

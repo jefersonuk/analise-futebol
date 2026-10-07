@@ -37,35 +37,40 @@ export const ODD_FLOOR = 1.5;
 export const floorOutOfReach = l => l.odd_min <= ODD_FLOOR + 1e-9 && l.odd_min_vs_pinnacle_pct > 5;
 
 // ---- linhas principais do pré-jogo ----
-// As que têm odd para entrar antes do jogo (as mais baixas — escanteios 1T 3,5, jogo 7 — só pagam no ao
-// vivo, e o plano ao vivo do 1º tempo está em live.js): escanteios do 1º tempo 4 a 5,5 e do jogo 8 a 11 (de
-// 0,5 em 0,5: nos jogos de muitos escanteios, 8–9 saem abaixo de 1,50 e as opções estão em 9,5–11), over ou
-// under; gols do 1º tempo 1,5 e do jogo 1,5 e 2,5, só over. Os handicaps do jogo inteiro nas linhas que a
-// Pinnacle cota — de escanteios e de gols (asiático) — completam a lista. Linha que a Pinnacle não cota num
-// total que ela cota sai do total dela (dossier.js); sem a Pinnacle nos escanteios, só do modelo.
-export const MAIN_LINES = { 'Total escanteios 1T': ['c1', [4, 4.5, 5, 5.5], 'OU'], 'Total de escanteios': ['corners', [8, 8.5, 9, 9.5, 10, 10.5, 11], 'OU'],
+// Regra do Jeferson (out/2026): só over — nenhum under — e, nos escanteios, só o over do total (do jogo e do
+// 1º tempo): é onde ele acha valor; handicap de escanteios fica de fora. As que têm odd para entrar antes do
+// jogo (as mais baixas — escanteios 1T 3,5, jogo 7 — só pagam no ao vivo, e o plano ao vivo do 1º tempo está
+// em live.js): escanteios do 1º tempo 4 a 5,5 e do jogo 8 a 11 (de 0,5 em 0,5: nos jogos de muitos
+// escanteios, 8–9 saem abaixo de 1,50 e as opções estão em 9,5–11); gols do 1º tempo 1,5 e do jogo 1,5 e 2,5;
+// chutes (total e no gol) em qualquer linha que o modelo calcula — a Pinnacle não cota chutes, o preço é só
+// do modelo —; o 1X2 e o handicap de gols (asiático) nas linhas que a Pinnacle cota. Linha que a Pinnacle não
+// cota num total que ela cota sai do total dela (dossier.js); sem a Pinnacle nos escanteios, só do modelo.
+export const MAIN_LINES = { 'Total escanteios 1T': ['c1', [4, 4.5, 5, 5.5], 'O'], 'Total de escanteios': ['corners', [8, 8.5, 9, 9.5, 10, 10.5, 11], 'O'],
   'Total de gols 1T': ['g1', [1.5], 'O'], 'Total de gols': ['g', [1.5, 2.5], 'O'] };
+export const SHOTS = ['Total de chutes', 'Total de chutes no gol'];
 const MAIN_IDS = new Set(Object.values(MAIN_LINES).flatMap(([k, ls, sides]) => ls.flatMap(L => [...sides].map(s => `${k}${s}${L}`))));
-export const isMain = id => MAIN_IDS.has(id);
+const MAIN_RE = /^(shots|sot)O[\d.]+$|^[12X]$/;   // over de chutes em qualquer linha, e o 1X2
+export const isMain = id => MAIN_IDS.has(id) || MAIN_RE.test(id);
 // Linha asiática fracionada (,25 ou ,75), que o app não oferece.
 export const isQuarter = id => { const m = String(id).match(/-?\d+(?:\.\d+)?$/); return !!m && Math.round(Math.abs(+m[0]) * 4) % 2 === 1; };
 export const HANDICAP = 'Handicap de escanteios';
 export const GOAL_HANDICAP = 'Handicap asiático';
-// Linha principal com preço da Pinnacle (direto, ou derivado do total que ela cota): um total da lista ou um
-// handicap do jogo (escanteios ou gols) que ela cota.
-export const isMainLine = l => (l.priced_by === 'pinnacle' && (isMain(l.id) || l.market === HANDICAP || l.market === GOAL_HANDICAP))
-  || (l.derived && isMain(l.id));
+// Linha principal: com preço da Pinnacle (um total da lista, o 1X2 ou o handicap de gols que ela cota), derivada
+// do total que ela cota, ou só do modelo (chutes, e escanteios quando ela não cota o mercado no jogo).
+export const isMainLine = l => (l.priced_by === 'pinnacle' && (isMain(l.id) || l.market === GOAL_HANDICAP))
+  || ((l.derived || l.model_only) && isMain(l.id));
 
-// Preferência do Jeferson: OVER em gols e escanteios. Under (e "ninguém chega a N", que é um under) só
-// quando é muito atrativo: só vira candidata se for âncora, e na ordem conta um nível abaixo e com
-// UNDER_PENALTY a menos no score — passa na frente de um over apenas quando é claramente mais consistente.
-// Exceção pedida por ele: nos totais de escanteios das linhas principais, over e under valem igual.
-export const isUnder = id => /^(g|g1|corners|c1|cH|cA)U|^crN/.test(id);
+// Só over (regra do Jeferson, out/2026): under (e "ninguém chega a N", que é um under) nunca é candidata, jogável
+// nem sugestão — em gols, escanteios ou chutes. A penalidade na ordem fica para as linhas que ainda aparecem
+// nas tabelas completas.
+export const isUnder = id => /^(g|g1|corners|c1|cH|cA|shots|sot)U|^crN/.test(id);
 export const UNDER_PENALTY = 0.05;
 const penalized = id => isUnder(id) && !isMain(id);
 export const rankTier = l => TIER_ORDER[l.tier] + (penalized(l.id) ? 1 : 0);
 export const rankScore = l => (l.consistency_score ?? 0) - (penalized(l.id) ? UNDER_PENALTY : 0);
-export const underOk = l => !penalized(l.id) || l.tier === 'âncora';
+// Nos escanteios, só o over: handicap, "quem tem mais" e corrida a N escanteios (jogo e 1º tempo) também ficam fora.
+export const isCornerSide = id => /^(c1?h[HA]|c1?x|cr[HAN])/.test(id);
+export const underOk = l => !isUnder(l.id) && !isCornerSide(l.id);
 
 // Valor (informativo): a nossa probabilidade (mistura Pinnacle × modelo, sem push) contra a da Pinnacle sem
 // margem — value = p/q − 1, o EV de quem pega a odd justa da Pinnacle. Conferido pelo pior cenário do modelo

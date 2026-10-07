@@ -4,7 +4,7 @@
 
 import { politicaE } from './model.js';
 import { renderDashboard } from './dashboard.js';
-import { HIT_MIN, floorOutOfReach, isUnder, rankScore, rankTier } from './consistency.js';
+import { HIT_MIN, floorOutOfReach, isCornerSide, isUnder, rankScore, rankTier } from './consistency.js';
 import { lineHistory, modelEntry, side, teamNames } from './dossier.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -162,7 +162,8 @@ export function verdict(line, odd) {
   else if (odd < line.fair_odd_blend) { level = 'no'; title = `Sem valor: a odd justa é ${odd2(line.fair_odd_blend)}`; }
   else if (odd < line.odd_min) { level = 'mid'; title = `Preço curto: o valor fica dentro da margem de erro (mínima ${odd2(line.odd_min)})`; }
   else if (line.tier === 'especulativa') { level = 'mid'; title = 'Tem preço, mas o pior cenário ou o histórico dos times fica abaixo do piso de 60% (especulativa)'; }
-  else if (isUnder(line.id) && line.tier !== 'âncora') { level = 'mid'; title = 'Under sólida: pela sua regra, under só entra se for âncora; veja o over nas alternativas'; }
+  else if (isUnder(line.id)) { level = 'no'; title = 'Under: fora da sua regra (só over); veja o over nas alternativas'; }
+  else if (isCornerSide(line.id)) { level = 'no'; title = 'Escanteios: pela sua regra só o over do total entra (handicap, quem tem mais e corrida ficam fora)'; }
   else if (odd < 1.5) { level = 'mid'; title = `Tem valor (${line.tier}), mas a odd está abaixo de 1,50, fora do seu núcleo`; }
   else { level = 'ok'; title = `Entrar: linha ${line.tier}, odd acima da mínima · entrada ${pe.label} (Política E)`; }
   return { level, title, ev, notes };
@@ -189,7 +190,7 @@ const RELATED = [
 ];
 
 // jogável: acerto ≥ 60% (piso) e odd mínima na faixa operada, que uma casa soft alcance quando é o próprio piso
-const playable = l => l && !l.inviable && l.p_blend >= HIT_MIN && l.odd_min >= 1.5 && l.odd_min <= 3 && !floorOutOfReach(l);
+const playable = l => l && !l.inviable && !isUnder(l.id) && !isCornerSide(l.id) && l.p_blend >= HIT_MIN && l.odd_min >= 1.5 && l.odd_min <= 3 && !floorOutOfReach(l);   // só over
 const better = (a, b) => rankTier(a) - rankTier(b) || a.fragile - b.fragile || rankScore(b) - rankScore(a);
 
 export function alternatives(price, chosen, dossier) {

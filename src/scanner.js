@@ -1,8 +1,8 @@
-// Varredura: maior chance de ganho nas linhas principais do pré-jogo (consistency.js: escanteios 1T 4, 4,5 e 5
-// e do jogo 8, 8,5 e 9, over ou under; gols 1T 1,5 e do jogo 1,5 e 2,5, só over; handicaps de escanteios e de
-// gols do jogo) dos jogos por começar com odds da Pinnacle, pelo mesmo modelo do app. Só linhas que a Pinnacle
-// cota. Liga sem estatística de escanteios na API (USL Championship, Liga de Expansión, Primera B…) entra só
-// com os mercados de gols.
+// Varredura: maior chance de ganho nas linhas principais do pré-jogo (consistency.js), só over: escanteios 1T
+// 4 a 5,5 e do jogo 8 a 11; gols 1T 1,5 e do jogo 1,5 e 2,5; chutes (total e no gol); handicap de gols e 1X2 —
+// dos jogos por começar com odds da Pinnacle, pelo mesmo modelo do app. "Melhor do jogo" olha só handicap de
+// gols, gols, chutes e 1X2; escanteios ficam nas abas deles. Liga sem estatística na API (USL Championship,
+// Liga de Expansión, Primera B…) entra só com gols, handicap de gols e 1X2.
 //
 // Janela: as próximas N horas (padrão da tela: 4 h, até 20 jogos, em ordem de horário) ou um dia inteiro.
 // Cada jogo leva o contexto (context.js: tabela, médias de gols e escanteios no mando, esperado, confronto
@@ -26,16 +26,22 @@ import { collect } from './odds.js';
 import { recentGames } from './insights.js';
 import { FRIENDLIES, byConsistency, contraAlert, favorSummary, isBet, priceLines, rolesNow, seasonsFor } from './dossier.js';
 import { favorFor } from './favoritism.js';
-import { GOAL_HANDICAP, HANDICAP, HIT_MIN, MAIN_LINES, floorOutOfReach, isMain, isMainLine, underOk } from './consistency.js';
+import { GOAL_HANDICAP, HIT_MIN, MAIN_LINES, SHOTS, floorOutOfReach, isMain, isMainLine, underOk } from './consistency.js';
 import { buildContext } from './context.js';
 import { livePlanOf } from './live.js';
 import { hardGame } from './hard.js';
 
-export { GOAL_HANDICAP, HANDICAP };
+export { GOAL_HANDICAP, SHOTS };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
-export const SCAN_MARKETS = MAIN_MARKETS.concat(HANDICAP, GOAL_HANDICAP);
+export const SCAN_MARKETS = MAIN_MARKETS.concat(GOAL_HANDICAP, SHOTS, '1X2');
+// "Melhor do jogo": a melhor linha entre handicap de gols, gols, chutes e 1X2 — escanteios só nas abas deles
+export const BEST_MARKETS = [GOAL_HANDICAP, 'Total de gols', 'Total de gols 1T', ...SHOTS, '1X2'];
+// Filtros da tela (abas): cada mercado, e "Chutes" juntando total e no gol
+export const SHOTS_FILTER = 'Chutes';
+const GROUPS = { [SHOTS_FILTER]: SHOTS };
+export const FILTER_KEYS = [...MAIN_MARKETS, GOAL_HANDICAP, SHOTS_FILTER, '1X2'];
 export const LIVE_1H = 'live1h';   // filtro da tela: jogos para a entrada ao vivo nos escanteios do 1º tempo
-const GOALS_ONLY = ['Total de gols 1T', 'Total de gols', GOAL_HANDICAP];
+const GOALS_ONLY = ['Total de gols 1T', 'Total de gols', GOAL_HANDICAP, '1X2'];
 const TZ = 'America/Sao_Paulo';
 export const brDate = t => new Date(t).toLocaleDateString('sv-SE', { timeZone: TZ });   // AAAA-MM-DD em Brasília
 // MIN_GAMES: jogos-equivalentes (com o decaimento) de cada time na base para analisar o jogo (gols);
@@ -70,12 +76,12 @@ const r2 = x => Math.round(x * 100) / 100;
 
 // jogável: acerto ≥ 60% (piso do Jeferson: abaixo disso a linha nem aparece), odd mínima na faixa operada
 // (1,50–3,00) e que uma casa soft alcance quando é o próprio piso, linha que o mercado oferece (não "favorito +x")
-// e under pela regra do over primeiro (nos totais de escanteios das linhas principais, over e under valem igual)
+// e nenhum under (só over, regra do Jeferson)
 const playable = l => l.p_blend >= HIT_MIN && l.odd_min >= 1.5 && !floorOutOfReach(l) && politicaE(l.odd_min).factor > 0 && !l.inviable && underOk(l);
 // Melhor linha de um jogo: maior chance de ganho — aposta (candidata âncora/sólida, preço que a casa paga, sem
 // contexto contra) primeiro; senão a mais consistente jogável. market: um mercado ou null (todos os da varredura).
 export function bestLine(lines, { market = null } = {}) {
-  const ms = market ? [market] : SCAN_MARKETS;
+  const ms = market == null ? BEST_MARKETS : GROUPS[market] || [market];
   const pool = lines.filter(l => ms.includes(l.market) && playable(l)).sort(byConsistency);
   return pool.find(isBet) || pool[0] || null;
 }
@@ -126,7 +132,7 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
 }
 
 // Escanteios no jogo, para o resumo da varredura: de onde vem o preço das linhas e se alguma é jogável/aposta.
-const CORNER_MARKETS = ['Total escanteios 1T', 'Total de escanteios', HANDICAP];
+const CORNER_MARKETS = ['Total escanteios 1T', 'Total de escanteios'];
 function cornersStatus(lines, noCorners) {
   if (noCorners) return { status: 'sem estatística' };
   const ls = lines.filter(l => CORNER_MARKETS.includes(l.market));
@@ -278,7 +284,7 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   // Guardados: os N melhores de cada filtro da tela (todos os mercados, cada um e o ao vivo do 1º tempo).
   const keepOf = () => {
     const keep = new Set();
-    for (const market of [null, ...SCAN_MARKETS, LIVE_1H]) for (const { g } of rankGames(games, { market }).slice(0, top)) keep.add(g);
+    for (const market of [null, ...FILTER_KEYS, LIVE_1H]) for (const { g } of rankGames(games, { market }).slice(0, top)) keep.add(g);
     return keep;
   };
   // 3ª passada: confronto direto em todas as competições (API) dos jogos guardados, e o contexto refeito com ele
@@ -302,10 +308,11 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   // resumo dos escanteios: por que um jogo tem ou não tem linha de escanteios na lista
   const cornersReport = games.reduce((o, g) => { const k = g.corners?.status || 'sem linha'; o[k] = (o[k] || 0) + 1; return o; }, {});
   for (const g of games) if (g.corners?.source && g.corners.status !== 'sem linha') cornersReport[`preço ${g.corners.source}`] = (cornersReport[`preço ${g.corners.source}`] || 0) + 1;
-  // v 6: jogo difícil de analisar (base/reservas, ligas diferentes); v 5: piso de 60% de acerto e odd mínima com
+  // v 7: só over, chutes e 1X2, "Melhor do jogo" sem escanteios; v 6: jogo difícil de analisar (base/reservas,
+  // ligas diferentes); v 5: piso de 60% de acerto e odd mínima com
   // piso de 1,50; v 4: janela de horas, contexto e plano ao vivo do 1º tempo. A tela avisa quando a varredura
   // guardada é de antes
-  return { v: 6, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
+  return { v: 7, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
     generated_at: new Date(now).toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }

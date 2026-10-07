@@ -4,7 +4,7 @@
 // o plano de entrada ao vivo nos escanteios do 1º tempo, os gráficos dos últimos 10 jogos de cada time na
 // melhor linha e o atalho para a análise completa do jogo.
 
-import { GOAL_HANDICAP, HANDICAP, LIVE_1H, MAIN_MARKETS, SCAN_MARKETS, bestLine, pickGames, scanDay } from './scanner.js';
+import { FILTER_KEYS, GOAL_HANDICAP, LIVE_1H, MAIN_MARKETS, SHOTS, SHOTS_FILTER, bestLine, pickGames, scanDay } from './scanner.js';
 import { bindTooltips, renderDashboard } from './dashboard.js';
 import { load, save } from './store.js';
 import { bindSpecialist, briefScan } from './brief.js';
@@ -29,7 +29,8 @@ const gap1 = l => nb(Math.round(priceGap(l) * 10) / 10);   // 5,3: o corte é 5%
 const gapTxt = l => `${gap1(l)}% acima da Pinnacle`;
 const ctxContra = l => isCandidate(l) && l.context?.verdict === 'contra';
 const SHORT = { 'Total escanteios 1T': 'Escanteios 1T', 'Total de escanteios': 'Escanteios', 'Total de gols 1T': 'Gols 1T',
-  'Total de gols': 'Gols', [HANDICAP]: 'Handicap esc.', [GOAL_HANDICAP]: 'Handicap gols' };
+  'Total de gols': 'Gols', [GOAL_HANDICAP]: 'Handicap gols', 'Total de chutes': 'Chutes', 'Total de chutes no gol': 'Chutes no gol',
+  '1X2': '1X2', [SHOTS_FILTER]: 'Chutes' };
 const signed = x => `${x > 0 ? '+' : ''}${nb(x)}`;
 const tierTag = l => `<span class="tag ${l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no'}">${l.tier}</span>${srcTag(l)}`;
 // de onde vem o preço quando não é a odd da Pinnacle na própria linha
@@ -56,7 +57,8 @@ const probs = l => `${pct(l.p_blend)} <span class="muted">· ${l.p_pinnacle != n
 const hits = l => [l.history?.home, l.history?.away].map(x => (x && (x.raw?.n ?? x.n) ? (x.hits || `${nb(x.wins)}/${x.n}`) : '—')).join(' · ');
 const thr = l => parseFloat(l.id.match(/-?[\d.]+$/)?.[0]) || 0;
 // Filtros: a melhor linha de cada jogo, cada mercado e os jogos para a entrada ao vivo no 1º tempo.
-const FILTERS = [['Melhor do jogo', null], ...SCAN_MARKETS.map(m => [SHORT[m], m]), ['1T ao vivo', LIVE_1H]];
+// Melhor do jogo: handicap de gols, gols, chutes e 1X2 (escanteios só nas abas deles, e só over).
+const FILTERS = [['Melhor do jogo', null], ...FILTER_KEYS.map(m => [SHORT[m], m]), ['1T ao vivo', LIVE_1H]];
 // Plano ao vivo: odd mínima e chance do over numa linha, no minuto e com os escanteios dados.
 const liveCell = (plan, c, m, L) => {
   const x = plan?.tables.find(t => t.corners === c)?.rows.find(r => r.minute === m)?.cells.find(z => z.line === L);
@@ -97,7 +99,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     $('#scanSpec').hidden = !scan?.games.length;
     if (!scan) { out.innerHTML = ''; return; }
     const top = scan.top || 20, live = market === LIVE_1H;
-    ranked = scan.v >= 5 ? pickGames(scan.games, { market, top, order }) : [];
+    ranked = scan.v >= 7 ? pickGames(scan.games, { market, top, order }) : [];
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const chips = FILTERS.map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
     const orders = [['Horário', 'time'], ['Chance de ganho', 'chance']].map(([t, o]) => `<button class="${order === o ? 'on' : ''}" data-o="${o}">${t}</button>`).join('');
@@ -128,7 +130,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
       ${scan.skipped.map(s => `<li>${hour(s.fx.t)} ${esc(s.fx.home.name)} x ${esc(s.fx.away.name)} <span class="muted">(${esc(s.fx.league.name)}): ${esc(s.why)}</span></li>`).join('')}</ul></details>` : '';
     const nBet = live ? 0 : ranked.filter(x => isBet(x.line)).length;
-    const old = scan.v >= 6 ? '' : `<p class="msg">Varredura feita antes ${scan.v >= 5 ? 'da regra de jogo difícil (base/reservas, ligas diferentes)' : 'do piso de 60% de acerto'}: toque em Varrer jogos de novo.</p>`;
+    const old = scan.v >= 7 ? '' : '<p class="msg">Varredura feita antes da regra "só over" (com chutes e 1X2, e o Melhor do jogo sem escanteios): toque em Varrer jogos de novo.</p>';
     const explain = live
       ? `<p class="muted">Jogos para a entrada ao vivo no over de escanteios do 1º tempo, dos que mais devem ter escanteios no 1º tempo (com o total
         da Pinnacle primeiro). Cada casa: odd mínima do Mais de 3,5 e a chance. Sem escanteio, a odd mínima sobe a cada minuto: entre só quando a casa
@@ -143,7 +145,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       <div class="chips" id="scanChips">${chips}</div>
       <div class="chips" id="scanOrder"><span class="muted">Ordem:</span>${orders}</div>
       ${ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`
-        : scan.v >= 5 ? `<p class="muted">${live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
+        : scan.v >= 7 ? `<p class="muted">${live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
           : 'Nenhum jogo com linha principal jogável (chance ≥ 60%, odd mínima 1,50–3,00) neste filtro.'}</p>` : ''}
       ${skipped}${cards}`;
     bindTooltips(out);
@@ -168,15 +170,11 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       p ? `histórico do 1º tempo: ${g.c1_known[0]} e ${g.c1_known[1]} dos últimos 10 jogos` : '',
       esc(g.no_history || ''), esc(g.no_h2h || ''), ...g.alerts.map(esc),
     ].filter(Boolean);
-    // as linhas principais do jogo — de cada total, o lado com mais chance — e o melhor de cada handicap
-    const totals = new Map();
-    for (const l of g.lines.filter(x => isMain(x.id))) {
-      const k = `${l.market}|${thr(l)}`;
-      if (!totals.has(k) || l.p_blend > totals.get(k).p_blend) totals.set(k, l);
-    }
-    const hcps = [HANDICAP, GOAL_HANDICAP].map(m => bestLine(g.lines, { market: m })).filter(Boolean);
-    const all = [...totals.values()].sort((a, b) => MAIN_MARKETS.indexOf(a.market) - MAIN_MARKETS.indexOf(b.market) || thr(a) - thr(b))
-      .concat(hcps);
+    // as linhas principais do jogo: os overs de escanteios e gols da lista e a melhor de handicap de gols, de cada
+    // chutes e do 1X2
+    const totals = g.lines.filter(x => isMain(x.id) && MAIN_MARKETS.includes(x.market))
+      .sort((a, b) => MAIN_MARKETS.indexOf(a.market) - MAIN_MARKETS.indexOf(b.market) || thr(a) - thr(b));
+    const all = totals.concat([GOAL_HANDICAP, ...SHOTS, '1X2'].map(m => bestLine(g.lines, { market: m })).filter(Boolean));
     const table = all.length ? `<div class="scroll"><table class="mainlines"><tr><th>Linha</th><th>Nível</th><th>Contexto</th><th>Chance · Pinnacle</th>
       <th>Últ. 10</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th><th>Valor</th></tr>${all.map(l => `<tr class="${top && l.id === top.id ? 'on' : ''}${isBet(l) ? '' : ' weak'}">
         <td>${esc(SHORT[l.market])}: <b>${esc(l.line)}</b></td><td>${tierTag(l)}</td><td>${ctxTag(l)}</td><td>${probs(l)}</td><td class="muted">${hits(l)}</td>
