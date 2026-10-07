@@ -49,6 +49,17 @@ export function scoreMatrix(lh, la, rho = RHO) {
   return { diff: norm(diff), tot: norm(tot), btts: btts / z };
 }
 
+// A mesma matriz, placar a placar: [[gols do mandante, do visitante, probabilidade]], somando 1 (combos.js).
+export function scoreGrid(lh, la, rho = RHO) {
+  const ph = dist(lh, 1, MAXG), pa = dist(la, 1, MAXG);
+  const tau = (i, j) => (i === 0 && j === 0 ? 1 - lh * la * rho : i === 0 && j === 1 ? 1 + lh * rho
+    : i === 1 && j === 0 ? 1 + la * rho : i === 1 && j === 1 ? 1 - rho : 1);
+  const g = [];
+  let z = 0;
+  for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) { const p = Math.max(0, tau(i, j) * ph[i] * pa[j]); g.push([i, j, p]); z += p; }
+  return g.map(([i, j, p]) => [i, j, p / z]);
+}
+
 // Liquidação asiática da aposta "X + line > 0". Linhas de quarto = meia aposta em cada meia-linha (o app não
 // as oferece, mas a liquidação serve para ler o preço da Pinnacle e apostas registradas nelas).
 // Devolve probabilidades efetivas: EV = pWin·(odd−1) − pLose.
@@ -231,7 +242,7 @@ export function impliedTotal(fair, prefix, phi) {
   return { from_line: c[0], p_over_no_vig: c[1], implied_total: (lo + hi) / 2 };
 }
 
-const SCENARIOS = [[1, -1], [-1, 1], [1, 1], [-1, -1]];   // ±1 erro-padrão em cada lado
+export const SCENARIOS = [[1, -1], [-1, 1], [1, 1], [-1, -1]];   // ±1 erro-padrão em cada lado
 const ALWAYS = new Set(['1X2', 'Ambas marcam', 'Resultado escanteios', 'Resultado escanteios 1T']);          // mercados exibidos inteiros, qualquer probabilidade
 
 // fair: probabilidades sem margem da Pinnacle (odds.js collect). Quando ela precifica o total de

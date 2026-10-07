@@ -103,7 +103,7 @@ export function marketOfId(id) {
   const tests = [[/^[12X]$/, '1X2'], [/^ah[HA]/, 'Handicap asiático'], [/^g1[OU]/, 'Total de gols 1T'], [/^g[OU]/, 'Total de gols'],
     [/^btts/, 'Ambas marcam'], [/^c1h[HA]/, 'Handicap escanteios 1T'], [/^c1x/, 'Resultado escanteios 1T'], [/^c1[OU]/, 'Total escanteios 1T'],
     [/^ch[HA]/, 'Handicap de escanteios'], [/^cx/, 'Resultado escanteios'], [/^cr[HAN]/, 'Corrida de escanteios'],
-    [/^c[HA][OU]/, 'Escanteios por time'], [/^corners[OU]/, 'Total de escanteios'], [/^shots[OU]/, 'Total de chutes'], [/^sot[OU]/, 'Total de chutes no gol']];
+    [/^cb:/, 'Combo'], [/^c[HA][OU]/, 'Escanteios por time'], [/^corners[OU]/, 'Total de escanteios'], [/^shots[OU]/, 'Total de chutes'], [/^sot[OU]/, 'Total de chutes no gol']];
   return tests.find(([re]) => re.test(id || ''))?.[1] || null;
 }
 

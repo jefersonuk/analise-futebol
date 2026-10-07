@@ -3,6 +3,7 @@
 // dos jogos por começar com odds da Pinnacle, pelo mesmo modelo do app. "Melhor do jogo" olha só handicap de
 // gols, gols, chutes e 1X2; escanteios ficam nas abas deles. Liga sem estatística na API (USL Championship,
 // Liga de Expansión, Primera B…) entra só com gols, handicap de gols e 1X2.
+// Combos: duas pernas no mesmo jogo (resultado + over de gols), com a chance da matriz de placares (combos.js).
 //
 // Janela: as próximas N horas (padrão da tela: 4 h, até 20 jogos, em ordem de horário) ou um dia inteiro.
 // Cada jogo leva o contexto (context.js: tabela, médias de gols e escanteios no mando, esperado, confronto
@@ -30,6 +31,7 @@ import { GOAL_HANDICAP, HIT_MIN, MAIN_LINES, SHOTS, floorOutOfReach, isMain, isM
 import { buildContext } from './context.js';
 import { livePlanOf } from './live.js';
 import { hardGame } from './hard.js';
+import { comboLines } from './combos.js';
 
 export { GOAL_HANDICAP, SHOTS };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
@@ -39,8 +41,9 @@ export const BEST_MARKETS = [GOAL_HANDICAP, 'Total de gols', 'Total de gols 1T',
 // Filtros da tela (abas): cada mercado, e "Chutes" juntando total e no gol
 export const SHOTS_FILTER = 'Chutes';
 const GROUPS = { [SHOTS_FILTER]: SHOTS };
-export const FILTER_KEYS = [...MAIN_MARKETS, GOAL_HANDICAP, SHOTS_FILTER, '1X2'];
 export const LIVE_1H = 'live1h';   // filtro da tela: jogos para a entrada ao vivo nos escanteios do 1º tempo
+export const COMBOS = 'combos';    // filtro da tela: combos de duas pernas no mesmo jogo (combos.js)
+export const FILTER_KEYS = [...MAIN_MARKETS, GOAL_HANDICAP, SHOTS_FILTER, '1X2', COMBOS];
 const GOALS_ONLY = ['Total de gols 1T', 'Total de gols', GOAL_HANDICAP, '1X2'];
 const TZ = 'America/Sao_Paulo';
 export const brDate = t => new Date(t).toLocaleDateString('sv-SE', { timeZone: TZ });   // AAAA-MM-DD em Brasília
@@ -116,9 +119,11 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
   const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market), context, hard });
   const lines = priced.filter(isMainLine).concat(anchored.filter(l => isMain(l.id)));
   const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
+  // combos de duas pernas (resultado + over de gols), pela matriz de placares da Pinnacle + modelo
+  const combos = comboLines({ res, fair, teams, names, banca, hard });
   const a = res.anchors, h1 = !noCorners;
   return {
-    fx, teams, lines, best, alerts, odds_age_min: ageMin, team_base: teamBase, no_corners: noCorners,
+    fx, teams, lines, best, combos, alerts, odds_age_min: ageMin, team_base: teamBase, no_corners: noCorners,
     favor: res.favor && Object.fromEntries(Object.entries(res.favor).map(([k, v]) => [k, typeof v === 'number' ? r2(v) : v])),
     favor_text: favorSummary(res.favor, names),
     c1_known: teams.map(t => t.games.filter(g => g.c1).length),
@@ -146,6 +151,8 @@ function cornersStatus(lines, noCorners) {
 // Ordem dos jogos pela chance de ganho: a melhor linha de cada um (no filtro pedido), apostas primeiro, depois
 // consistência. market LIVE_1H: os jogos com plano ao vivo do 1º tempo, pelos escanteios esperados no 1º tempo.
 export function rankGames(games, opts = {}) {
+  if (opts.market === COMBOS) return games.filter(g => g.combos?.length).map(g => ({ g, line: g.combos.find(isBet) || g.combos[0] }))
+    .sort((a, b) => isBet(b.line) - isBet(a.line) || byConsistency(a.line, b.line));
   if (opts.market === LIVE_1H) return games.filter(g => g.live1h).map(g => ({ g, line: null }))
     .sort((a, b) => b.g.live1h.anchored - a.g.live1h.anchored || b.g.live1h.mu - a.g.live1h.mu);
   return games.map(g => ({ g, line: bestLine(g.lines, opts) })).filter(x => x.line)
@@ -308,11 +315,11 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   // resumo dos escanteios: por que um jogo tem ou não tem linha de escanteios na lista
   const cornersReport = games.reduce((o, g) => { const k = g.corners?.status || 'sem linha'; o[k] = (o[k] || 0) + 1; return o; }, {});
   for (const g of games) if (g.corners?.source && g.corners.status !== 'sem linha') cornersReport[`preço ${g.corners.source}`] = (cornersReport[`preço ${g.corners.source}`] || 0) + 1;
-  // v 7: só over, chutes e 1X2, "Melhor do jogo" sem escanteios; v 6: jogo difícil de analisar (base/reservas,
+  // v 8: combos de duas pernas; v 7: só over, chutes e 1X2, "Melhor do jogo" sem escanteios; v 6: jogo difícil de analisar (base/reservas,
   // ligas diferentes); v 5: piso de 60% de acerto e odd mínima com
   // piso de 1,50; v 4: janela de horas, contexto e plano ao vivo do 1º tempo. A tela avisa quando a varredura
   // guardada é de antes
-  return { v: 7, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
+  return { v: 8, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
     generated_at: new Date(now).toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }

@@ -151,7 +151,8 @@ export function initEntry({ getLine, getFixture }) {
       ['Consistência', `${line.tier} · acerta ${pct(line.p_blend)} <span class="muted">(piso 60%, ideal 70%)</span>`],
       ['Preço justo', num(line.fair_odd_blend)],
       ['Odd mínima', `<b>${num(line.odd_min)}</b>`],
-      ['Pinnacle', line.pinnacle_odd ? num(line.pinnacle_odd) : line.derived ? 'não cota esta linha (derivada do total dela)' : 'sem odd (modelo ancorado)'],
+      line.combo ? ['Pernas separadas', `${num(line.odd_indep)} <span class="muted">(produto das justas; a Pinnacle não cota combos — a chance sai da matriz de placares dela)</span>`]
+        : ['Pinnacle', line.pinnacle_odd ? num(line.pinnacle_odd) : line.derived ? 'não cota esta linha (derivada do total dela)' : 'sem odd (modelo ancorado)'],
     ].map(([k, v]) => `<span class="muted">${k}</span><span>${v}</span>`).join('');
     $('#enManual').checked = false;
     $('#enManual').disabled = false;
