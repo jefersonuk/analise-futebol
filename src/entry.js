@@ -55,6 +55,8 @@ export function buildEntry({ line, fx, casa, currency, odd, stake, stakeNat = nu
       p_model: line.p_model, p_blend: line.p_blend, p_pinnacle: line.p_pinnacle ?? null,
       fair_odd: line.fair_odd_blend, odd_min: line.odd_min, pinnacle_odd: line.pinnacle_odd ?? null,
       priced_by: line.priced_by, fragile: !!line.fragile,
+      // entrada manual: sua análise, registrada sem as regras do app (piso de 60%, odd mínima, jogo difícil)
+      ...(line.manual ? { manual: true } : {}),
     },
   };
 }

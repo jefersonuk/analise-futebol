@@ -39,6 +39,7 @@
   <select id="teamSel" hidden></select>
   <select id="fixSel" hidden></select>
   <div class="row">
+    <button id="btnManual" class="ghost" title="Registre no app de apostas uma entrada da sua análise, sem as regras do app">✍️ Entrada manual</button>
     <button id="btnRun" class="primary" disabled>Analisar jogo</button>
   </div>
   <p id="msg" class="msg" hidden></p>
@@ -118,6 +119,22 @@
     <h2 id="enTitle"></h2>
     <p id="enGame" class="muted"></p>
     <div id="enFacts" class="facts"></div>
+    <label class="chk" for="enManual"><input id="enManual" type="checkbox"> Minha análise: registrar sem as regras do app (piso de 60%, odd mínima, jogo difícil)</label>
+    <div id="enFree" hidden>
+      <div class="grid2">
+        <div><label for="enHome">Mandante</label><input id="enHome" type="text" autocomplete="off"></div>
+        <div><label for="enAway">Visitante</label><input id="enAway" type="text" autocomplete="off"></div>
+      </div>
+      <div class="grid2">
+        <div><label for="enComp">Competição</label><input id="enComp" type="text" autocomplete="off"></div>
+        <div><label for="enWhen">Data e hora do jogo</label><input id="enWhen" type="datetime-local"></div>
+      </div>
+    </div>
+    <div id="enLineWrap" hidden>
+      <label for="enLine">Linha</label>
+      <input id="enLine" type="text" autocomplete="off" placeholder="Ex.: Mais de 9,5 escanteios · Acima 2.5 · H1(-1) · Abaixo 4.5 1º período - escanteios">
+      <p id="enLineMsg" class="muted"></p>
+    </div>
     <label for="enHouse">Casa</label>
     <select id="enHouse"></select>
     <input id="enHouseOther" type="text" placeholder="Nome da casa" hidden>

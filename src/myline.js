@@ -98,6 +98,15 @@ export function parseLine(text, { names = null, market = null } = {}) {
   return { error: 'Não reconheci a linha. Use o mercado e a linha nas listas abaixo.' };
 }
 
+// Mercado de uma linha pelo id (para a entrada manual: a linha digitada vira id e mercado do app).
+export function marketOfId(id) {
+  const tests = [[/^[12X]$/, '1X2'], [/^ah[HA]/, 'Handicap asiático'], [/^g1[OU]/, 'Total de gols 1T'], [/^g[OU]/, 'Total de gols'],
+    [/^btts/, 'Ambas marcam'], [/^c1h[HA]/, 'Handicap escanteios 1T'], [/^c1x/, 'Resultado escanteios 1T'], [/^c1[OU]/, 'Total escanteios 1T'],
+    [/^ch[HA]/, 'Handicap de escanteios'], [/^cx/, 'Resultado escanteios'], [/^cr[HAN]/, 'Corrida de escanteios'],
+    [/^c[HA][OU]/, 'Escanteios por time'], [/^corners[OU]/, 'Total de escanteios'], [/^shots[OU]/, 'Total de chutes'], [/^sot[OU]/, 'Total de chutes no gol']];
+  return tests.find(([re]) => re.test(id || ''))?.[1] || null;
+}
+
 // ---- preço de qualquer linha ----
 // O dossiê traz as linhas com Pinnacle e as ancoradas; as demais saem do modelo (margem de 8%).
 // teams: [{ role, name, games }] (últimos jogos, como no painel).
