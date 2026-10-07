@@ -1,7 +1,7 @@
 // Painel: as 5 linhas de maior EV e como cada time se saiu nelas nos últimos 10 jogos.
 
 import { roleOf, settle } from './model.js';
-import { HIT_MIN, isMainLine, isUnder, rankScore, rankTier, underOk } from './consistency.js';
+import { HIT_MIN, isCornerSide, isMainLine, isUnder, rankScore, rankTier, underOk } from './consistency.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const numBR = x => String(x).replace('.', ',');
@@ -210,7 +210,8 @@ const ctxRow = c => (c ? `<p class="ctxline"><span class="tag ${CTX_CLS[c.verdic
 function outsideReason(l, ok = []) {
   if (ok.includes(l.id)) return null;
   if (l.blocked) return 'jogo difícil: só over de gols da Pinnacle';
-  if (isUnder(l.id) && !underOk(l)) return 'under só se for âncora';
+  if (isUnder(l.id)) return 'under fora (só over)';
+  if (isCornerSide(l.id)) return 'escanteios: só over do total';
   if (l.tier === 'especulativa') {
     if (l.p_blend < HIT_MIN) return `acerta ${pct(l.p_blend)}: abaixo do piso de 60%`;
     if (l.p_model_range[0] < HIT_MIN - 0.1) return 'pior cenário do modelo abaixo de 50%';
@@ -241,7 +242,7 @@ export function pickDashboard(dossier, n = 5, { focus = true } = {}) {
   const out = [...first], used = new Set(out.map(l => l.id));
   const add = (l, outside) => { if (out.length < n && !used.has(l.id)) { used.add(l.id); out.push(outside ? { ...l, outside } : l); } };
   const markets = new Set(out.map(l => l.market));
-  all.filter(l => !l.inviable && l.odd_min >= 1.2 && !markets.has(l.market))
+  all.filter(l => !l.inviable && underOk(l) && l.odd_min >= 1.2 && !markets.has(l.market))
     .sort((a, b) => (a.odd_min < 1.5) - (b.odd_min < 1.5) || better(a, b))
     .forEach(l => { if (!markets.has(l.market)) { markets.add(l.market); add(l, outsideReason(l, [])); } });
   return out;
