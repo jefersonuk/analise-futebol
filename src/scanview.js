@@ -4,7 +4,7 @@
 // o plano de entrada ao vivo nos escanteios do 1º tempo, os gráficos dos últimos 10 jogos de cada time na
 // melhor linha e o atalho para a análise completa do jogo.
 
-import { FILTER_KEYS, GOAL_HANDICAP, LIVE_1H, MAIN_MARKETS, SHOTS, SHOTS_FILTER, bestLine, pickGames, scanDay } from './scanner.js';
+import { COMBOS, FILTER_KEYS, GOAL_HANDICAP, LIVE_1H, MAIN_MARKETS, SHOTS, SHOTS_FILTER, bestLine, pickGames, scanDay } from './scanner.js';
 import { bindTooltips, renderDashboard } from './dashboard.js';
 import { load, save } from './store.js';
 import { bindSpecialist, briefScan } from './brief.js';
@@ -30,7 +30,7 @@ const gapTxt = l => `${gap1(l)}% acima da Pinnacle`;
 const ctxContra = l => isCandidate(l) && l.context?.verdict === 'contra';
 const SHORT = { 'Total escanteios 1T': 'Escanteios 1T', 'Total de escanteios': 'Escanteios', 'Total de gols 1T': 'Gols 1T',
   'Total de gols': 'Gols', [GOAL_HANDICAP]: 'Handicap gols', 'Total de chutes': 'Chutes', 'Total de chutes no gol': 'Chutes no gol',
-  '1X2': '1X2', [SHOTS_FILTER]: 'Chutes' };
+  '1X2': '1X2', [SHOTS_FILTER]: 'Chutes', [COMBOS]: 'Combos', Combo: 'Combo' };
 const signed = x => `${x > 0 ? '+' : ''}${nb(x)}`;
 const tierTag = l => `<span class="tag ${l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no'}">${l.tier}</span>${srcTag(l)}`;
 // de onde vem o preço quando não é a odd da Pinnacle na própria linha
@@ -65,6 +65,16 @@ const liveCell = (plan, c, m, L) => {
   return x ? `<b>${n2(x.odd_min)}</b> <span class="muted">${pct(x.p)}</span>` : '—';
 };
 const started = g => Date.now() > g.fx.t;
+// Combos: quanto as pernas andam juntas (chance das duas ÷ produto das chances de cada uma)
+const corrTag = c => {
+  const d = Math.round((c.corr - 1) * 100);
+  return d >= 3 ? `<span class="tag ok" title="as pernas andam juntas: o combo acerta ${d}% mais do que se fossem independentes; a casa costuma pagar menos que o produto">juntas +${d}%</span>`
+    : d <= -3 ? `<span class="tag mid" title="uma perna atrapalha a outra: o combo acerta ${-d}% menos do que se fossem independentes">contra ${d}%</span>`
+      : '<span class="tag">independentes</span>';
+};
+const comboHead = '<th>Combo</th><th>Nível</th><th>Chance · Pinnacle</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pernas separadas</th><th>Pernas</th>';
+const comboCells = c => `<td><b>${esc(c.line)}</b></td><td>${tierTag(c)}</td><td>${probs(c)}</td><td class="muted">${hits(c)}</td>
+  <td>${n2(c.fair_odd_blend)}</td><td><b>${n2(c.odd_min)}</b></td><td class="muted">${n2(c.odd_indep)}</td><td>${corrTag(c)}</td>`;
 
 export function initScan({ api, openEntry, analyzeFixture, banca }) {
   let scan = null, market = null, order = 'time', ranked = [];
@@ -98,8 +108,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const out = $('#scanOut');
     $('#scanSpec').hidden = !scan?.games.length;
     if (!scan) { out.innerHTML = ''; return; }
-    const top = scan.top || 20, live = market === LIVE_1H;
-    ranked = scan.v >= 7 ? pickGames(scan.games, { market, top, order }) : [];
+    const top = scan.top || 20, live = market === LIVE_1H, combos = market === COMBOS, ok = scan.v >= (combos ? 8 : 7);
+    ranked = ok ? pickGames(scan.games, { market, top, order }) : [];
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const chips = FILTERS.map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
     const orders = [['Horário', 'time'], ['Chance de ganho', 'chance']].map(([t, o]) => `<button class="${order === o ? 'on' : ''}" data-o="${o}">${t}</button>`).join('');
@@ -117,21 +127,30 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         return `<tr ${go}>${game}<td>${n2(p.mu)}${p.anchored ? ` <span class="muted">· Pin ${n2(p.pinnacle_total)}</span>` : ' <span class="muted">· modelo</span>'}</td>
           <td>${liveCell(p, 0, 0, 3.5)}</td><td>${liveCell(p, 0, 5, 3.5)}</td><td>${liveCell(p, 0, 10, 3.5)}</td><td>${liveCell(p, 1, 10, 3.5)}</td></tr>`;
       }
+      if (combos) return `<tr ${go} class="${isBet(line) ? '' : 'weak'}">${game}${comboCells(line)}</tr>`;
       const gap = priceGap(line);
       return `<tr ${go} class="${isBet(line) ? '' : 'weak'}">${game}<td>${esc(SHORT[line.market] || line.market)}: <b>${esc(line.line)}</b></td>
         <td>${tierTag(line)}${gap ? ` <span class="tag price" title="sem aposta: a odd mínima fica ${gapTxt(line)}; casa soft raramente paga mais de 5% acima">+${gap1(line)}% Pin</span>` : ''}</td>
         <td>${ctxTag(line)}</td><td>${probs(line)}</td><td class="muted">${hits(line)}</td><td>${n2(line.fair_odd_blend)}</td><td><b>${n2(line.odd_min)}</b></td>
         <td class="muted">${line.pinnacle_odd ? n2(line.pinnacle_odd) : '—'}</td><td>${valueTxt(line)}</td></tr>`;
     }).join('');
-    const head = live
+    const head = combos ? `<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th>${comboHead}</tr>` : live
       ? '<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Esperado 1T</th><th>+3,5 no 0\'</th><th>5\' sem esc.</th><th>10\' sem esc.</th><th>10\' com 1</th></tr>'
       : '<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Linha</th><th>Nível</th><th>Contexto</th><th>Chance · Pinnacle</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th><th>Valor</th></tr>';
     const cards = ranked.map(({ g, line }, i) => card(g, line, i)).join('');
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
       ${scan.skipped.map(s => `<li>${hour(s.fx.t)} ${esc(s.fx.home.name)} x ${esc(s.fx.away.name)} <span class="muted">(${esc(s.fx.league.name)}): ${esc(s.why)}</span></li>`).join('')}</ul></details>` : '';
     const nBet = live ? 0 : ranked.filter(x => isBet(x.line)).length;
-    const old = scan.v >= 7 ? '' : '<p class="msg">Varredura feita antes da regra "só over" (com chutes e 1X2, e o Melhor do jogo sem escanteios): toque em Varrer jogos de novo.</p>';
-    const explain = live
+    const old = ok ? '' : combos ? '<p class="msg">Varredura feita antes dos combos: toque em Varrer jogos de novo.</p>'
+      : '<p class="msg">Varredura feita antes da regra "só over" (com chutes e 1X2, e o Melhor do jogo sem escanteios): toque em Varrer jogos de novo.</p>';
+    const explain = combos
+      ? `<p class="muted"><b>${nBet} ${nBet === 1 ? 'jogo com combo para apostar' : 'jogos com combo para apostar'}</b>. Combo = duas pernas no mesmo jogo ("criar aposta"):
+        um resultado (vitória, dupla chance, empate anula ou handicap ±1,5) + over de gols. A chance sai da matriz de placares da Pinnacle (1X2 e total de
+        gols, sem margem) com 10% do modelo — as pernas não são independentes, então não é o produto das duas. Só aparecem combos com chance ≥ 60%,
+        odd mínima 1,50–3,00 e que pagam pelo menos 10% mais que a melhor perna sozinha. <b>Pernas separadas</b> = produto das odds justas de cada perna:
+        quando as pernas andam juntas, a casa costuma pagar menos que isso; se ela pagar a mínima, entre. Empate anula com empate: a perna volta e vale só a
+        de gols (regra da maioria das casas — confira).</p>`
+      : live
       ? `<p class="muted">Jogos para a entrada ao vivo no over de escanteios do 1º tempo, dos que mais devem ter escanteios no 1º tempo (com o total
         da Pinnacle primeiro). Cada casa: odd mínima do Mais de 3,5 e a chance. Sem escanteio, a odd mínima sobe a cada minuto: entre só quando a casa
         pagar pelo menos ela. A grade completa e a calculadora estão em cada jogo.</p>`
@@ -145,7 +164,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       <div class="chips" id="scanChips">${chips}</div>
       <div class="chips" id="scanOrder"><span class="muted">Ordem:</span>${orders}</div>
       ${ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`
-        : scan.v >= 7 ? `<p class="muted">${live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
+        : ok ? `<p class="muted">${combos ? 'Nenhum combo com chance ≥ 60% e odd mínima 1,50–3,00 nos jogos analisados.' : live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
           : 'Nenhum jogo com linha principal jogável (chance ≥ 60%, odd mínima 1,50–3,00) neste filtro.'}</p>` : ''}
       ${skipped}${cards}`;
     bindTooltips(out);
@@ -153,7 +172,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   }
 
   function card(g, line, i) {
-    const top = line || bestLine(g.lines), p = g.pinnacle_1h, e = g.expected_1h;
+    const top = (line && !line.combo ? line : null) || bestLine(g.lines), p = g.pinnacle_1h, e = g.expected_1h;
     const facts = [
       g.hard ? `<b>⚠️ jogo difícil de analisar</b> (${esc(g.hard.reasons.join('; '))}): só over de gols com a odd da Pinnacle, com metade da entrada` : '',
       !top ? '<b>sem linha principal jogável</b> (odd mínima 1,50–3,00)'
@@ -189,9 +208,22 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       <p class="muted facts">${facts.join(' · ')}</p>
       ${ctx}
       ${table}
+      ${comboBlock(g)}
       ${renderLive(g.live1h)}
       ${top ? renderDashboard([top], g.teams) : ''}
     </article>`;
+  }
+
+  // Combos do jogo: abertos no filtro Combos; nos outros, recolhidos
+  function comboBlock(g) {
+    if (!g.combos?.length) return '';
+    const rows = g.combos.map(c => `<tr class="${isBet(c) ? '' : 'weak'}">${comboCells(c)}
+      <td>${isBet(c) ? `<button class="enter" data-enter="${esc(c.id)}">➕ Entrar</button>` : ''}</td></tr>`).join('');
+    const legs = c => c.legs.map(x => `${esc(x.line)} ${pct(x.p)}${x.push ? ` (devolve ${pct(x.push)})` : ''} · justa ${n2(x.fair_odd)}`).join(' — ');
+    const best = g.combos.find(isBet) || g.combos[0];
+    return `<details class="combos"${market === COMBOS ? ' open' : ''}><summary>Combos de duas pernas (${g.combos.length}${g.combos.some(isBet) ? `, ${g.combos.filter(isBet).length} para apostar` : ''})</summary>
+      <p class="muted">Melhor: <b>${esc(best.line)}</b> — acerta ${pct(best.p_blend)}${best.push_prob > 0.005 ? ` (${pct(best.p_full)} com as duas pernas, ${pct(best.push_prob)} só a de gols)` : ''}, procure odd ≥ ${n2(best.odd_min)}${isBet(best) ? '' : ' (especulativo: sem aposta)'}. Pernas: ${legs(best)}.</p>
+      <div class="scroll"><table class="mainlines"><tr>${comboHead}<th></th></tr>${rows}</table></div></details>`;
   }
 
   $('#scanOut').addEventListener('click', e => {
@@ -205,7 +237,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     if (full) { openFull(ranked[full.dataset.full].g.fx, full); return; }
     const en = e.target.closest('[data-enter]');
     if (en) {
-      const { g, line } = ranked[en.closest('[data-g]').dataset.g], l = line || bestLine(g.lines);
+      const { g, line } = ranked[en.closest('[data-g]').dataset.g];
+      const l = [line, ...(g.combos || []), ...g.lines].find(x => x && x.id === en.dataset.enter) || bestLine(g.lines);
       if (l) openEntry(l.id, null, { line: l, fx: g.fx, btn: en });
     }
   });

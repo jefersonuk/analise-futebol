@@ -6,6 +6,7 @@
 import { history } from './dashboard.js';
 import { collect } from './odds.js';
 import { statsOf } from './client.js';
+import { isCombo, liveCombo, settleCombo } from './combos.js';
 
 const BASE = 'https://v3.football.api-sports.io';
 const FINISHED = new Set(['FT', 'AET', 'PEN']);
@@ -36,6 +37,7 @@ export function gameOf(f, c1 = null) {
 
 // Liquida uma linha num jogo encerrado: 'A' | 'HW' | 'VOID' | 'HL' | 'RED', ou null se faltar dado.
 export function settleLine(lineId, game, homeName = 'Mandante') {
+  if (isCombo(lineId)) return settleCombo(lineId, game.gf, game.ga, { home: homeName, away: game.opp || 'Visitante' });
   const h = history(lineId, 'home', homeName, [game]);
   const bar = h?.bars[0];
   return bar ? { winner: WINNER[bar.res], value: bar.v, what: h.what, threshold: h.threshold } : null;
@@ -61,6 +63,9 @@ export async function checkBet(meta, oddTaken) {
   const r = settleLine(meta.lineId, game, f.teams.home.name);
   const score = `${f.teams.home.name} ${game.gf}–${game.ga} ${f.teams.away.name}`;
   if (!r) return { status: 'sem dado', detail: `${score}: a API ainda não publicou a estatística desta linha` };
+  // combo com o empate anula devolvido e a perna de gols ganha: vale só ela, na odd da casa (marcar à mão)
+  if (r.manual) return { status: 'manual', detail: `${score} · ${r.detail}` };
+  if (isCombo(meta.lineId)) return { status: 'encerrado', winner: r.winner, detail: `${score} · combo: ${r.winner === 'A' ? 'as duas pernas ganharam' : 'uma perna perdeu'}`, clv: null, closingFair: null };
 
   // CLV: odd tomada contra a odd justa (sem margem) da última cotação da Pinnacle antes do jogo.
   let clv = null, closingFair = null;
@@ -132,6 +137,7 @@ export async function liveFixtures(ids, { needC1 = new Set(), c1 = new Map() } =
 // no over que ainda não bateu, quantos faltam.
 export function liveLine(lineId, info) {
   if (!lineId || !info) return null;
+  if (isCombo(lineId)) return liveCombo(lineId, info);
   const h = history(lineId, 'home', info.home, [info.game]), bar = h?.bars[0];
   if (!bar) return null;
   const now = WINNER[bar.res], firstHalf = /^(g1|c1)/.test(lineId);

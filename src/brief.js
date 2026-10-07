@@ -2,7 +2,7 @@
 // (mercados de foco, candidatas e as melhores linhas de cada mercado), para caber numa conversa sem
 // gastar o plano à toa. O texto começa com uma marca que a página do especialista reconhece.
 
-import { LIVE_1H, bestLine } from './scanner.js';
+import { COMBOS, LIVE_1H, bestLine } from './scanner.js';
 
 export const SPECIALIST_URL = 'https://claude.ai/artifact/T2QWDJ4U4zzFJSnQumKSBr';
 export const MARK = '#ESPECIALISTA-FUTEBOL v1';
@@ -50,6 +50,14 @@ const lean = (l, full = false) => l && {
   last10: [l.history?.home, l.history?.away].map(t => (t ? `${t.hits} ${t.rule}` : '—')).join(' · '),
   context: l.context && `${l.context.verdict}: ${l.context.signals.map(x => (full ? `${x.kind} ${x.verdict} (${x.text})` : `${x.kind} ${x.verdict}`)).join('; ')}`,
 };
+// Combo de duas pernas (combos.js), enxuto: as pernas com a chance de cada uma, a chance do combo (com a parte
+// em que o empate anula volta e vale só a de gols), a justa, a mínima, o produto das pernas e a correlação.
+const leanCombo = c => c && {
+  id: c.id, combo: c.line, legs: c.legs.map(x => `${x.line}: ${Math.round(x.p * 100)}%${x.push ? ` (devolve ${Math.round(x.push * 100)}%)` : ''}, justa ${x.fair_odd}`),
+  tier: c.tier, p_blend: c.p_blend, p_both_legs: c.p_full, p_only_goals_leg: c.push_prob || undefined, p_pinnacle_grid: c.p_pinnacle, p_model_range: c.p_model_range,
+  fair_odd: c.fair_odd_blend, odd_min: c.odd_min, odd_legs_product: c.odd_indep, correlation: c.corr, entry_brl: c.entry_brl, politica_e: c.politica_e,
+  last10: [c.history?.home, c.history?.away].map(t => (t ? t.hits : '—')).join(' · '),
+};
 // Plano ao vivo enxuto: odd mínima (e chance) do over 3, 3,5 e 4,5 nos minutos 0, 5, 8 e 10, sem escanteio e com 1.
 function leanLive(p) {
   if (!p) return null;
@@ -69,11 +77,12 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
   return {
     kind: 'varredura',
     date: scan.date, window: scan.window ? { hours: scan.hours, from: new Date(scan.window.from).toISOString(), to: new Date(scan.window.to).toISOString() } : null,
-    order: order === 'time' ? 'horário (o mais próximo primeiro)' : 'chance de ganho', filter: market === LIVE_1H ? 'ao vivo 1º tempo' : market || 'melhor do jogo',
+    order: order === 'time' ? 'horário (o mais próximo primeiro)' : 'chance de ganho',
+    filter: market === LIVE_1H ? 'ao vivo 1º tempo' : market === COMBOS ? 'combos de duas pernas' : market || 'melhor do jogo',
     generated_at: scan.generated_at, fixtures: scan.fixtures, with_odds: scan.with_odds, with_1h: scan.with_1h ?? null,
     asked_hours: scan.asked_hours ?? null, corners_report: scan.corners_report ?? null,
     games: ranked.map(({ g, line }, i) => {
-      const top = line || bestLine(g.lines);
+      const top = (line && !line.combo ? line : null) || bestLine(g.lines);
       return {
         n: i + 1,
         kickoff: new Date(g.fx.t).toISOString(), competition: g.fx.league.name, home: g.fx.home.name, away: g.fx.away.name,
@@ -84,6 +93,7 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
         top_line: lean(top, true),
         best_by_market: Object.fromEntries(Object.entries(g.best || {}).filter(([, l]) => l && l.id !== top?.id).map(([m, l]) => [m, lean(l)])),
         live_1h: leanLive(g.live1h),
+        combos: (g.combos || []).slice(0, market === COMBOS ? 4 : 2).map(leanCombo),
       };
     }),
     skipped: scan.skipped.map(s => `${s.fx.home.name} x ${s.fx.away.name} (${s.fx.league.name}): ${s.why}`),

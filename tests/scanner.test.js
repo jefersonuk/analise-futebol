@@ -27,7 +27,7 @@ function demoApi({ noHalf = true } = {}) {
 test('varredura: maior chance de ganho nas linhas principais, só com preço da Pinnacle', async () => {
   const api = demoApi();
   const scan = await scanDay(api, { date: '2026-10-01', top: 5, budget: 5000 });
-  assert.equal(scan.v, 7);
+  assert.equal(scan.v, 8);
   assert.equal(scan.with_odds, 10);
   assert.equal(scan.with_1h, 10);
   // guardados: os 5 melhores de cada filtro da tela (inclui o ao vivo do 1º tempo)
