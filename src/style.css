@@ -228,3 +228,10 @@ table.tablenow tr.on td { color: var(--blue); font-weight: 600; }
 .multisum input { width: 90px; }
 table.multitab input.mleg { width: 70px; }
 table.multitab tr.bad td { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+
+/* simulação */
+.simbar { margin: 6px 0 10px; }
+details.sims { border: 1px dashed var(--line); border-radius: 10px; padding: 8px 12px; margin: 14px 0; }
+details.sims > summary { font-weight: 700; cursor: pointer; }
+.simcard { border-top: 1px solid var(--line); padding: 8px 0; }
+table.simtab td, table.simtab th { white-space: nowrap; }

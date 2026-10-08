@@ -114,6 +114,33 @@ export async function checkBet(meta, oddTaken) {
     clv, closingFair };
 }
 
+// Para a simulação (sim.js): os jogos de uma vez (/fixtures?ids=, 20 por requisição, com a estatística), a liquidação
+// de uma linha, os escanteios do 1º tempo (1 requisição por jogo, só para linha do 1º tempo) e as justas de fechamento
+// da Pinnacle (1 por jogo).
+export const simIO = {
+  async fixtures(ids) {
+    if (!apiKey()) throw new Error('sem a chave da API-Football: salve em ⚙️ Chave');
+    const out = new Map();
+    for (let i = 0; i < ids.length; i += 20) {
+      for (const f of await get('/fixtures', { ids: ids.slice(i, i + 20).join('-') })) {
+        const st = f.fixture.status.short, g = gameOf(f);
+        out.set(f.fixture.id, { finished: FINISHED.has(st), cancelled: NO_MATCH.has(st), long: f.fixture.status.long, home: f.teams.home.name,
+          homeId: f.teams.home.id, awayId: f.teams.away.id, game: g, score: `${f.teams.home.name} ${g.gf ?? '?'}–${g.ga ?? '?'} ${f.teams.away.name}` });
+      }
+    }
+    return out;
+  },
+  settle: (lineId, f, c1 = null) => settleLine(lineId, c1 ? { ...f.game, c1 } : f.game, f.home),
+  async halfCorners(id, f) {
+    const s = await get('/fixtures/statistics', { fixture: id, half: 'true' });
+    if (!s.some(t => t.statistics_1h?.length)) return null;
+    const by = Object.fromEntries(s.map(t => [t.team.id, t.statistics_1h || []]));
+    const c = t => Number(by[t]?.find(x => x.type === 'Corner Kicks')?.value) || 0;
+    return [c(f.homeId), c(f.awayId)];
+  },
+  async closing(id) { return collect((await get('/odds', { fixture: id, bookmaker: 4 }))[0]?.bookmakers || []).fair; },
+};
+
 // ---- ao vivo ----
 const FIRST_HALF = new Set(['1H']);
 const PAST_HT = new Set(['2H', 'ET', 'BT', 'P', 'FT', 'AET', 'PEN']);

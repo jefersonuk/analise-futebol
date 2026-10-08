@@ -7,8 +7,9 @@
 // withCloud({ load, save }, { repo, token, branch }) -> { load, save, flush, pushAll, status }
 
 const API = 'https://api.github.com';
-// histórico pesado e estável, e as análises guardadas até o jogo (af:an:<jogo> e o índice af:anidx)
-const SYNCED = /^af:(lg|tm|h1|an):|^af:(teamIndex|anidx)$/;
+// histórico pesado e estável, as análises guardadas até o jogo (af:an:<jogo> e o índice af:anidx) e as simulações
+// (af:sim:<id> e o índice af:simidx)
+const SYNCED = /^af:(lg|tm|h1|an|sim):|^af:(teamIndex|anidx|simidx)$/;
 const TREE_TTL = 10 * 60e3;
 const DEBOUNCE = 4000;
 
@@ -40,6 +41,8 @@ export function merge(key, a, b) {
   }
   if (key === 'af:teamIndex') return { ...b, ...a };
   if (/^af:an:/.test(key)) return (a.savedAt || '') >= (b.savedAt || '') ? a : b;   // análise: a mais nova
+  if (/^af:sim:/.test(key)) return (a.updated_at || '') >= (b.updated_at || '') ? a : b;   // simulação: a conferida por último
+  if (key === 'af:simidx') return [...new Set([...(b || []), ...(a || [])])];          // índice das simulações: união
   if (key === 'af:anidx') {                                                         // índice: união, sem jogos já passados
     const out = {}, alive = x => x && x.t > Date.now() - 3 * 3600e3;
     for (const [id, x] of Object.entries({ ...b, ...a })) {
