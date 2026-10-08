@@ -81,6 +81,9 @@ const scenCells = l => `<td>${esc(SHORT[l.market] || l.market)}: <b>${esc(l.line
   <td><b>${n2(l.odd_min)}</b></td><td class="muted">${l.bet && l.entry_brl ? `R$ ${l.entry_brl} · ${l.politica_e}` : '—'}</td>`;
 const prof = (p, n) => (p?.n ? `${esc(n)} ${esc(p.how)}: ${p.w}V ${p.d}E ${p.l}D, ${nb(p.gf.toFixed(1))}–${nb(p.ga.toFixed(1))}, ${signed(nb(p.resid.toFixed(1)))} além do esperado` : `${esc(n)}: sem jogos no cenário`);
 const scenShort = g => { const c = g.context?.scenario; return c ? `${prof(c.home, g.fx.home.name)} · ${prof(c.away, g.fx.away.name)}` : '—'; };
+// ➕ no começo de cada linha (a tabela rola para a direita no celular e na tela estreita): cheio quando é aposta pelo
+// app; vazado quando não é — entra mesmo assim, com o aviso de "fora da regra" no formulário
+const enterBtn = (l, ok) => `<button class="enter mini${ok ? '' : ' off'}" data-enter="${esc(l.id)}" title="${ok ? 'Entrar' : 'Entrar fora da regra: o app não marca como aposta'}">➕</button>`;
 const comboHead = '<th>Combo</th><th>Nível</th><th>Chance · Pinnacle</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pernas separadas</th><th>Pernas</th>';
 const comboCells = c => `<td><b>${esc(c.line)}</b></td><td>${tierTag(c)}</td><td>${probs(c)}</td><td class="muted">${hits(c)}</td>
   <td>${n2(c.fair_odd_blend)}</td><td><b>${n2(c.odd_min)}</b></td><td class="muted">${n2(c.odd_indep)}</td><td>${corrTag(c)}</td>`;
@@ -214,9 +217,9 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const totals = g.lines.filter(x => isMain(x.id) && MAIN_MARKETS.includes(x.market))
       .sort((a, b) => MAIN_MARKETS.indexOf(a.market) - MAIN_MARKETS.indexOf(b.market) || thr(a) - thr(b));
     const all = totals.concat([GOAL_HANDICAP, ...SHOTS, '1X2'].map(m => bestLine(g.lines, { market: m })).filter(Boolean));
-    const table = all.length ? `<div class="scroll"><table class="mainlines"><tr><th>Linha</th><th>Nível</th><th>Contexto</th><th>Chance · Pinnacle</th>
+    const table = all.length ? `<div class="scroll"><table class="mainlines"><tr><th></th><th>Linha</th><th>Nível</th><th>Contexto</th><th>Chance · Pinnacle</th>
       <th>Últ. 10</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th><th>Valor</th></tr>${all.map(l => `<tr class="${top && l.id === top.id ? 'on' : ''}${isBet(l) ? '' : ' weak'}">
-        <td>${esc(SHORT[l.market])}: <b>${esc(l.line)}</b></td><td>${tierTag(l)}</td><td>${ctxTag(l)}</td><td>${probs(l)}</td><td class="muted">${hits(l)}</td>
+        <td>${enterBtn(l, isBet(l))}</td><td>${esc(SHORT[l.market])}: <b>${esc(l.line)}</b></td><td>${tierTag(l)}</td><td>${ctxTag(l)}</td><td>${probs(l)}</td><td class="muted">${hits(l)}</td>
         <td>${n2(l.fair_odd_blend)}</td><td><b>${n2(l.odd_min)}</b></td><td class="muted">${n2(l.pinnacle_odd)}</td><td>${valueTxt(l)}</td></tr>`).join('')}</table></div>` : '';
     const c = g.context;
     const ctx = c ? `<ul class="ctx">${c.text.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
@@ -239,27 +242,26 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   function scenarioBlock(g) {
     const c = g.context?.scenario;
     if (!c || !g.scenario?.length) return '';
-    const rows = g.scenario.map(l => `<tr class="${l.bet ? '' : 'weak'}">${scenCells(l)}
-      <td>${l.bet ? `<button class="enter" data-enter="${esc(l.id)}">➕ Entrar</button>` : `<span class="muted small">${esc(l.why_not.join('; '))}</span>`}</td></tr>`).join('');
+    const rows = g.scenario.map(l => `<tr class="${l.bet ? '' : 'weak'}"><td>${enterBtn(l, l.bet)}</td>${scenCells(l)}
+      <td class="muted small">${l.bet ? '' : esc(l.why_not.join('; '))}</td></tr>`).join('');
     const games = (p, n) => (p?.games?.length ? `<li><b>${esc(n)} ${esc(p.how)}</b>${p.relaxed ? ` <span class="muted">(${esc(p.relaxed)})</span>` : ''}: ${p.games.map(esc).join(' · ')}</li>` : '');
     const best = g.scenario.find(l => l.bet);
     return `<details class="combos"${market === CENARIO ? ' open' : ''}><summary>🎯 Leitura de cenário${best ? `: <b>${esc(SHORT[best.market])} ${esc(best.line)}</b> a partir de ${n2(best.odd_min)}` : ' (sem aposta)'}</summary>
       <p class="muted">Papel de hoje: ${esc(g.fx.home.name)} ${esc(c.band.home)} · ${esc(g.fx.away.name)} ${esc(c.band.away)} (superioridade ${c.market.source === 'pinnacle' ? 'da Pinnacle' : 'do modelo'}: ${signed(nb(c.market.sup.toFixed(2)))}).
         Correção pelo cenário: ${signed(nb(c.adj_sup.toFixed(2)))} gol no saldo do mandante, ${signed(nb(c.adj_total.toFixed(2)))} no total${c.agree ? '' : ' — os dois cenários discordam'}${c.enough ? '' : ' — amostra curta'}.</p>
       <ul class="ctx">${games(c.home, g.fx.home.name)}${games(c.away, g.fx.away.name)}</ul>
-      <div class="scroll"><table class="mainlines"><tr>${scenHead}<th></th></tr>${rows}</table></div></details>`;
+      <div class="scroll"><table class="mainlines"><tr><th></th>${scenHead}<th></th></tr>${rows}</table></div></details>`;
   }
 
   // Combos do jogo: abertos no filtro Combos; nos outros, recolhidos
   function comboBlock(g) {
     if (!g.combos?.length) return '';
-    const rows = g.combos.map(c => `<tr class="${isBet(c) ? '' : 'weak'}">${comboCells(c)}
-      <td>${isBet(c) ? `<button class="enter" data-enter="${esc(c.id)}">➕ Entrar</button>` : ''}</td></tr>`).join('');
+    const rows = g.combos.map(c => `<tr class="${isBet(c) ? '' : 'weak'}"><td>${enterBtn(c, isBet(c))}</td>${comboCells(c)}</tr>`).join('');
     const legs = c => c.legs.map(x => `${esc(x.line)} ${pct(x.p)}${x.push ? ` (devolve ${pct(x.push)})` : ''} · justa ${n2(x.fair_odd)}`).join(' — ');
     const best = g.combos.find(isBet) || g.combos[0];
     return `<details class="combos"${market === COMBOS ? ' open' : ''}><summary>Combos de duas pernas (${g.combos.length}${g.combos.some(isBet) ? `, ${g.combos.filter(isBet).length} para apostar` : ''})</summary>
       <p class="muted">Melhor: <b>${esc(best.line)}</b> — acerta ${pct(best.p_blend)}${best.push_prob > 0.005 ? ` (${pct(best.p_full)} com as duas pernas, ${pct(best.push_prob)} só a de gols)` : ''}, procure odd ≥ ${n2(best.odd_min)}${isBet(best) ? '' : ' (especulativo: sem aposta)'}. Pernas: ${legs(best)}.</p>
-      <div class="scroll"><table class="mainlines"><tr>${comboHead}<th></th></tr>${rows}</table></div></details>`;
+      <div class="scroll"><table class="mainlines"><tr><th></th>${comboHead}</tr>${rows}</table></div></details>`;
   }
 
   $('#scanOut').addEventListener('click', e => {

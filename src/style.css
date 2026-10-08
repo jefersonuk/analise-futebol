@@ -104,6 +104,8 @@ td.book { color: var(--muted); font-size: 12px; text-align: left; }
 @media (max-width: 640px) { .teams { grid-template-columns: 1fr; } .cards { grid-template-columns: 1fr 1fr; } }
 
 button.enter { background: var(--accent); border-color: var(--accent); color: #04260f; font-weight: 600; padding: 5px 12px; }
+button.enter.mini { padding: 2px 9px; white-space: nowrap; }
+button.enter.off { background: transparent; color: var(--accent); }
 dialog#entryDlg { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 18px;
   width: min(460px, calc(100vw - 32px)); }
 dialog#entryDlg::backdrop { background: rgba(0,0,0,.6); }
