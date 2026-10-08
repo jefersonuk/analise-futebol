@@ -17,6 +17,7 @@ import { isScenario } from './scenario.js';
 import { lineVerdict, lineupReport } from './lineupcheck.js';
 import { clubsHtml } from './clubs.js';
 import { MAX_LEGS, MULTI, TARGETS, TARGET, autoTicket, multiGames, multiLine, ticketOf } from './multiple.js';
+import { buildSim, settleSim, simReport } from './sim.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -105,6 +106,9 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   // bilhete da múltipla: alvo, jogos marcados (null = o automático), a linha escolhida em cada jogo, odds da casa por
   // perna e a total
   const multi = { target: TARGET, picked: null, lineFor: new Map(), house: new Map(), total: null, ticket: null };
+  // simulações guardadas (índice e as carregadas): ver "simulação" abaixo
+  const sims = { ids: [], list: new Map(), busy: false, msg: '' };
+  const simId = sc => String(Date.parse(sc?.generated_at) || '');
   $('#scanDate').innerHTML = [['Próximas 4 horas (amplia até 12 h se faltar jogo)', WINDOW], ['Hoje (dia todo)', dayStr(0)], ['Amanhã', dayStr(1)]]
     .map(([t, v]) => `<option value="${v}">${t}${v === WINDOW ? '' : ` (${v.split('-').reverse().slice(0, 2).join('/')})`}</option>`).join('');
   $('#scanBudget').value = localStorage.getItem(BUDGET_KEY) || 1500;
@@ -202,6 +206,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         mais de 5% acima da Pinnacle ou contexto contra).</p>`;
     out.innerHTML = `<p class="muted">Varredura de ${when}: ${span} · ${scan.fixtures} jogos por começar, ${pool},
       ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>${cornersLine(scan.corners_report)}${old}
+      <div class="simbar">${sims.ids.includes(simId(scan)) ? '<span class="muted">🧪 esta varredura já está na simulação (abaixo)</span>'
+        : '<button class="ghost" id="simRun">🧪 Simular as propostas desta varredura</button> <span class="muted">registra tudo o que ela propôs, com a odd da Pinnacle, numa área separada das apostas reais</span>'}</div>
       <div class="chips" id="scanChips">${chips}</div>
       <div class="chips" id="scanOrder"><span class="muted">Ordem:</span>${orders}</div>
       ${mult ? multiView() : ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`
@@ -258,6 +264,90 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       ${top ? renderDashboard([top], g.teams) : ''}
     </article>`;
   }
+
+  // ---- simulação (sim.js): tudo o que a varredura propôs, com a odd da Pinnacle, liquidado pelos resultados; guardada à
+  // parte (af:sim:<id>, índice af:simidx) — nunca vai para o app de apostas ----
+  const due = sim => sim.bets.some(b => b.status === 'aberta' && Date.now() > b.kickoff + 110 * 60e3);
+  async function loadSims() {
+    sims.ids = (await api.loadDoc('af:simidx').catch(() => null)) || [];
+    for (const id of sims.ids) if (!sims.list.has(id)) { const x = await api.loadDoc(`af:sim:${id}`).catch(() => null); if (x) sims.list.set(id, x); }
+    renderSims();
+  }
+  async function saveSim(sim) {
+    sims.list.set(sim.id, sim);
+    if (!sims.ids.includes(sim.id)) { sims.ids = [sim.id, ...sims.ids]; await api.saveDoc('af:simidx', sims.ids); }
+    await api.saveDoc(`af:sim:${sim.id}`, sim);
+  }
+  async function checkSim(id, auto = false) {
+    const sim = sims.list.get(id);
+    if (!sim || sims.busy) return;
+    sims.busy = true; sims.msg = 'Conferindo os resultados…'; renderSims();
+    try {
+      const { simIO } = await import('./settlement.js');
+      const r = await settleSim(sim, simIO);
+      await saveSim(sim);
+      sims.msg = r.settled ? `${r.settled} entrada${r.settled > 1 ? 's' : ''} liquidada${r.settled > 1 ? 's' : ''}; ${r.pending} em aberto.` : auto ? '' : `Nada novo: ${r.pending} em aberto.`;
+    } catch (e) { sims.msg = `Conferência: ${e.message}`; }
+    sims.busy = false; renderSims();
+  }
+  const sg = (x, d = 2) => (x == null ? '—' : `${x > 0 ? '+' : ''}${x.toFixed(d).replace('.', ',')}`);
+  const pc = x => (x == null ? '—' : `${x > 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')}%`);
+  const cls = x => (x > 0 ? 'pos' : x < 0 ? 'neg' : 'muted');
+  const RES = { A: '✅', HW: '½✅', VOID: '↩', HL: '½❌', RED: '❌' };
+  function renderSims() {
+    const el = $('#simOut');
+    if (!el) return;
+    const list = sims.ids.map(id => sims.list.get(id)).filter(Boolean);
+    if (!list.length) { el.innerHTML = sims.msg ? `<p class="muted">${esc(sims.msg)}</p>` : ''; return; }
+    const row = (name, s, strong = false) => `<tr${strong ? ' class="on"' : ''}><td>${strong ? `<b>${esc(name)}</b>` : esc(name)}</td><td>${s.n}</td><td>${s.green} · ${s.void} · ${s.red}</td>
+      <td class="muted">${s.open}</td><td class="${cls(s.profit_u)}"><b>${sg(s.profit_u)}</b></td><td class="${cls(s.yield)}">${pc(s.yield)}</td>
+      <td class="${cls(s.profit_brl)}">${s.done ? `R$ ${sg(s.profit_brl, 0)}` : '—'}</td><td class="${cls(s.clv)}">${pc(s.clv)}${s.clv_n ? ` <span class="muted">(${s.clv_n})</span>` : ''}</td></tr>`;
+    const cards = list.slice(0, 10).map(sim => {
+      const rep = simReport(sim), t = rep.total;
+      const when = new Date(sim.scan_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const bets = [...sim.bets].sort((a, b) => a.kickoff - b.kickoff).map(b => `<tr class="${b.status === 'aberta' ? 'weak' : ''}"><td>${hour(b.kickoff)}</td>
+        <td>${esc(b.home)}${b.away ? ` x ${esc(b.away)}` : ''}</td><td class="muted">${esc(b.cat)}</td><td>${esc(b.line)}</td>
+        <td>${n2(b.odd)} <span class="muted">${b.odd_src === 'pinnacle' ? 'Pin' : 'mín.'}</span></td><td>${pct(b.p)}</td>
+        <td title="${esc(b.detail || '')}">${b.status === 'aberta' ? `<span class="muted">${esc(b.detail || 'aberta')}</span>` : `${RES[b.winner]} <span class="muted">${esc(b.detail || '')}</span>`}</td>
+        <td class="${cls(b.profit_u)}">${b.profit_u == null ? '' : sg(b.profit_u)}</td><td class="${cls(b.profit_brl)}">${b.profit_brl == null ? '' : sg(b.profit_brl, 0)}</td></tr>`).join('');
+      return `<div class="simcard"><div><b>Varredura de ${when}</b> · ${t.n} entradas · ${t.done} encerradas${t.open ? `, ${t.open} em aberto` : ''} ·
+        <b class="${cls(t.profit_u)}">${sg(t.profit_u)} u</b> (yield ${pc(t.yield)}) · <span class="${cls(t.profit_brl)}">R$ ${sg(t.profit_brl, 0)}</span>
+        ${t.clv != null ? ` · CLV médio ${pc(t.clv)}` : ''}
+        <button class="ghost mini" data-simcheck="${sim.id}"${sims.busy ? ' disabled' : ''}>🔄 Conferir resultados</button>
+        <button class="ghost mini" data-simdel="${sim.id}">apagar</button>
+        ${sim.checked_at ? `<span class="muted"> · conferida às ${hour(Date.parse(sim.checked_at))}</span>` : ''}</div>
+        <div class="scroll"><table class="scanrank simtab"><tr><th>Lente</th><th>Entradas</th><th>✓ · ↩ · ✗</th><th>Abertas</th><th>Lucro (u)</th><th>Yield</th><th>Lucro R$</th><th>CLV</th></tr>
+          ${rep.cats.map(([c, s]) => row(c, s)).join('')}${row('Total (sem repetir a mesma linha)', t, true)}${row('Total sem as "entrar se…"', rep.confirmed, true)}</table></div>
+        <details><summary>As ${sim.bets.length} entradas</summary><div class="scroll"><table class="scanrank simtab"><tr><th>Hora</th><th>Jogo</th><th>Lente</th><th>Linha</th><th>Odd</th><th>Chance</th><th>Resultado</th><th>u</th><th>R$</th></tr>${bets}</table></div></details></div>`;
+    }).join('');
+    el.innerHTML = `<details class="sims" open><summary>🧪 Simulações (${list.length}) — fora do app de apostas</summary>
+      <p class="muted">Como se tivéssemos entrado em tudo o que cada varredura propôs: nossa análise (aposta e, à parte, "entrar se…" sem conferir),
+      a linha de aposta de cada aba de mercado, o combo e a múltipla automática. Odd de entrada = a da Pinnacle na hora da varredura; onde ela não
+      cota (linha derivada, só do modelo, combo), a odd mínima do app ("mín."). Lucro em unidades (stake 1 em tudo) e em R$ (a entrada que o app
+      propôs). CLV = odd de entrada contra a justa de fechamento da Pinnacle. Combo ou múltipla com devolução numa perna conta como anulada.
+      Nada daqui entra no app de apostas.</p>${sims.msg ? `<p class="muted">${esc(sims.msg)}</p>` : ''}${cards}</details>`;
+  }
+  $('#simOut').addEventListener('click', async e => {
+    const c = e.target.closest('[data-simcheck]');
+    if (c) { checkSim(c.dataset.simcheck); return; }
+    const d = e.target.closest('[data-simdel]');
+    if (d && confirm('Apagar esta simulação?')) {
+      sims.ids = sims.ids.filter(x => x !== d.dataset.simdel); sims.list.delete(d.dataset.simdel);
+      await api.saveDoc('af:simidx', sims.ids); await api.removeDoc?.(`af:sim:${d.dataset.simdel}`); renderSims(); render();
+    }
+  });
+  async function runSim() {
+    if (!scan?.games.length) return;
+    const sim = buildSim(scan, { banca });
+    if (!sim.bets.length) { sims.msg = 'Esta varredura não propôs nenhuma entrada.'; renderSims(); return; }
+    await saveSim(sim);
+    sims.msg = `Simulação registrada: ${sim.bets.length} entradas. Os resultados entram com 🔄 Conferir resultados depois dos jogos (e sozinhos com a página aberta).`;
+    render(); renderSims();
+    $('#simOut').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  loadSims().then(() => { for (const id of sims.ids) { const s = sims.list.get(id); if (s && due(s)) { checkSim(id, true); break; } } });
+  // com a página aberta: confere sozinha a cada 15 min o que já deve ter terminado
+  setInterval(() => { const s = sims.ids.map(id => sims.list.get(id)).find(x => x && due(x) && Date.now() - Date.parse(x.checked_at || 0) > 14 * 60e3); if (s) checkSim(s.id, true); }, 15 * 60e3);
 
   // Múltipla (multiple.js): as pernas possíveis da varredura, o bilhete (automático pelo alvo ou marcado à mão), a odd
   // da casa (por perna ou a total) e o veredito com a entrada. Uma perna por jogo, só over de gols do jogo.
@@ -391,6 +481,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   $('#scanOut').addEventListener('click', e => {
     const ck = e.target.closest('[data-check]');
     if (ck) { checkFixture(Number(ck.dataset.check), ck); return; }
+    if (e.target.closest('#simRun')) { runSim(); return; }
     const mt = e.target.closest('[data-mt]');
     if (mt) { multi.target = Number(mt.dataset.mt); multi.picked = null; render(); return; }
     if (e.target.closest('#mEnter') && multi.ticket) {
