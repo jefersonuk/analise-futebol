@@ -1,17 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
-import { LEG_P, MARGIN, STAKE_CAP, autoTicket, multiLegs, multiLine, settleMulti, ticketOf } from '../src/multiple.js';
+import { LEG_P, MARGIN, STAKE_CAP, autoTicket, multiGames, multiLegs, multiLine, settleMulti, ticketOf } from '../src/multiple.js';
 import { buildEntry } from '../src/entry.js';
 import { liveMulti } from '../src/settlement.js';
 import { scanDay } from '../src/scanner.js';
 
 const NOW = Date.UTC(2026, 9, 8, 12), H = 3600e3;
 let id = 0;
-const game = ({ t = NOW + 2 * H, p = 0.8, pin = 0.79, nossa = null, ctx = 'neutro', hard = null, extra = [] } = {}) => {
+const game = ({ t = NOW + 2 * H, p = 0.8, pin = 0.79, nossa = null, ctx = 'neutro', hard = null, derived = false, extra = [] } = {}) => {
   const fid = ++id;
   return { fx: { id: fid, t, home: { id: fid * 10, name: `Casa${fid}` }, away: { id: fid * 10 + 1, name: `Fora${fid}` }, league: { name: 'Liga' } }, hard,
-    lines: [{ id: 'gO1.5', market: 'Total de gols', line: 'Mais de 1,5', p_blend: p, p_pinnacle: pin, context: { verdict: ctx } }, ...extra],
+    lines: [{ id: 'gO1.5', market: 'Total de gols', line: 'Mais de 1,5', p_blend: p, p_pinnacle: pin, context: { verdict: ctx },
+      ...(derived ? { derived: true } : { pinnacle_odd: Math.round(100 / pin / 1.025) / 100 }) }, ...extra],
     scenario: nossa != null ? [{ id: 'gO1.5', p_nossa: nossa }] : [] };
 };
 
@@ -19,13 +20,29 @@ test('pernas: só over de gols com chance alta, uma por jogo, a menor chance ent
   id = 0;
   const gs = [game({ p: 0.82, pin: 0.8, ctx: 'a favor' }), game({ p: 0.85, pin: 0.84, nossa: 0.83 }), game({ p: 0.7, pin: 0.7 }),
     game({ hard: { reasons: ['base'] } }), game({ t: NOW + 5 * 60e3 }), game({ ctx: 'contra' }), game({ p: 0.8, pin: 0.86 }),
-    game({ p: 0.8, pin: 0.78, extra: [{ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', p_blend: 0.74, p_pinnacle: 0.73, context: { verdict: 'neutro' } }] })];
+    game({ p: 0.8, pin: 0.78, extra: [{ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', p_blend: 0.74, p_pinnacle: 0.73, pinnacle_odd: 1.33, context: { verdict: 'neutro' } }] })];
   const legs = multiLegs(gs, { now: NOW });
   assert.deepEqual(legs.map(l => l.fixtureId), [1, 2, 8], 'a favor primeiro; depois a chance da Pinnacle');
   assert.equal(legs[1].p, 0.83, 'a nossa (0,83) abaixo da mistura (0,85): vale a menor');
   assert.equal(multiLegs([game({ p: 0.85, pin: 0.84, nossa: 0.76 })], { now: NOW }).length, 0, 'nós bem abaixo da Pinnacle: fora');
   assert.equal(legs[2].lineId, 'gO1.5', 'uma perna por jogo: a de maior chance');
-  assert.ok(legs.every(l => l.p >= LEG_P));
+  assert.ok(legs.every(l => l.p >= LEG_P[l.lineId]));
+});
+
+test('linha disponível: over 1,5 que a Pinnacle não cota passa para o over 2,5 cotado; o bilhete automático só usa linha cotada', () => {
+  id = 0;
+  const o25 = (p, odd) => ({ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', p_blend: p, p_pinnacle: p, ...(odd ? { pinnacle_odd: odd } : { derived: true }), context: { verdict: 'neutro' } });
+  const gs = [game({ p: 0.84, pin: 0.84, derived: true, extra: [o25(0.64, 1.52)] }),   // 1,5 não cotado, 2,5 cotado: entra pelo 2,5
+    game({ p: 0.77, pin: 0.77, derived: true }),                                           // só o 1,5 não cotado: aparece, mas fora do automático
+    game({ p: 0.84, pin: 0.84, derived: true, extra: [o25(0.55, 1.75)] }),                 // 2,5 abaixo de 60%: fica o 1,5 não cotado
+    game({ p: 0.75, pin: 0.75 })];                                                         // 1,5 cotado
+  const ms = multiGames(gs, { now: NOW });
+  const by = new Map(ms.map(m => [m.fixtureId, m]));
+  assert.equal(by.get(1).best.lineId, 'gO2.5'); assert.ok(by.get(1).best.quoted);
+  assert.deepEqual(by.get(1).options.map(o => o.lineId), ['gO2.5', 'gO1.5'], 'dá para trocar para o 1,5');
+  assert.equal(by.get(2).best.quoted, false); assert.equal(by.get(3).best.lineId, 'gO1.5');
+  assert.deepEqual(ms.slice(0, 2).map(m => m.fixtureId).sort(), [1, 4], 'cotadas primeiro');
+  assert.deepEqual(autoTicket(ms.map(m => m.best), { target: 100 }).map(l => l.fixtureId).sort(), [1, 4]);
 });
 
 test('bilhete: chance de acertar tudo, justa, mínima, mínima de cada perna, veredito e entrada', () => {
