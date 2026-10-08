@@ -57,6 +57,8 @@ export function buildEntry({ line, fx, casa, currency, odd, stake, stakeNat = nu
       priced_by: line.priced_by, fragile: !!line.fragile,
       // entrada manual: sua análise, registrada sem as regras do app (piso de 60%, odd mínima, jogo difícil)
       ...(line.manual ? { manual: true } : {}),
+      // aposta de cenário: a chance é a do cenário; a Pinnacle cota a linha (o CLV é medido contra ela)
+      ...(line.scenario ? { scenario: true, p_scenario: line.p_scenario, ev_pinnacle: line.ev_pinnacle } : {}),
     },
   };
 }

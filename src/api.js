@@ -149,4 +149,4 @@ export const stats = () => (isDemo() ? { api: 0, cache: 0 } : client.stats());
 
 // O conjunto que o dossiê do especialista usa (mesma interface do script do Claude Code).
 export const dossierApi = { searchTeams, upcoming, leaguesOf, leagueMatches, teamMatches, attachHalfCorners, fixtureOdds,
-  injuries, standings, headToHead, lastPlayed, indexMatches, dayFixtures, dayOdds, hasLeague, stats, quota: () => remaining };
+  injuries, standings, headToHead, lastPlayed, indexMatches, dayFixtures, dayOdds, hasLeague, teamInfo, stats, quota: () => remaining };

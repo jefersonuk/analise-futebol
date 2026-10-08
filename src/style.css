@@ -177,6 +177,7 @@ details.h2h ul { margin: 4px 0; padding-left: 18px; color: var(--muted); }
 details.combos { margin: 8px 0; }
 details.combos > summary { cursor: pointer; font-weight: 600; }
 details.combos p { margin: 6px 0; }
+.muted.small, .small { font-size: 12px; }
 .ctxline { margin: 0 0 8px; font-size: 13px; }
 .live { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; min-width: 0; }
 .live h4 { margin: 0 0 8px; font-size: 14px; }
