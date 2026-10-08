@@ -235,3 +235,8 @@ details.sims { border: 1px dashed var(--line); border-radius: 10px; padding: 8px
 details.sims > summary { font-weight: 700; cursor: pointer; }
 .simcard { border-top: 1px solid var(--line); padding: 8px 0; }
 table.simtab td, table.simtab th { white-space: nowrap; }
+
+/* plano do dia */
+#planSec h3 { margin: 14px 0 6px; font-size: 15px; }
+table.plantab td, table.plantab th { white-space: nowrap; }
+textarea.plantext { width: 100%; min-height: 220px; font: 13px/1.5 ui-monospace, monospace; }

@@ -36,6 +36,7 @@ import { hardGame } from './hard.js';
 import { comboLines } from './combos.js';
 import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
 import { loadClubs } from './clubs.js';
+import { multiLegs } from './multiple.js';
 
 export { GOAL_HANDICAP, SHOTS };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
@@ -185,7 +186,8 @@ export function pickGames(games, { market = null, top = 20, order = 'time' } = {
 
 // api: o mesmo conjunto do dossiê (dayFixtures, dayOdds, hasLeague, leagueMatches, attachHalfCorners, standings,
 // headToHead, stats). Janela: hours (as próximas N horas a partir de now) ou date (o dia inteiro, AAAA-MM-DD).
-export async function scanDay(api, { date = null, hours = null, now = Date.now(), top = 20, budget = 1500, banca = 44000, onProgress = () => {} }) {
+// half: false pula a 2ª passada (histórico dos escanteios do 1º tempo) — o Plano do dia não usa escanteio do 1º tempo.
+export async function scanDay(api, { date = null, hours = null, now = Date.now(), top = 20, budget = 1500, banca = 44000, half = true, onProgress = () => {} }) {
   const used = (() => { const s0 = api.stats().api; return () => api.stats().api - s0; })();
   const skipped = [];
   const from = now + 10 * 60e3;
@@ -284,7 +286,7 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   }
 
   // 2ª passada: histórico do 1º tempo dos dois times nos jogos mais promissores nos escanteios do 1º tempo
-  const short = rankGames(games, { market: 'Total escanteios 1T' }).slice(0, Math.ceil(top * 1.5));
+  const short = half ? rankGames(games, { market: 'Total escanteios 1T' }).slice(0, Math.ceil(top * 1.5)) : [];
   let gi = 0;
   for (const { g } of short) {
     gi++;
@@ -309,6 +311,9 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   const keepOf = () => {
     const keep = new Set();
     for (const market of [CENARIO, null, ...FILTER_KEYS, LIVE_1H]) for (const { g } of rankGames(games, { market }).slice(0, top)) keep.add(g);
+    // e os jogos com as melhores pernas de múltipla (over de gols cotado)
+    const ids = new Set(multiLegs(games, { now }).filter(l => l.quoted).slice(0, top).map(l => l.fixtureId));
+    for (const g of games) if (ids.has(g.fx.id)) keep.add(g);
     return keep;
   };
   // 3ª passada: confronto direto em todas as competições (API) dos jogos guardados e clássico (cidade dos dois times,

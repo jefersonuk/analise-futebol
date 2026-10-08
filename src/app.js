@@ -10,6 +10,7 @@ import { FOCUS, ODDS_STALE_MIN, buildDossier, favorSummary, loadLeague, repriceD
 import { favorFor } from './favoritism.js';
 import { alternatives, makePricer, nearest, parseLine, renderMyLine, verdict } from './myline.js';
 import { initScan } from './scanview.js';
+import { initPlan } from './planview.js';
 import { bindSpecialist, briefGame } from './brief.js';
 import { livePlanOf } from './live.js';
 import { isQuarter } from './consistency.js';
@@ -518,4 +519,5 @@ async function analyzeFixture(fx, national) {
   return runAnalysis();
 }
 initScan({ api, openEntry, analyzeFixture, banca: BANCA });
+initPlan({ api, openEntry, banca: BANCA });
 bindSpecialist($('#btnSpec'), () => state.dossier && briefGame(state.dossier));

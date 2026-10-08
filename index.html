@@ -29,6 +29,18 @@
   <p id="cloudInfo" class="muted"></p>
 </section>
 
+<section class="card" id="planSec">
+  <h2>📋 Plano do dia <span class="muted">a análise do dia inteiro em poucas entradas — 5 a 10 simples, 2 múltiplas e 5 no mesmo jogo —, para apostar na noite anterior</span></h2>
+  <div class="row">
+    <select id="planDate"></select>
+    <button id="planRun" class="primary">Montar o plano</button>
+    <button id="planCopy" class="ghost" hidden title="Copia a lista para apostar nas casas">📋 Copiar o plano</button>
+    <button id="planSpec" class="ghost" hidden title="Copia o plano com o contexto dos jogos e abre o especialista no claude.ai">🧠 Especialista</button>
+  </div>
+  <p id="planMsg" class="msg" hidden></p>
+  <div id="planOut"></div>
+</section>
+
 <section class="card">
   <label for="teamInput">Time</label>
   <div class="row">

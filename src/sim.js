@@ -15,8 +15,8 @@ import { COMBOS, FILTER_KEYS, bestLine } from './scanner.js';
 import { isBet } from './dossier.js';
 import { TARGET, bandTickets, multiLegs, settleMulti, ticketOf } from './multiple.js';
 
-export const CATS = ['nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T', 'Handicap gols', '1X2', 'Escanteios', 'Escanteios 1T',
-  'Chutes', 'Combo', 'Múltipla'];
+export const CATS = ['Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo', 'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T',
+  'Handicap gols', '1X2', 'Escanteios', 'Escanteios 1T', 'Chutes', 'Combo', 'Múltipla'];
 const CAT_OF = { 'Total de gols': 'Gols', 'Total de gols 1T': 'Gols 1T', 'Handicap asiático': 'Handicap gols', '1X2': '1X2', 'Total de escanteios': 'Escanteios',
   'Total escanteios 1T': 'Escanteios 1T', 'Total de chutes': 'Chutes', 'Total de chutes no gol': 'Chutes' };
 const r2 = x => Math.round(x * 100) / 100, r3 = x => Math.round(x * 1000) / 1000;
@@ -35,7 +35,7 @@ export function buildSim(scan, { banca = 44000 } = {}) {
   for (const g of scan.games) {
     // nossa análise: a aposta do jogo; sem ela, a "entrar se…"
     const sc = (g.scenario || []).find(l => l.bet) || (g.scenario || []).find(l => l.conditional);
-    if (sc?.pinnacle_odd > 1) bets.push(base(g, sc, sc.bet ? CATS[0] : CATS[1], sc.pinnacle_odd, 'pinnacle', sc.entry_brl));
+    if (sc?.pinnacle_odd > 1) bets.push(base(g, sc, sc.bet ? 'nossa análise: aposta' : 'nossa análise: entrar se…', sc.pinnacle_odd, 'pinnacle', sc.entry_brl));
     // linhas principais: a linha do jogo em cada aba de mercado, quando é aposta
     const seen = new Set();
     for (const m of FILTER_KEYS.filter(k => k !== COMBOS)) {
@@ -50,17 +50,32 @@ export function buildSim(scan, { banca = 44000 } = {}) {
     if (cb) bets.push(base(g, cb, 'Combo', cb.odd_min, 'mínima', cb.entry_brl));
   }
   // múltipla: os bilhetes por faixa de horário, como a aba montava na hora da varredura (só linha cotada)
-  for (const legs of bandTickets(multiLegs(scan.games, { now: at }).filter(l => l.quoted), { target: TARGET })) {
-    const odd = legs.reduce((t, l) => t * l.pinnacle_odd, 1), t = ticketOf(legs, { houseTotal: odd, banca });
-    bets.push({ key: `Múltipla|${legs.map(l => l.key).join(',')}`, cat: 'Múltipla', fixtureId: null, kickoff: Math.min(...legs.map(l => l.kickoff)),
-      home: `Múltipla (${legs.length})`, away: '', competition: [...new Set(legs.map(l => l.competition))].join(', '), lineId: 'multi', market: 'Múltipla',
-      line: legs.map(l => `${l.home} x ${l.away} ${l.line}`).join(' · '), odd: r2(odd), odd_src: 'pinnacle', p: t.p_all, p_pinnacle: t.p_pinnacle_all,
-      // entrada: a do bilhete na odd da Pinnacle; se ali não vale (margem), a que o app propõe na odd mínima
-      stake_brl: t.stake || t.stake_at_min || 0, legs: legs.map(l => ({ fixtureId: l.fixtureId, lineId: l.lineId, home: l.home, away: l.away, line: l.line, odd: l.pinnacle_odd })),
-      status: 'aberta', winner: null, profit_u: null, profit_brl: null, clv: null, detail: null });
-  }
+  for (const legs of bandTickets(multiLegs(scan.games, { now: at }).filter(l => l.quoted), { target: TARGET })) bets.push(multiBet(legs, banca, 'Múltipla'));
   return { id: `${at}`, scan_at: new Date(at).toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     window: scan.window ? { from: scan.window.from, to: scan.window.to } : null, date: scan.date || null, bets };
+}
+
+// Uma múltipla (pernas de multiple.js) na odd da Pinnacle: o produto das odds dela em cada perna.
+function multiBet(legs, banca, cat) {
+  const odd = legs.reduce((t, l) => t * l.pinnacle_odd, 1), t = ticketOf(legs, { houseTotal: odd, banca });
+  return { key: `${cat}|${legs.map(l => l.key).join(',')}`, cat, fixtureId: null, kickoff: Math.min(...legs.map(l => l.kickoff)),
+    home: `Múltipla (${legs.length})`, away: '', competition: [...new Set(legs.map(l => l.competition))].join(', '), lineId: 'multi', market: 'Múltipla',
+    line: legs.map(l => `${l.home} x ${l.away} ${l.line}`).join(' · '), odd: r2(odd), odd_src: 'pinnacle', p: t.p_all, p_pinnacle: t.p_pinnacle_all,
+    // entrada: a do bilhete na odd da Pinnacle; se ali não vale (margem), a que o app propõe na odd mínima
+    stake_brl: t.stake || t.stake_at_min || 0, legs: legs.map(l => ({ fixtureId: l.fixtureId, lineId: l.lineId, home: l.home, away: l.away, line: l.line, odd: l.pinnacle_odd })),
+    status: 'aberta', winner: null, profit_u: null, profit_brl: null, clv: null, detail: null };
+}
+
+// O Plano do dia (plan.js) na simulação: as simples na odd da Pinnacle, os combos na odd mínima (a Pinnacle não cota
+// combo), as múltiplas no produto das odds da Pinnacle. Um por data (plano-AAAA-MM-DD).
+export function buildPlanSim(plan, { banca = 44000 } = {}) {
+  const bets = [
+    ...plan.singles.map(({ g, line }) => base(g, line, 'Plano: simples', line.pinnacle_odd, 'pinnacle', line.entry_brl)),
+    ...plan.multis.map(t => multiBet(t.legs, banca, 'Plano: múltipla')),
+    ...plan.sameGame.map(({ g, combo }) => base(g, combo, 'Plano: mesmo jogo', combo.odd_min, 'mínima', combo.entry_brl)),
+  ];
+  const now = new Date().toISOString();
+  return { id: `plano-${plan.date}`, plan: true, date: plan.date, scan_at: plan.scan_at, created_at: now, updated_at: now, window: null, bets };
 }
 
 function close(b, winner, detail) {
@@ -127,6 +142,6 @@ export function simReport(sim) {
   const cats = CATS.map(c => [c, summarize(sim.bets.filter(b => b.cat === c))]).filter(([, s]) => s.n);
   const uniq = new Map();
   for (const b of sim.bets) { const k = b.legs ? b.key : `${b.fixtureId}|${b.lineId}`; if (!uniq.has(k)) uniq.set(k, b); }
-  const real = sim.bets.filter(b => b.cat !== CATS[1]);   // sem as "entrar se…" que não foram conferidas
+  const real = sim.bets.filter(b => b.cat !== 'nossa análise: entrar se…');   // sem as "entrar se…" que não foram conferidas
   return { cats, total: summarize([...uniq.values()]), confirmed: summarize(real.filter(b => uniq.get(b.legs ? b.key : `${b.fixtureId}|${b.lineId}`) === b)) };
 }

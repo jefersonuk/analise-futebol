@@ -271,11 +271,13 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   // ---- simulação (sim.js): tudo o que a varredura propôs, com a odd da Pinnacle, liquidado pelos resultados; guardada à
   // parte (af:sim:<id>, índice af:simidx) — nunca vai para o app de apostas ----
   const due = sim => sim.bets.some(b => b.status === 'aberta' && Date.now() > b.kickoff + 110 * 60e3);
-  async function loadSims() {
+  async function loadSims(force = false) {
     sims.ids = (await api.loadDoc('af:simidx').catch(() => null)) || [];
-    for (const id of sims.ids) if (!sims.list.has(id)) { const x = await api.loadDoc(`af:sim:${id}`).catch(() => null); if (x) sims.list.set(id, x); }
+    for (const id of sims.ids) if (force || !sims.list.has(id)) { const x = await api.loadDoc(`af:sim:${id}`).catch(() => null); if (x) sims.list.set(id, x); }
     renderSims();
   }
+  // o Plano do dia (planview.js) grava a simulação dele: recarrega
+  window.addEventListener('sims-changed', () => loadSims(true));
   async function saveSim(sim) {
     sims.list.set(sim.id, sim);
     if (!sims.ids.includes(sim.id)) { sims.ids = [sim.id, ...sims.ids]; await api.saveDoc('af:simidx', sims.ids); }
@@ -313,7 +315,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         <td>${n2(b.odd)} <span class="muted">${b.odd_src === 'pinnacle' ? 'Pin' : 'mín.'}</span></td><td>${pct(b.p)}</td>
         <td title="${esc(b.detail || '')}">${b.status === 'aberta' ? `<span class="muted">${esc(b.detail || 'aberta')}</span>` : `${RES[b.winner]} <span class="muted">${esc(b.detail || '')}</span>`}</td>
         <td class="${cls(b.profit_u)}">${b.profit_u == null ? '' : sg(b.profit_u)}</td><td class="${cls(b.profit_brl)}">${b.profit_brl == null ? '' : sg(b.profit_brl, 0)}</td></tr>`).join('');
-      return `<div class="simcard"><div><b>Varredura de ${when}</b> · ${t.n} entradas · ${t.done} encerradas${t.open ? `, ${t.open} em aberto` : ''} ·
+      return `<div class="simcard"><div><b>${sim.plan ? `📋 Plano de ${sim.date.split('-').reverse().slice(0, 2).join('/')}` : `Varredura de ${when}`}</b> · ${t.n} entradas · ${t.done} encerradas${t.open ? `, ${t.open} em aberto` : ''} ·
         <b class="${cls(t.profit_u)}">${sg(t.profit_u)} u</b> (yield ${pc(t.yield)}) · <span class="${cls(t.profit_brl)}">R$ ${sg(t.profit_brl, 0)}</span>
         ${t.clv != null ? ` · CLV médio ${pc(t.clv)}` : ''}
         <button class="ghost mini" data-simcheck="${sim.id}"${sims.busy ? ' disabled' : ''}>🔄 Conferir resultados</button>
