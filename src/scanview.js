@@ -16,7 +16,8 @@ import { collect } from './odds.js';
 import { isScenario } from './scenario.js';
 import { lineVerdict, lineupReport } from './lineupcheck.js';
 import { clubsHtml } from './clubs.js';
-import { MAX_LEGS, MULTI, TARGETS, TARGET, autoTicket, multiGames, multiLine, ticketOf } from './multiple.js';
+import { BAND, BANDS, MULTI, TARGETS, TARGET, bandTickets, multiGames, multiLine, ticketOf } from './multiple.js';
+import { exposedGames } from './entry.js';
 import { buildSim, settleSim, simReport } from './sim.js';
 
 const $ = s => document.querySelector(s);
@@ -105,7 +106,9 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   let scan = null, market = CENARIO, order = 'time', ranked = [];
   // bilhete da múltipla: alvo, jogos marcados (null = o automático), a linha escolhida em cada jogo, odds da casa por
   // perna e a total
-  const multi = { target: TARGET, picked: null, lineFor: new Map(), house: new Map(), total: null, ticket: null };
+  // bilhetes da múltipla: alvo, faixa de horário (h), pernas marcadas/desmarcadas à mão (fixtureId -> sim/não), a linha
+  // escolhida em cada jogo, odds da casa por perna e a total de cada bilhete (pela primeira perna)
+  const multi = { target: TARGET, band: BAND, include: new Map(), lineFor: new Map(), house: new Map(), totals: new Map(), tickets: [] };
   // simulações guardadas (índice e as carregadas): ver "simulação" abaixo
   const sims = { ids: [], list: new Map(), busy: false, msg: '' };
   const simId = sc => String(Date.parse(sc?.generated_at) || '');
@@ -116,7 +119,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
 
   async function showSaved() {
     scan = await load(`af:scan:${$('#scanDate').value}`);
-    Object.assign(multi, { picked: null, lineFor: new Map(), house: new Map(), total: null });
+    Object.assign(multi, { include: new Map(), lineFor: new Map(), house: new Map(), totals: new Map() });
     render();
   }
   $('#scanDate').onchange = showSaved;
@@ -129,7 +132,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     $('#scanRun').disabled = true;
     try {
       scan = await scanDay(api.dossierApi, { ...win, budget, banca, onProgress: t => msg(t) });
-      Object.assign(multi, { picked: null, lineFor: new Map(), house: new Map(), total: null });
+      Object.assign(multi, { include: new Map(), lineFor: new Map(), house: new Map(), totals: new Map() });
       await save(`af:scan:${v}`, scan);
       msg(scan.games.length ? '' : scan.hours ? `Nenhum jogo com odds da Pinnacle nas próximas ${scan.hours} horas.` : 'Nenhum jogo com odds da Pinnacle nesta data.');
       render();
@@ -352,46 +355,58 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   // Múltipla (multiple.js): as pernas possíveis da varredura, o bilhete (automático pelo alvo ou marcado à mão), a odd
   // da casa (por perna ou a total) e o veredito com a entrada. Uma perna por jogo, só over de gols do jogo.
   function multiView() {
-    const games = multiGames(scan.games);
+    const games = multiGames(scan.games), exp = exposedGames();
     const legOf = gm => gm.options.find(o => o.lineId === multi.lineFor.get(gm.fixtureId)) || gm.best;
-    const legs = games.map(legOf);
+    // jogo que já tem entrada (aposta registrada ou na caixa de envio) fica fora: não aumenta a exposição
+    const exposed = games.filter(gm => exp.has(gm.fixtureId, gm.best.home, gm.best.away));
+    const free = games.filter(gm => !exposed.includes(gm)), legs = free.map(legOf);
     const intro = `<p class="muted">Múltipla = uma perna por jogo, só over de gols do jogo, com chance ≥ 72% (a <b>menor</b> entre a nossa e a da
       mistura com a Pinnacle: numa múltipla o erro de cada perna se multiplica). <b>A conta que manda</b>: com odds justas, a chance de acertar
       tudo é 1 ÷ odd total — odd 6 acerta ~17%, sejam 3 pernas ou 6; "perna segura" não muda isso. O que muda é a <b>margem da casa</b>, que se
       multiplica a cada perna (5 pernas com 5% de margem: −23%). Por isso cada perna tem a sua <b>mínima</b>: se a casa pagar menos numa perna,
-      troque a perna. Aposte antes do início da primeira; entrada pequena (¼ Kelly, até 0,5% da banca).
-      <b>Linha disponível</b>: o bilhete automático só usa linha que a Pinnacle cota no jogo (a casa costuma ter a mesma). Jogo de muito gol
-      costuma não ter o over 1,5 — aí ele entra pelo <b>over 2,5</b> (chance ≥ 60%), se cotado; em cada jogo dá para trocar a linha.</p>`;
-    if (!legs.length) return `${intro}<p class="muted">Nenhuma perna possível nesta varredura (over 1,5 com chance ≥ 72% ou over 2,5 com ≥ 60%, com a Pinnacle, em jogo que não é difícil e ainda não começou).</p>`;
-    if (!multi.picked) multi.picked = new Set(autoTicket(legs, { target: multi.target }).map(l => l.fixtureId));
-    const chosen = legs.filter(l => multi.picked.has(l.fixtureId));
-    const t = multi.ticket = ticketOf(chosen, { house: multi.house, houseTotal: multi.total, banca });
-    const tl = new Map((t?.legs || []).map(l => [l.key, l]));
-    const targets = TARGETS.map(x => `<button class="${multi.target === x ? 'on' : ''}" data-mt="${x}">odd ${x}</button>`).join('');
+      troque a perna. Entrada pequena (¼ Kelly, até 0,5% da banca).
+      <b>Por faixa de horário</b>: os bilhetes vêm do mais próximo ao mais longe, cada um com jogos que começam dentro da faixa escolhida
+      — aposte cada bilhete antes do primeiro jogo dele. <b>Exposição</b>: jogo que já tem entrada no app de apostas fica fora, e cada jogo
+      entra num bilhete só. <b>Linha disponível</b>: só entra linha que a Pinnacle cota no jogo (a casa costuma ter a mesma); jogo sem o
+      over 1,5 entra pelo <b>over 2,5</b> (chance ≥ 60%) se cotado; em cada jogo dá para trocar a linha ou marcar uma não cotada.</p>`;
+    const expTxt = exposed.length ? `<p class="muted">Fora das múltiplas por já terem entrada: ${exposed.map(gm => `${esc(gm.best.home)} x ${esc(gm.best.away)} (${hour(gm.best.kickoff)})`).join(' · ')}.</p>` : '';
+    if (!legs.length) return `${intro}${expTxt}<p class="muted">Nenhuma perna possível nesta varredura (over 1,5 com chance ≥ 72% ou over 2,5 com ≥ 60%, com a Pinnacle, em jogo que não é difícil, ainda não começou e não tem entrada).</p>`;
+    // o que pode entrar: as cotadas, menos as desmarcadas, mais as não cotadas marcadas à mão
+    const inPool = l => multi.include.get(l.fixtureId) ?? l.quoted;
+    const tickets = bandTickets(legs.filter(inPool), { target: multi.target, band: multi.band })
+      .map(ls => ticketOf(ls, { house: multi.house, houseTotal: multi.totals.get(ls[0].key) ?? null, banca }));
+    multi.tickets = tickets;
+    const ticketNo = new Map(tickets.flatMap((t, i) => t.legs.map(l => [l.key, { i, leg: l }])));
+    const chips = `<div class="chips" id="multiTarget"><span class="muted">Odd justa de cada bilhete:</span>${TARGETS.map(x => `<button class="${multi.target === x ? 'on' : ''}" data-mt="${x}">odd ${x}</button>`).join('')}
+      <span class="muted">Faixa de horário:</span>${BANDS.map(h => `<button class="${multi.band === h ? 'on' : ''}" data-mb="${h}">${h} h</button>`).join('')}</div>`;
     const VERD = { vale: ['pos', '✅ vale: a casa paga a mínima'], 'no limite': ['', '⚠️ no limite: acima da justa, abaixo da mínima (sem margem de segurança)'],
       'não vale': ['neg', '❌ não vale: a casa paga menos que a justa — a margem dela come o bilhete'], 'sem odd': ['muted', 'digite a odd da casa (total ou de cada perna)'] };
-    const [vc, vt] = VERD[t?.verdict || 'sem odd'];
-    const sum = !t ? '<p class="muted">Marque as pernas do bilhete.</p>' : `<div class="multisum">
-      <div><b>${t.n} perna${t.n > 1 ? 's' : ''}</b> · acerta todas em <b>${pct(t.p_all)}</b> <span class="muted">(Pinnacle ${pct(t.p_pinnacle_all)})</span>
-        · odd justa <b>${n2(t.fair)}</b> · mínima <b>${n2(t.min)}</b> · aposte até <b>${hour(t.first_kickoff)}</b>${t.n > MAX_LEGS ? ` · <span class="neg">mais de ${MAX_LEGS} pernas: cada perna a mais é mais margem da casa</span>` : ''}</div>
-      <div>Odd total na casa: <input id="mTotal" type="number" step="0.01" min="1" inputmode="decimal" value="${t.odd ?? ''}" placeholder="${n2(t.min)}">
+    const sums = tickets.map((t, i) => { const [vc, vt] = VERD[t.verdict];
+      return `<div class="multisum">
+      <div><b>Bilhete ${i + 1}</b> · ${hour(t.first_kickoff)}–${hour(t.last_kickoff)} · <b>${t.n} pernas</b> · acerta todas em <b>${pct(t.p_all)}</b>
+        <span class="muted">(Pinnacle ${pct(t.p_pinnacle_all)})</span> · odd justa <b>${n2(t.fair)}</b> · mínima <b>${n2(t.min)}</b> · aposte até <b>${hour(t.first_kickoff)}</b>
+        ${Date.now() > t.first_kickoff ? ' <span class="tag mid">o primeiro jogo já começou</span>' : ''}</div>
+      <div class="muted">${t.legs.map(l => `${hour(l.kickoff)} ${esc(l.home)} x ${esc(l.away)} ${esc(l.line)}`).join(' · ')}</div>
+      <div>Odd total na casa: <input class="mtotal" data-mtotal="${esc(t.legs[0].key)}" type="number" step="0.01" min="1" inputmode="decimal" value="${t.odd ?? ''}" placeholder="${n2(t.min)}">
         <span class="${vc}">${vt}</span>${t.ev != null ? ` · EV <b class="${t.ev > 0 ? 'pos' : 'neg'}">${(t.ev * 100).toFixed(1).replace('.', ',')}%</b>` : ''}
         ${t.stake ? ` · entrada <b>R$ ${t.stake}</b>` : t.odd ? ' · <b>sem entrada</b>' : ''}
-        ${t.n < 2 ? '<span class="muted">· marque 2 pernas ou mais</span>' : `<button class="enter" id="mEnter"${t.verdict === 'não vale' ? ' title="a odd da casa não paga a justa"' : ''}>➕ Registrar múltipla</button>`}</div></div>`;
+        <button class="enter" data-mreg="${i}"${t.verdict === 'não vale' ? ' title="a odd da casa não paga a justa"' : ''}>➕ Registrar bilhete ${i + 1}</button></div></div>`; }).join('')
+      || '<p class="muted">Nenhum bilhete de 2 pernas ou mais com as pernas marcadas nesta faixa de horário.</p>';
     // a linha do jogo: escolha entre as que passam (over 1,5 / 2,5); a não cotada pela Pinnacle pode faltar na casa
     const noQuote = '<span class="tag mid" title="a Pinnacle não cota esta linha neste jogo (a chance sai do total dela): a casa costuma não ter — troque para a linha seguinte">pode faltar na casa</span>';
     const pernaCell = (gm, l) => (gm.options.length > 1
       ? `<select data-mline="${gm.fixtureId}">${gm.options.map(o => `<option value="${esc(o.lineId)}"${o.lineId === l.lineId ? ' selected' : ''}>Gols: ${esc(o.line)} · ${pct(o.p)}${o.quoted ? '' : ' (não cotada)'}</option>`).join('')}</select>`
       : `Gols: <b>${esc(l.line)}</b>`) + (l.quoted ? '' : ` ${noQuote}`);
-    const row = (gm, l) => { const x = tl.get(l.key), on = multi.picked.has(l.fixtureId);
-      return `<tr class="${on ? '' : 'weak'}${x?.below ? ' bad' : ''}"><td><input type="checkbox" data-mpick="${l.fixtureId}"${on ? ' checked' : ''}></td>
-        <td>${hour(l.kickoff)}</td><td>${esc(l.home)} x ${esc(l.away)}</td><td class="muted">${esc(l.competition)}</td><td>${pernaCell(gm, l)}</td>
+    const row = (gm, l) => { const x = ticketNo.get(l.key), on = inPool(l);
+      return `<tr class="${x ? '' : 'weak'}${x?.leg.below ? ' bad' : ''}"><td><input type="checkbox" data-mpick="${l.fixtureId}"${on ? ' checked' : ''}></td>
+        <td>${x ? `<b>${x.i + 1}</b>` : '<span class="muted">—</span>'}</td><td>${hour(l.kickoff)}</td><td>${esc(l.home)} x ${esc(l.away)}</td><td class="muted">${esc(l.competition)}</td><td>${pernaCell(gm, l)}</td>
         <td><b>${pct(l.p)}</b></td><td class="muted">${pct(l.p_pinnacle)} · ${l.quoted ? n2(l.pinnacle_odd) : 'não cota'}</td><td>${l.context ? `<span class="tag ${CTX_CLS[l.context] || ''}">${esc(l.context)}</span>` : '—'}</td>
-        <td>${n2(l.fair)}</td><td><b>${x ? n2(x.min) : '—'}</b></td>
-        <td>${on ? `<input class="mleg" type="number" step="0.01" min="1" inputmode="decimal" data-mleg="${esc(l.key)}" value="${multi.house.get(l.key) ?? ''}">${x?.below ? ' <span class="neg">abaixo da mínima</span>' : ''}` : ''}</td></tr>`; };
-    return `${intro}<div class="chips" id="multiTarget"><span class="muted">Bilhete automático até a odd justa:</span>${targets}</div>${sum}
-      <div class="scroll"><table class="scanrank multitab"><tr><th></th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Perna</th><th>Chance</th><th>Pinnacle</th><th>Contexto</th>
-        <th>Justa</th><th>Mínima na múltipla</th><th>Odd da casa</th></tr>${games.map((gm, i) => row(gm, legs[i])).join('')}</table></div>`;
+        <td>${n2(l.fair)}</td><td><b>${x ? n2(x.leg.min) : '—'}</b></td>
+        <td>${x ? `<input class="mleg" type="number" step="0.01" min="1" inputmode="decimal" data-mleg="${esc(l.key)}" value="${multi.house.get(l.key) ?? ''}">${x.leg.below ? ' <span class="neg">abaixo da mínima</span>' : ''}` : ''}</td></tr>`; };
+    const order = free.map((gm, i) => [gm, legs[i]]).sort((a, b) => a[1].kickoff - b[1].kickoff);
+    return `${intro}${chips}${expTxt}${sums}
+      <div class="scroll"><table class="scanrank multitab"><tr><th></th><th>Bilhete</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Perna</th><th>Chance</th><th>Pinnacle</th><th>Contexto</th>
+        <th>Justa</th><th>Mínima na múltipla</th><th>Odd da casa</th></tr>${order.map(([gm, l]) => row(gm, l)).join('')}</table></div>`;
   }
 
   // Para confirmar: as entradas "entrar se…" de todos os jogos, na ordem da hora de conferir (30 min antes), com o botão
@@ -471,21 +486,25 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   // múltipla: marcar/desmarcar perna e as odds da casa (ao sair do campo)
   $('#scanOut').addEventListener('change', e => {
     const pk = e.target.closest('[data-mpick]');
-    if (pk) { const k = Number(pk.dataset.mpick); if (pk.checked) multi.picked.add(k); else multi.picked.delete(k); multi.total = null; render(); return; }
+    if (pk) { multi.include.set(Number(pk.dataset.mpick), pk.checked); render(); return; }
     const ml = e.target.closest('[data-mline]');
-    if (ml) { multi.lineFor.set(Number(ml.dataset.mline), ml.value); multi.total = null; render(); return; }
+    if (ml) { multi.lineFor.set(Number(ml.dataset.mline), ml.value); render(); return; }
     const lg = e.target.closest('[data-mleg]');
-    if (lg) { const v = parseFloat(lg.value); if (v > 1) multi.house.set(lg.dataset.mleg, v); else multi.house.delete(lg.dataset.mleg); multi.total = null; render(); return; }
-    if (e.target.id === 'mTotal') { const v = parseFloat(e.target.value); multi.total = v > 1 ? v : null; render(); }
+    if (lg) { const v = parseFloat(lg.value); if (v > 1) multi.house.set(lg.dataset.mleg, v); else multi.house.delete(lg.dataset.mleg); render(); return; }
+    const mt = e.target.closest('[data-mtotal]');
+    if (mt) { const v = parseFloat(mt.value); if (v > 1) multi.totals.set(mt.dataset.mtotal, v); else multi.totals.delete(mt.dataset.mtotal); render(); }
   });
   $('#scanOut').addEventListener('click', e => {
     const ck = e.target.closest('[data-check]');
     if (ck) { checkFixture(Number(ck.dataset.check), ck); return; }
     if (e.target.closest('#simRun')) { runSim(); return; }
     const mt = e.target.closest('[data-mt]');
-    if (mt) { multi.target = Number(mt.dataset.mt); multi.picked = null; render(); return; }
-    if (e.target.closest('#mEnter') && multi.ticket) {
-      const t = multi.ticket, line = multiLine(t);
+    if (mt) { multi.target = Number(mt.dataset.mt); render(); return; }
+    const mb = e.target.closest('[data-mb]');
+    if (mb) { multi.band = Number(mb.dataset.mb); render(); return; }
+    const mr = e.target.closest('[data-mreg]');
+    if (mr && multi.tickets[mr.dataset.mreg]) {
+      const t = multi.tickets[mr.dataset.mreg], line = multiLine(t);
       openEntry(line.id, t.odd, { line, fx: { id: line.id, t: t.first_kickoff, home: { name: 'Múltipla' }, away: { name: `${t.n} jogos` }, league: { name: 'várias ligas' } }, btn: e.target });
       return;
     }
@@ -532,6 +551,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     }
   }, 60e3);
 
-  bindSpecialist($('#scanSpec'), () => scan && (market === MULTI ? briefMulti(scan, multi.ticket) : briefScan(scan, ranked, { market, order })));
+  // registrou um bilhete: o jogo passa a ter entrada e sai dos próximos bilhetes
+  $('#entryDlg')?.addEventListener('close', () => { if (market === MULTI && scan) render(); });
+  bindSpecialist($('#scanSpec'), () => scan && (market === MULTI ? briefMulti(scan, multi.tickets) : briefScan(scan, ranked, { market, order })));
   showSaved();
 }

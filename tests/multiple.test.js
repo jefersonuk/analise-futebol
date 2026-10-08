@@ -97,3 +97,40 @@ test('varredura da demo: a aba Múltipla tem pernas e monta o bilhete', async ()
   const t = ticketOf(autoTicket(legs, { target: 3 }));
   assert.ok(t.n >= 1 && t.p_all > 0 && t.fair >= 1);
 });
+
+test('bilhetes por faixa de horário: do mais próximo ao mais longe, cada jogo num bilhete só', async () => {
+  const { bandTickets } = await import('../src/multiple.js');
+  const leg = (k, h, p = 0.75, extra = {}) => ({ key: `${k}:gO1.5`, fixtureId: k, kickoff: NOW + h * H, p, p_pinnacle: p, quoted: true, context: 'neutro', ...extra });
+  // 13h: três jogos; 13h30: um; 16h: dois; 20h: um sozinho
+  const legs = [leg(1, 1), leg(2, 1, 0.8), leg(3, 1, 0.78), leg(4, 1.5), leg(5, 4), leg(6, 4.5), leg(7, 8)];
+  const ts = bandTickets(legs, { target: 3, band: 2 });
+  assert.deepEqual(ts.map(t => t.map(l => l.fixtureId).sort()), [[1, 2, 3, 4], [5, 6]], 'faixa de 2 h a partir do primeiro jogo; o das 20h sozinho fica de fora');
+  assert.ok(ts[0][0].kickoff <= ts[1][0].kickoff);
+  const once = new Set(ts.flat().map(l => l.fixtureId));
+  assert.equal(once.size, ts.flat().length);
+  // alvo baixo: a faixa rende dois bilhetes, as melhores pernas primeiro
+  const t2 = bandTickets(legs.slice(0, 4), { target: 1.6, band: 2 });
+  assert.deepEqual(t2.map(t => t.map(l => l.fixtureId).sort()), [[2, 3], [1, 4]]);
+  // faixa de 1 h: o jogo das 13h30 entra com os das 13h; com 0,5 h, não
+  assert.equal(bandTickets(legs, { target: 3, band: 1 })[0].length, 4);
+});
+
+test('exposição: jogo que já tem entrada (app de apostas ou caixa de envio) é reconhecido', async () => {
+  const mem = new Map();
+  globalThis.localStorage = { getItem: k => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)) };
+  const { exposedGames, BETS_KEY, INBOX_KEY } = await import('../src/entry.js');
+  const iso = h => new Date(Date.now() + h * H).toISOString();
+  mem.set(BETS_KEY, JSON.stringify({ surebets: [
+    { event: 'Holon Yermiyahu x Nordia Jerusalem — Handicap asiático: Nordia +1,5', date: iso(1).slice(0, 16), analise: { fixtureId: 11, kickoff: iso(1) } },
+    { event: 'Casa Velha x Fora Velha — Gols', winner: 'A', date: iso(-30).slice(0, 16), analise: { fixtureId: 12, kickoff: iso(-30) } },   // passou: não pesa
+    { event: 'Múltipla (2) — …', analise: { multi: true, fixtureId: 14, kickoff: iso(2), legs: [{ fixtureId: 13, home: 'A', away: 'B' }, { fixtureId: 14, home: 'C', away: 'D' }] } },
+    { event: 'Vänersborgs FK x Kumla — Gols: Mais de 1,5', winner: null, date: iso(1).slice(0, 16) },                                  // à mão, sem o jogo da API
+  ] }));
+  mem.set(INBOX_KEY, JSON.stringify([{ event: 'X x Y — Gols', analise: { fixtureId: 15, home: 'X', away: 'Y', kickoff: iso(3) } }]));
+  const e = exposedGames();
+  assert.ok(e.has(11) && e.has(13) && e.has(14) && e.has(15));
+  assert.ok(!e.has(12), 'aposta liquidada de jogo que já passou não conta');
+  assert.ok(e.has(999, 'Vanersborgs FK', 'Kumla'), 'à mão: pelo nome dos times');
+  assert.ok(!e.has(998, 'Kumla', 'Outro'));
+  delete globalThis.localStorage;
+});

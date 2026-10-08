@@ -85,6 +85,31 @@ function buildMulti({ line, casa, currency, odd, stake, stakeNat }) {
   };
 }
 
+// Jogos que já têm entrada — aposta no app de apostas (em aberto, ou com o jogo ainda por acontecer ou em andamento) ou
+// na caixa de envio —, para a múltipla não aumentar a exposição. ids: jogos da API (apostas vindas daqui e pernas de
+// múltipla); names: "mandante|visitante" normalizado (apostas lançadas à mão, sem o jogo da API).
+const normTeam = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+export const pairKey = (home, away) => `${normTeam(home)}|${normTeam(away)}`;
+export function exposedGames({ now = Date.now() } = {}) {
+  let st = null;
+  try { st = JSON.parse(localStorage.getItem(BETS_KEY)); } catch { /* sem dados */ }
+  const ids = new Set(), names = new Set();
+  const add = (a, event) => {
+    if (a?.fixtureId && !a.multi) ids.add(a.fixtureId);
+    for (const l of a?.legs || []) { ids.add(l.fixtureId); names.add(pairKey(l.home, l.away)); }
+    if (a?.home && a?.away) names.add(pairKey(a.home, a.away));
+    const m = String(event || '').split(' — ')[0].match(/^(.+?) x (.+)$/);
+    if (m && !a?.multi) names.add(pairKey(m[1], m[2]));
+  };
+  for (const o of st?.surebets || []) {
+    const a = o.analise || {}, t = Date.parse(a.kickoff || o.date);
+    if (o.winner && !(t > now - 4 * 3600e3)) continue;   // liquidada e o jogo já passou: não pesa mais
+    add(a, o.event);
+  }
+  for (const it of readInbox()) add(it.analise, it.event);
+  return { ids, names, has: (fixtureId, home, away) => ids.has(fixtureId) || names.has(pairKey(home, away)) };
+}
+
 export const readInbox = () => { try { return JSON.parse(localStorage.getItem(INBOX_KEY)) || []; } catch { return []; } };
 
 // Grava na caixa deste navegador e, se a ☁️ nuvem estiver conectada, na caixa da nuvem (qualquer aparelho
