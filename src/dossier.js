@@ -15,6 +15,7 @@ import { favorFor } from './favoritism.js';
 import { buildContext, contextGames, lineContext } from './context.js';
 import { livePlanOf } from './live.js';
 import { applyHard, hardGame } from './hard.js';
+import { derbyOf, scenarioLines } from './scenario.js';
 
 export { stakeFor };
 
@@ -22,7 +23,8 @@ const DAY = 864e5;
 // Mercados das linhas principais do pré-jogo (painel e candidatas de foco): over de escanteios 1T e do jogo,
 // de gols 1T e do jogo (linhas de MAIN_LINES, consistency.js), handicap de gols, over de chutes e 1X2.
 export const FOCUS = Object.keys(MAIN_LINES).concat(GOAL_HANDICAP, SHOTS, '1X2');
-export const ODDS_STALE_MIN = 90;   // acima disso a odd da API provavelmente já andou
+export const ODDS_STALE_MIN = 90;
+const SCEN_MARKETS = ['1X2', 'Handicap asiático', 'Total de gols'];   // acima disso a odd da API provavelmente já andou
 // Peso do modelo na mistura log-linear com a Pinnacle (o resto é da Pinnacle). Valores iniciais
 // do relatório (0,05–0,15 em mercados líquidos; mais onde a Pinnacle é fraca); calibrar por CLV.
 const W_MODEL = { '1X2': 0.1, 'Handicap asiático': 0.1, 'Total de gols': 0.1, 'Total de gols 1T': 0.1, 'Ambas marcam': 0.1,
@@ -380,7 +382,8 @@ export function repriceDossier(dossier, res, oddsP, teams, banca = 44000) {
     fx: { home: { id: ids.home, name: fx.home.name }, away: { id: ids.away, name: fx.away.name }, league: { name: dossier.fixture.competition } } }) : null;
   if (hard && !alerts.some(a => a.startsWith('jogo difícil'))) alerts.push(`jogo difícil de analisar (${hard.reasons.join('; ')}): só over de gols com a odd da Pinnacle, com metade da entrada`);
   const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams, banca, context, hard });
-  return { ...dossier, data_quality: { ...dossier.data_quality, alerts }, lines_with_pinnacle: priced, lines_anchored: anchored,
+  const scen = c?.scenario ? scenarioLines(c.scenario, priced.filter(l => SCEN_MARKETS.includes(l.market)), { banca, hard }).slice(0, 6) : [];
+  return { ...dossier, data_quality: { ...dossier.data_quality, alerts }, lines_with_pinnacle: priced, lines_anchored: anchored, scenario_lines: scen,
     hard_game: hard, live_1h: hard ? null : livePlanOf(res),
     model_only_lines: modelOnly, ...pickCandidates(priced, anchored),
     favoritism: res.favor && { summary: favorSummary(res.favor, { home: fx.home.name, away: fx.away.name }), ...res.favor } };
@@ -484,7 +487,9 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   const teamsHist = [{ role: 'home', name: fx.home.name, games: recent[fx.home.id], roleNow: now.home },
     { role: 'away', name: fx.away.name, games: recent[fx.away.id], roleNow: now.away }];
   const h2hExtra = val(6, []);
-  const context = buildContext({ rows: res.prep.rows, fx, table, extra: h2hExtra, res, fair });
+  let derby = null;   // clássico: os dois times da mesma cidade (cadastro guardado 180 dias)
+  if (api.teamInfo) try { derby = derbyOf(await api.teamInfo(fx.home.id), await api.teamInfo(fx.away.id)); } catch { /* sem cadastro */ }
+  const context = buildContext({ rows: res.prep.rows, fx, table, extra: h2hExtra, res, fair, derby });
   const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams: teamsHist, banca, context, hard });
   const { candidatesFocus, candidates } = pickCandidates(priced, anchored);
 
@@ -521,6 +526,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     live_1h: hard ? null : livePlanOf(res),
     focus_markets: FOCUS,
     candidates_focus: candidatesFocus,
+    // apostas de cenário (odd perto de 2): as linhas de gols da Pinnacle pela leitura de cenário (scenario.js)
+    scenario_lines: scenarioLines(context.ctx.scenario, priced.filter(l => SCEN_MARKETS.includes(l.market)), { banca, hard }).slice(0, 6),
     candidates,
     lines_with_pinnacle: priced,
     lines_anchored: anchored,

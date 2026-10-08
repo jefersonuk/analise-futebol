@@ -2,7 +2,7 @@
 // (mercados de foco, candidatas e as melhores linhas de cada mercado), para caber numa conversa sem
 // gastar o plano à toa. O texto começa com uma marca que a página do especialista reconhece.
 
-import { COMBOS, LIVE_1H, bestLine } from './scanner.js';
+import { CENARIO, COMBOS, LIVE_1H, bestLine } from './scanner.js';
 
 export const SPECIALIST_URL = 'https://claude.ai/artifact/T2QWDJ4U4zzFJSnQumKSBr';
 export const MARK = '#ESPECIALISTA-FUTEBOL v1';
@@ -45,10 +45,11 @@ const lean = (l, full = false) => l && {
   id: l.id, market: l.market, line: l.line, price_source: l.priced_by === 'pinnacle' ? 'pinnacle' : l.derived ? 'derivada do total da Pinnacle' : 'só o modelo',
   tier: l.tier, p_blend: l.p_blend, p_pinnacle: l.p_pinnacle, fair_odd: l.fair_odd_blend,
   odd_min: l.odd_min, pinnacle_odd: l.pinnacle_odd, odd_min_vs_pinnacle_pct: l.odd_min_vs_pinnacle_pct, value_pct: l.value_pct,
-  fragile: l.fragile, inviable: l.inviable || undefined, blocked: l.blocked || undefined, reduced: l.reduced || undefined,
+  fragile: l.fragile || undefined, inviable: l.inviable || undefined, blocked: l.blocked || undefined, reduced: l.reduced || undefined,
   entry_brl: l.entry_brl, politica_e: l.politica_e,
-  last10: [l.history?.home, l.history?.away].map(t => (t ? `${t.hits} ${t.rule}` : '—')).join(' · '),
-  context: l.context && `${l.context.verdict}: ${l.context.signals.map(x => (full ? `${x.kind} ${x.verdict} (${x.text})` : `${x.kind} ${x.verdict}`)).join('; ')}`,
+  // nas melhores de cada mercado, só a contagem e o veredito (o detalhe vai na linha da lista)
+  last10: [l.history?.home, l.history?.away].map(t => (t ? (full ? `${t.hits} ${t.rule}` : t.hits) : '—')).join(' · '),
+  context: l.context && (full ? `${l.context.verdict}: ${l.context.signals.map(x => `${x.kind} ${x.verdict} (${x.text})`).join('; ')}` : l.context.verdict),
 };
 // Combo de duas pernas (combos.js), enxuto: as pernas com a chance de cada uma, a chance do combo (com a parte
 // em que o empate anula volta e vale só a de gols), a justa, a mínima, o produto das pernas e a correlação.
@@ -58,6 +59,16 @@ const leanCombo = c => c && {
   fair_odd: c.fair_odd_blend, odd_min: c.odd_min, odd_legs_product: c.odd_indep, correlation: c.corr, entry_brl: c.entry_brl, politica_e: c.politica_e,
   last10: [c.history?.home, c.history?.away].map(t => (t ? t.hits : '—')).join(' · '),
 };
+// Leitura de cenário enxuta: o papel de cada time hoje, como ele se saiu nos jogos de mesmas características, a
+// correção sobre a Pinnacle, motivação e clássico; e as linhas da Pinnacle pelo cenário.
+// (o texto do cenário já vai em context.text; aqui só os números, e os jogos só na aba Cenário)
+const leanSide = (p, games) => p && { how: p.how, relaxed: p.relaxed || undefined, n: p.n, wdl: `${p.w}-${p.d}-${p.l}`, gf: p.gf, ga: p.ga, resid: p.resid,
+  tot_resid: p.tot_resid ?? undefined, win2: p.win2, lose2: p.lose2, games: games ? p.games.slice(0, 4) : undefined };
+const leanScenario = (c, games) => c && { band: c.band, adj_sup: c.adj_sup, adj_total: c.adj_total, agree: c.agree, enough: c.enough,
+  motivation: c.motivation || undefined, derby: c.derby || undefined, home: leanSide(c.home, games), away: leanSide(c.away, games) };
+const leanScenLine = l => l && { line: `${l.market}: ${l.line}`, pinnacle_odd: l.pinnacle_odd, p_pinnacle: l.p_pinnacle, p_scenario: l.p_scenario,
+  ev_at_pinnacle: l.ev_pinnacle, odd_min: l.odd_min, bet: l.bet, tier: l.bet ? l.tier : undefined, why_not: l.bet ? undefined : l.why_not[0],
+  entry_brl: l.bet ? l.entry_brl : undefined };
 // Plano ao vivo enxuto: odd mínima (e chance) do over 3, 3,5 e 4,5 nos minutos 0, 5, 8 e 10, sem escanteio e com 1.
 function leanLive(p) {
   if (!p) return null;
@@ -78,11 +89,11 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
     kind: 'varredura',
     date: scan.date, window: scan.window ? { hours: scan.hours, from: new Date(scan.window.from).toISOString(), to: new Date(scan.window.to).toISOString() } : null,
     order: order === 'time' ? 'horário (o mais próximo primeiro)' : 'chance de ganho',
-    filter: market === LIVE_1H ? 'ao vivo 1º tempo' : market === COMBOS ? 'combos de duas pernas' : market || 'melhor do jogo',
+    filter: market === LIVE_1H ? 'ao vivo 1º tempo' : market === COMBOS ? 'combos de duas pernas' : market === CENARIO ? 'cenário (odd perto de 2)' : market || 'melhor do jogo',
     generated_at: scan.generated_at, fixtures: scan.fixtures, with_odds: scan.with_odds, with_1h: scan.with_1h ?? null,
     asked_hours: scan.asked_hours ?? null, corners_report: scan.corners_report ?? null,
     games: ranked.map(({ g, line }, i) => {
-      const top = (line && !line.combo ? line : null) || bestLine(g.lines);
+      const top = (line && !line.combo && !line.scenario ? line : null) || bestLine(g.lines);
       return {
         n: i + 1,
         kickoff: new Date(g.fx.t).toISOString(), competition: g.fx.league.name, home: g.fx.home.name, away: g.fx.away.name,
@@ -94,6 +105,8 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
         best_by_market: Object.fromEntries(Object.entries(g.best || {}).filter(([, l]) => l && l.id !== top?.id).map(([m, l]) => [m, lean(l)])),
         live_1h: leanLive(g.live1h),
         combos: (g.combos || []).slice(0, market === COMBOS ? 4 : 2).map(leanCombo),
+        scenario: leanScenario(g.context?.scenario, market === CENARIO),
+        scenario_lines: (g.scenario || []).filter((l, k) => l.bet || k < (market === CENARIO ? 3 : 1)).slice(0, 4).map(leanScenLine),
       };
     }),
     skipped: scan.skipped.map(s => `${s.fx.home.name} x ${s.fx.away.name} (${s.fx.league.name}): ${s.why}`),

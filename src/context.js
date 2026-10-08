@@ -6,6 +6,8 @@
 //   médias           o total (ou o saldo) que as médias dos dois times no mando de hoje apontam, contra a linha
 //   confronto direto acerto da linha nos confrontos dos últimos H2H_YEARS anos (3 jogos ou mais)
 //   tabela           só nos handicaps: o time apostado está bem acima ou bem abaixo na tabela
+//   cenário          a chance da linha pelos jogos de mesmas características dos dois times (scenario.js); contra
+//                    por 9 pp ou mais tira a linha das apostas sozinho (a zebra que leva goleada nesse cenário)
 // Contexto contra (2 checagens contra e mais contra do que a favor) tira a linha das apostas: a estatística
 // sozinha não basta. O confronto direto é amostra pequena (elencos e técnicos mudam): confirma ou levanta
 // dúvida, nunca decide sozinho.
@@ -13,6 +15,7 @@
 import { recentGames } from './insights.js';
 import { history } from './dashboard.js';
 import { impliedTotal } from './model.js';
+import { buildScenario, scenarioSignal, scenarioText } from './scenario.js';
 
 const DAY = 864e5;
 export const H2H_YEARS = 5;   // confronto mais antigo que isso não entra: elencos e técnicos já são outros
@@ -108,8 +111,9 @@ function h2hRow(g, home) {
 }
 
 // Contexto do jogo. rows: jogos da base antes do jogo (prep.rows); table: api.standings; extra: api.headToHead;
-// res: analyzeMatch; fair: Pinnacle sem margem. Devolve { ctx (vai para a tela e o especialista), games }.
-export function buildContext({ rows, fx, table = [], extra = [], res, fair = null }) {
+// res: analyzeMatch; fair: Pinnacle sem margem; derby: clássico (texto) ou null. Devolve { ctx (vai para a tela e o
+// especialista), games }.
+export function buildContext({ rows, fx, table = [], extra = [], res, fair = null, derby = null }) {
   const H = fx.home, A = fx.away, names = { home: H.name, away: A.name };
   const games = contextGames(rows, H.id, A.id, fx.t, extra);
   const tab = table?.length ? { home: tableRow(table, H.id, A.id), away: tableRow(table, A.id, H.id) } : null;
@@ -122,6 +126,11 @@ export function buildContext({ rows, fx, table = [], extra = [], res, fair = nul
     h2h: { n: h.length, years: H2H_YEARS, home_record: { w: h.filter(g => g.gf > g.ga).length, d: h.filter(g => g.gf === g.ga).length,
       l: h.filter(g => g.gf < g.ga).length }, profile: profile(h), games: h.map(g => h2hRow(g, H.name)) },
   };
+  // cenário: o saldo e o total que a Pinnacle precifica (sem ela, o modelo), corrigidos pelos jogos de mesmas características
+  const pin = fair?.size ? impliedTotal(fair, 'g', 1)?.implied_total : null, g = res.pred?.goals;
+  const market = res.favor?.sup != null && (pin || g) ? { s: res.favor.sup, T: pin || g.h + g.a,
+    source: res.favor.source === 'pinnacle_1x2' && pin ? 'pinnacle' : 'modelo' } : null;
+  ctx.scenario = buildScenario({ rows, fx, market, table: ctx.table, derby });
   ctx.text = contextText(ctx, names);
   return { ctx, games, names };
 }
@@ -197,8 +206,10 @@ export function lineContext(id, c, p) {
   if (hh && hh.bars.length) sig.push(rateSignal('confronto direto', hh.bars.length, hh.wins, p, `${hitTxt(hh)} nos confrontos diretos`, 3));
   const t = tableSignal(id, ctx, names);
   if (t) sig.push(t);
+  const sc = ctx.scenario && scenarioSignal(id, ctx.scenario, p);
+  if (sc) sig.push(sc);
   const F = sig.filter(s => s.verdict === 'a favor').length, C = sig.filter(s => s.verdict === 'contra').length;
-  const verdict = C >= 2 && C > F ? 'contra' : F >= 2 && C === 0 ? 'a favor' : F && C ? 'misto' : 'neutro';
+  const verdict = (C >= 2 && C > F) || sc?.strong ? 'contra' : F >= 2 && C === 0 ? 'a favor' : F && C ? 'misto' : 'neutro';
   return { verdict, favor: F, contra: C, signals: sig };
 }
 
@@ -224,6 +235,7 @@ export function contextText(ctx, names) {
   const sh = t?.home?.home, sa = t?.away?.away;
   if (sh && sa) out.push(`Gols na temporada: ${names.home} em casa marca ${n1(sh.gf_pg)} e sofre ${n1(sh.ga_pg)} por jogo (${sh.played} jogos) · `
     + `${names.away} fora marca ${n1(sa.gf_pg)} e sofre ${n1(sa.ga_pg)} (${sa.played} jogos).`);
+  out.push(...scenarioText(ctx.scenario, names));
   const venue = (p, n, where) => (p.n ? `${n} ${where} (${p.n}): ${n1(p.goals)} gols${p.n_1h ? ` (${n1(p.goals_1h)} no 1T)` : ''}`
     + `${p.n_corners ? `, ${n1(p.corners)} escanteios` : ''}${p.n_c1 >= 3 ? ` (${n1(p.corners_1h)} no 1T)` : ''}, over 2,5 em ${Math.round(p.over25 * 100)}%` : null);
   const vs = [venue(v.home, names.home, 'em casa'), venue(v.away, names.away, 'fora')].filter(Boolean);

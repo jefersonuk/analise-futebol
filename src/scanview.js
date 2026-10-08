@@ -4,7 +4,7 @@
 // o plano de entrada ao vivo nos escanteios do 1º tempo, os gráficos dos últimos 10 jogos de cada time na
 // melhor linha e o atalho para a análise completa do jogo.
 
-import { COMBOS, FILTER_KEYS, GOAL_HANDICAP, LIVE_1H, MAIN_MARKETS, SHOTS, SHOTS_FILTER, bestLine, pickGames, scanDay } from './scanner.js';
+import { CENARIO, COMBOS, FILTER_KEYS, GOAL_HANDICAP, LIVE_1H, MAIN_MARKETS, SHOTS, SHOTS_FILTER, bestLine, pickGames, scanDay } from './scanner.js';
 import { bindTooltips, renderDashboard } from './dashboard.js';
 import { load, save } from './store.js';
 import { bindSpecialist, briefScan } from './brief.js';
@@ -58,7 +58,8 @@ const hits = l => [l.history?.home, l.history?.away].map(x => (x && (x.raw?.n ??
 const thr = l => parseFloat(l.id.match(/-?[\d.]+$/)?.[0]) || 0;
 // Filtros: a melhor linha de cada jogo, cada mercado e os jogos para a entrada ao vivo no 1º tempo.
 // Melhor do jogo: handicap de gols, gols, chutes e 1X2 (escanteios só nas abas deles, e só over).
-const FILTERS = [['Melhor do jogo', null], ...FILTER_KEYS.map(m => [SHORT[m], m]), ['1T ao vivo', LIVE_1H]];
+// 🎯 Cenário (a padrão): odd perto de 2 pela leitura de cenário dos dois times.
+const FILTERS = [['🎯 Cenário', CENARIO], ['Melhor do jogo', null], ...FILTER_KEYS.map(m => [SHORT[m], m]), ['1T ao vivo', LIVE_1H]];
 // Plano ao vivo: odd mínima e chance do over numa linha, no minuto e com os escanteios dados.
 const liveCell = (plan, c, m, L) => {
   const x = plan?.tables.find(t => t.corners === c)?.rows.find(r => r.minute === m)?.cells.find(z => z.line === L);
@@ -72,12 +73,20 @@ const corrTag = c => {
     : d <= -3 ? `<span class="tag mid" title="uma perna atrapalha a outra: o combo acerta ${-d}% menos do que se fossem independentes">contra ${d}%</span>`
       : '<span class="tag">independentes</span>';
 };
+// Cenário: a linha, a chance da Pinnacle e a pelo cenário, o valor na odd dela e a leitura curta dos dois times
+const scenTag = l => `<span class="tag ${l.bet ? 'ok' : ''}" title="${esc(l.bet ? 'aposta de cenário' : l.why_not.join('; '))}">${l.bet ? l.tier : 'sem aposta'}</span>`;
+const scenHead = '<th>Linha</th><th>Cenário</th><th>Pinnacle</th><th>Chance: Pinnacle → cenário</th><th>Valor no cenário</th><th>Mínima</th><th>Entrada</th>';
+const scenCells = l => `<td>${esc(SHORT[l.market] || l.market)}: <b>${esc(l.line)}</b></td><td>${scenTag(l)}</td><td>${n2(l.pinnacle_odd)}</td>
+  <td>${pct(l.p_pinnacle)} → <b>${pct(l.p_scenario)}</b></td><td><span class="${l.ev_pinnacle >= 0.05 ? 'pos' : l.ev_pinnacle < 0 ? 'neg' : 'muted'}">${signed(Math.round(l.ev_pinnacle * 100))}%</span></td>
+  <td><b>${n2(l.odd_min)}</b></td><td class="muted">${l.bet && l.entry_brl ? `R$ ${l.entry_brl} · ${l.politica_e}` : '—'}</td>`;
+const prof = (p, n) => (p?.n ? `${esc(n)} ${esc(p.how)}: ${p.w}V ${p.d}E ${p.l}D, ${nb(p.gf.toFixed(1))}–${nb(p.ga.toFixed(1))}, ${signed(nb(p.resid.toFixed(1)))} além do esperado` : `${esc(n)}: sem jogos no cenário`);
+const scenShort = g => { const c = g.context?.scenario; return c ? `${prof(c.home, g.fx.home.name)} · ${prof(c.away, g.fx.away.name)}` : '—'; };
 const comboHead = '<th>Combo</th><th>Nível</th><th>Chance · Pinnacle</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pernas separadas</th><th>Pernas</th>';
 const comboCells = c => `<td><b>${esc(c.line)}</b></td><td>${tierTag(c)}</td><td>${probs(c)}</td><td class="muted">${hits(c)}</td>
   <td>${n2(c.fair_odd_blend)}</td><td><b>${n2(c.odd_min)}</b></td><td class="muted">${n2(c.odd_indep)}</td><td>${corrTag(c)}</td>`;
 
 export function initScan({ api, openEntry, analyzeFixture, banca }) {
-  let scan = null, market = null, order = 'time', ranked = [];
+  let scan = null, market = CENARIO, order = 'time', ranked = [];
   $('#scanDate').innerHTML = [['Próximas 4 horas (amplia até 12 h se faltar jogo)', WINDOW], ['Hoje (dia todo)', dayStr(0)], ['Amanhã', dayStr(1)]]
     .map(([t, v]) => `<option value="${v}">${t}${v === WINDOW ? '' : ` (${v.split('-').reverse().slice(0, 2).join('/')})`}</option>`).join('');
   $('#scanBudget').value = localStorage.getItem(BUDGET_KEY) || 1500;
@@ -108,7 +117,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const out = $('#scanOut');
     $('#scanSpec').hidden = !scan?.games.length;
     if (!scan) { out.innerHTML = ''; return; }
-    const top = scan.top || 20, live = market === LIVE_1H, combos = market === COMBOS, ok = scan.v >= (combos ? 8 : 7);
+    const top = scan.top || 20, live = market === LIVE_1H, combos = market === COMBOS, cen = market === CENARIO;
+    const ok = scan.v >= (cen ? 9 : combos ? 8 : 7);
     ranked = ok ? pickGames(scan.games, { market, top, order }) : [];
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const chips = FILTERS.map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
@@ -128,22 +138,30 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
           <td>${liveCell(p, 0, 0, 3.5)}</td><td>${liveCell(p, 0, 5, 3.5)}</td><td>${liveCell(p, 0, 10, 3.5)}</td><td>${liveCell(p, 1, 10, 3.5)}</td></tr>`;
       }
       if (combos) return `<tr ${go} class="${isBet(line) ? '' : 'weak'}">${game}${comboCells(line)}</tr>`;
+      if (cen) return `<tr ${go} class="${line.bet ? '' : 'weak'}">${game}${scenCells(line)}<td class="muted small">${scenShort(g)}</td></tr>`;
       const gap = priceGap(line);
       return `<tr ${go} class="${isBet(line) ? '' : 'weak'}">${game}<td>${esc(SHORT[line.market] || line.market)}: <b>${esc(line.line)}</b></td>
         <td>${tierTag(line)}${gap ? ` <span class="tag price" title="sem aposta: a odd mínima fica ${gapTxt(line)}; casa soft raramente paga mais de 5% acima">+${gap1(line)}% Pin</span>` : ''}</td>
         <td>${ctxTag(line)}</td><td>${probs(line)}</td><td class="muted">${hits(line)}</td><td>${n2(line.fair_odd_blend)}</td><td><b>${n2(line.odd_min)}</b></td>
         <td class="muted">${line.pinnacle_odd ? n2(line.pinnacle_odd) : '—'}</td><td>${valueTxt(line)}</td></tr>`;
     }).join('');
-    const head = combos ? `<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th>${comboHead}</tr>` : live
+    const head = cen ? `<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th>${scenHead}<th>Leitura dos dois times</th></tr>` : combos ? `<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th>${comboHead}</tr>` : live
       ? '<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Esperado 1T</th><th>+3,5 no 0\'</th><th>5\' sem esc.</th><th>10\' sem esc.</th><th>10\' com 1</th></tr>'
       : '<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Linha</th><th>Nível</th><th>Contexto</th><th>Chance · Pinnacle</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th><th>Valor</th></tr>';
     const cards = ranked.map(({ g, line }, i) => card(g, line, i)).join('');
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
       ${scan.skipped.map(s => `<li>${hour(s.fx.t)} ${esc(s.fx.home.name)} x ${esc(s.fx.away.name)} <span class="muted">(${esc(s.fx.league.name)}): ${esc(s.why)}</span></li>`).join('')}</ul></details>` : '';
-    const nBet = live ? 0 : ranked.filter(x => isBet(x.line)).length;
-    const old = ok ? '' : combos ? '<p class="msg">Varredura feita antes dos combos: toque em Varrer jogos de novo.</p>'
+    const nBet = live ? 0 : cen ? ranked.filter(x => x.line.bet).length : ranked.filter(x => isBet(x.line)).length;
+    const old = ok ? '' : cen ? '<p class="msg">Varredura feita antes da leitura de cenário: toque em Varrer jogos de novo.</p>' : combos ? '<p class="msg">Varredura feita antes dos combos: toque em Varrer jogos de novo.</p>'
       : '<p class="msg">Varredura feita antes da regra "só over" (com chutes e 1X2, e o Melhor do jogo sem escanteios): toque em Varrer jogos de novo.</p>';
-    const explain = combos
+    const explain = cen
+      ? `<p class="muted"><b>${nBet} ${nBet === 1 ? 'jogo com aposta de cenário' : 'jogos com aposta de cenário'}</b>. Cada time é comparado com os jogos de
+        <b>mesmas características</b> do de hoje — mesmo mando e mesmo papel (favorito forte, favorito, equilibrado, zebra, zebra forte, pela superioridade
+        esperada antes de cada jogo) — e não com a média da temporada: o favorito que goleia quando é favorito em casa, a zebra que desaba quando é zebra fora.
+        O saldo e os gols além do esperado nesses jogos corrigem o que a Pinnacle precifica (com peso pela amostra), e a tabela (motivação) e o clássico
+        entram na leitura. <b>Aposta de cenário</b>: odd da Pinnacle de 1,80 a 2,70, chance pelo cenário ≥ 45%, a Pinnacle pagando pelo menos 5% acima do
+        justo pelo cenário, amostra nos dois times e os dois cenários apontando para o mesmo lado. Só over nos gols. Entre com odd ≥ a mínima.</p>`
+      : combos
       ? `<p class="muted"><b>${nBet} ${nBet === 1 ? 'jogo com combo para apostar' : 'jogos com combo para apostar'}</b>. Combo = duas pernas no mesmo jogo ("criar aposta"):
         um resultado (vitória, dupla chance, empate anula ou handicap ±1,5) + over de gols. A chance sai da matriz de placares da Pinnacle (1X2 e total de
         gols, sem margem) com 10% do modelo — as pernas não são independentes, então não é o produto das duas. Só aparecem combos com chance ≥ 60%,
@@ -164,7 +182,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       <div class="chips" id="scanChips">${chips}</div>
       <div class="chips" id="scanOrder"><span class="muted">Ordem:</span>${orders}</div>
       ${ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`
-        : ok ? `<p class="muted">${combos ? 'Nenhum combo com chance ≥ 60% e odd mínima 1,50–3,00 nos jogos analisados.' : live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
+        : ok ? `<p class="muted">${cen ? 'Nenhum jogo com aposta de cenário (odd da Pinnacle 1,80–2,70 com valor de 5% pelo cenário, amostra e os dois cenários de acordo). A leitura de cenário de cada jogo está nos cartões das outras abas.' : combos ? 'Nenhum combo com chance ≥ 60% e odd mínima 1,50–3,00 nos jogos analisados.' : live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
           : 'Nenhum jogo com linha principal jogável (chance ≥ 60%, odd mínima 1,50–3,00) neste filtro.'}</p>` : ''}
       ${skipped}${cards}`;
     bindTooltips(out);
@@ -172,11 +190,13 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   }
 
   function card(g, line, i) {
-    const top = (line && !line.combo ? line : null) || bestLine(g.lines), p = g.pinnacle_1h, e = g.expected_1h;
+    const top = (line && !line.combo && !line.scenario ? line : null) || bestLine(g.lines), p = g.pinnacle_1h, e = g.expected_1h;
+    const sb = market === CENARIO && g.scenario?.find(l => l.bet);
     const facts = [
+      sb ? `<b>aposta de cenário</b>: ${esc(SHORT[sb.market])} ${esc(sb.line)} — Pinnacle ${n2(sb.pinnacle_odd)} (${pct(sb.p_pinnacle)}), pelo cenário ${pct(sb.p_scenario)}, procure odd ≥ ${n2(sb.odd_min)}` : '',
       g.hard ? `<b>⚠️ jogo difícil de analisar</b> (${esc(g.hard.reasons.join('; '))}): só over de gols com a odd da Pinnacle, com metade da entrada` : '',
       !top ? '<b>sem linha principal jogável</b> (odd mínima 1,50–3,00)'
-        : isBet(top) ? `<b>aposta</b>: ${esc(SHORT[top.market])} ${esc(top.line)} acerta ${pct(top.p_blend)} (Pinnacle ${top.p_pinnacle != null ? pct(top.p_pinnacle) : '—'}), procure odd ≥ ${n2(top.odd_min)}`
+        : isBet(top) ? `<b>${sb ? 'consistência (odd baixa)' : 'aposta'}</b>: ${esc(SHORT[top.market])} ${esc(top.line)} acerta ${pct(top.p_blend)} (Pinnacle ${top.p_pinnacle != null ? pct(top.p_pinnacle) : '—'}), procure odd ≥ ${n2(top.odd_min)}`
           + `${top.context ? ` · contexto ${top.context.verdict}` : ''}`
           : ctxContra(top) ? `<b>sem aposta pelo contexto</b>: ${esc(SHORT[top.market])} ${esc(top.line)} passa na estatística, mas ${esc(contextLine(top.context))}`
             : priceGap(top) ? `<b>sem aposta pelo preço</b>: odd mínima ${n2(top.odd_min)} contra ${n2(top.pinnacle_odd)} da Pinnacle (${gapTxt(top)})`
@@ -207,11 +227,27 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         <button class="ghost" data-full="${i}">Análise completa ↗</button></div>
       <p class="muted facts">${facts.join(' · ')}</p>
       ${ctx}
+      ${scenarioBlock(g)}
       ${table}
       ${comboBlock(g)}
       ${renderLive(g.live1h)}
       ${top ? renderDashboard([top], g.teams) : ''}
     </article>`;
+  }
+
+  // Leitura de cenário do jogo: as linhas da Pinnacle pelo cenário (aberta na aba Cenário) e os jogos de cada time
+  function scenarioBlock(g) {
+    const c = g.context?.scenario;
+    if (!c || !g.scenario?.length) return '';
+    const rows = g.scenario.map(l => `<tr class="${l.bet ? '' : 'weak'}">${scenCells(l)}
+      <td>${l.bet ? `<button class="enter" data-enter="${esc(l.id)}">➕ Entrar</button>` : `<span class="muted small">${esc(l.why_not.join('; '))}</span>`}</td></tr>`).join('');
+    const games = (p, n) => (p?.games?.length ? `<li><b>${esc(n)} ${esc(p.how)}</b>${p.relaxed ? ` <span class="muted">(${esc(p.relaxed)})</span>` : ''}: ${p.games.map(esc).join(' · ')}</li>` : '');
+    const best = g.scenario.find(l => l.bet);
+    return `<details class="combos"${market === CENARIO ? ' open' : ''}><summary>🎯 Leitura de cenário${best ? `: <b>${esc(SHORT[best.market])} ${esc(best.line)}</b> a partir de ${n2(best.odd_min)}` : ' (sem aposta)'}</summary>
+      <p class="muted">Papel de hoje: ${esc(g.fx.home.name)} ${esc(c.band.home)} · ${esc(g.fx.away.name)} ${esc(c.band.away)} (superioridade ${c.market.source === 'pinnacle' ? 'da Pinnacle' : 'do modelo'}: ${signed(nb(c.market.sup.toFixed(2)))}).
+        Correção pelo cenário: ${signed(nb(c.adj_sup.toFixed(2)))} gol no saldo do mandante, ${signed(nb(c.adj_total.toFixed(2)))} no total${c.agree ? '' : ' — os dois cenários discordam'}${c.enough ? '' : ' — amostra curta'}.</p>
+      <ul class="ctx">${games(c.home, g.fx.home.name)}${games(c.away, g.fx.away.name)}</ul>
+      <div class="scroll"><table class="mainlines"><tr>${scenHead}<th></th></tr>${rows}</table></div></details>`;
   }
 
   // Combos do jogo: abertos no filtro Combos; nos outros, recolhidos
@@ -238,7 +274,9 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const en = e.target.closest('[data-enter]');
     if (en) {
       const { g, line } = ranked[en.closest('[data-g]').dataset.g];
-      const l = [line, ...(g.combos || []), ...g.lines].find(x => x && x.id === en.dataset.enter) || bestLine(g.lines);
+      // o botão do cenário vem antes: a mesma linha pode estar nas linhas principais com outro preço
+      const pool = en.closest('details.combos') ? [...(g.scenario || []), ...(g.combos || [])] : [line && !line.combo && !line.scenario ? line : null, ...g.lines];
+      const l = pool.find(x => x && x.id === en.dataset.enter) || bestLine(g.lines);
       if (l) openEntry(l.id, null, { line: l, fx: g.fx, btn: en });
     }
   });

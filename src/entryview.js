@@ -24,7 +24,8 @@ const SEND = 'Registrar no app de apostas';
 // (pior cenário ou histórico abaixo do piso) ou odd abaixo da mínima pedem um segundo toque. Nas apostas da
 // análise de 02–05/10/2026, as que passavam nessa regra acertaram 64%; as outras, 41%. A entrada manual
 // não passa por essas regras.
-const belowFloor = line => !(line.p_blend >= HIT_MIN);
+// aposta de cenário (odd perto de 2) segue a regra de valor do cenário, não o piso de 60%
+const belowFloor = line => !line.scenario && !(line.p_blend >= HIT_MIN);
 const offRule = (line, odd) => [line.blocked && 'jogo difícil de analisar (só over de gols com a odd da Pinnacle)',
   line.tier === 'especulativa' && 'linha especulativa (pior cenário ou histórico dos times abaixo do piso)',
   odd < line.odd_min && `odd abaixo da mínima ${num(line.odd_min)}`].filter(Boolean);
@@ -87,11 +88,12 @@ export function initEntry({ getLine, getFixture }) {
           : 'Sem jogo da API ou sem linha reconhecida: o resultado é marcado à mão no app de apostas.') + '</span>');
     } else if (belowFloor(line)) out.push(`<span class="neg"><b>Acerta ${pct(line.p_blend)}: abaixo do piso de 60%.</b> Esta linha não entra (marque "Minha análise" para registrar mesmo assim).</span>`);
     else if (line.blocked) out.push('<span class="neg">Jogo difícil de analisar (base/reservas ou ligas diferentes): aqui só over de gols com a odd da Pinnacle.</span>');
+    else if (line.scenario) out.push(`<span class="muted"><b>Aposta de cenário</b>: ${pct(line.p_scenario)} pelo cenário contra ${pct(line.p_pinnacle)} da Pinnacle${line.bet ? '' : ` — <span class="neg">sem aposta: ${esc(line.why_not.join('; '))}</span>`}.</span>`);
     else if (line.tier === 'especulativa') out.push('<span class="neg">Linha especulativa: o pior cenário ou o histórico dos times fica abaixo do piso de 60%.</span>');
     else if (line.p_blend < HIT_IDEAL) out.push('<span class="muted">Acerto acima do piso (60%) e abaixo do ideal (70%).</span>');
     if (odd > 1 && line.p_blend != null) {
       const evv = line.p_blend * odd - 1;
-      out.push(`EV nessa odd pelo modelo: <b class="${evv > 0 ? 'pos' : 'neg'}">${(evv * 100).toFixed(1).replace('.', ',')}%</b> (acerto ${pct(line.p_blend)})`);
+      out.push(`EV nessa odd ${line.scenario ? 'pelo cenário' : 'pelo modelo'}: <b class="${evv > 0 ? 'pos' : 'neg'}">${(evv * 100).toFixed(1).replace('.', ',')}%</b> (acerto ${pct(line.p_blend)})`);
       if (!manual() && odd < line.odd_min) out.push(`<span class="neg">Abaixo da odd mínima ${num(line.odd_min)}: a margem de segurança some.</span>`);
       if (!manual() && odd < 1.5) out.push('<span class="neg">Fora do seu núcleo (odd abaixo de 1,50).</span>');
     }
@@ -148,7 +150,8 @@ export function initEntry({ getLine, getFixture }) {
     $('#enGame').textContent = `${fx.home.name} x ${fx.away.name} · ${fx.league.name} · ${hour(fx.t)}`;
     $('#enFacts').hidden = false;
     $('#enFacts').innerHTML = [
-      ['Consistência', `${line.tier} · acerta ${pct(line.p_blend)} <span class="muted">(piso 60%, ideal 70%)</span>`],
+      line.scenario ? ['Cenário', `${line.tier} · acerta ${pct(line.p_scenario)} pelo cenário <span class="muted">(Pinnacle ${pct(line.p_pinnacle)}; valor de ${Math.round(line.ev_pinnacle * 100)}% na odd dela)</span>`]
+        : ['Consistência', `${line.tier} · acerta ${pct(line.p_blend)} <span class="muted">(piso 60%, ideal 70%)</span>`],
       ['Preço justo', num(line.fair_odd_blend)],
       ['Odd mínima', `<b>${num(line.odd_min)}</b>`],
       line.combo ? ['Pernas separadas', `${num(line.odd_indep)} <span class="muted">(produto das justas; a Pinnacle não cota combos — a chance sai da matriz de placares dela)</span>`]

@@ -20,7 +20,7 @@ export const ROLE_EDGE = FAV_EDGE;   // gols de superioridade para ser favorito 
 
 export { roleOf };
 
-// id do jogo -> { sup, dc } do ponto de vista do mandante.
+// id do jogo -> { sup, xt, dc } do ponto de vista do mandante (xt: total de gols esperado).
 export function preMatch(matches, { step = MONTH, minRows = 120 } = {}) {
   const done = matches.filter(m => m.hg != null).sort((a, b) => a.t - b.t);
   const out = new Map();
@@ -34,7 +34,7 @@ export function preMatch(matches, { step = MONTH, minRows = 120 } = {}) {
     if (!fg) continue;
     for (const m of batch) {
       const g = predict(fg, m.h, m.a), c = fc ? predict(fc, m.h, m.a) : null;
-      out.set(m.id, { sup: g.h - g.a, dc: c ? c.h - c.a : null });
+      out.set(m.id, { sup: g.h - g.a, xt: g.h + g.a, dc: c ? c.h - c.a : null });
     }
   }
   return out;
@@ -99,7 +99,7 @@ export function calibrate(matches, pre = preMatch(matches)) {
 // Diferença de escanteios (mandante − visitante) esperada no jogo de hoje com o favoritismo do mercado.
 export const cornerDiff = (rel, dc, sup) => (rel?.useful ? rel.coef[0] + rel.coef[1] * dc + rel.coef[2] * sup : null);
 
-// Base pronta para a análise: cada jogo com a superioridade pré-jogo (m.sup, do mandante) e a calibração
+// Base pronta para a análise: cada jogo com a superioridade e o total de gols pré-jogo (m.sup, do mandante; m.xt) e a calibração
 // da base. Guardado na memória por base (o cálculo leva ~0,5 s por liga).
 const memo = new Map();
 export function favorFor(matches) {
@@ -107,7 +107,7 @@ export function favorFor(matches) {
   const key = `${matches.length}:${matches.reduce((s, m) => Math.max(s, m.t), 0)}:${matches[0]?.id}:${matches.filter(m => m.s).length}:${matches.filter(m => m.c1).length}`;
   if (memo.has(key)) return memo.get(key);
   const pre = preMatch(matches), cal = calibrate(matches, pre);
-  const out = { matches: matches.map(m => (pre.has(m.id) ? { ...m, sup: pre.get(m.id).sup } : m)),
+  const out = { matches: matches.map(m => (pre.has(m.id) ? { ...m, sup: pre.get(m.id).sup, xt: pre.get(m.id).xt } : m)),
     cal: { n: cal.n, cornersPerGoal: cal.cornersPerGoal } };
   if (memo.size > 40) memo.delete(memo.keys().next().value);
   memo.set(key, out);

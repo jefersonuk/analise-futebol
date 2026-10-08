@@ -69,7 +69,7 @@ export async function checkBet(meta, oddTaken) {
 
   // CLV: odd tomada contra a odd justa (sem margem) da última cotação da Pinnacle antes do jogo.
   let clv = null, closingFair = null;
-  if (meta.priced_by === 'pinnacle') {
+  if (meta.priced_by === 'pinnacle' || meta.scenario) {
     try {
       const o = (await get('/odds', { fixture: meta.fixtureId, bookmaker: 4 }))[0];
       const p = collect(o?.bookmakers || []).fair.get(meta.lineId);

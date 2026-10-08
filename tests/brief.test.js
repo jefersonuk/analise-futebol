@@ -34,7 +34,7 @@ test('varredura enxuta: um item por jogo, na ordem da tela, com contexto e plano
   assert.equal(b.games[0].top_line.id, ranked[0].line.id);
   assert.equal(b.order, 'horário (o mais próximo primeiro)');
   assert.ok(b.games.every(g => g.context.text.length && g.live_1h && g.top_line.context));
-  // 20 jogos precisam caber numa conversa: ~5 KB por jogo
-  assert.ok(toText(b).length / b.games.length < 5500, `${Math.round(toText(b).length / b.games.length)} bytes por jogo`);
+  // 20 jogos precisam caber numa conversa: até ~7 KB por jogo (com a leitura de cenário e os combos, ~140 KB)
+  assert.ok(toText(b).length / b.games.length < 7000, `${Math.round(toText(b).length / b.games.length)} bytes por jogo`);
   assert.equal(briefScan(scan, rankGames(scan.games)).games.length, rankGames(scan.games).length);
 });

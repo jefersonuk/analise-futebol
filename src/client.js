@@ -107,9 +107,10 @@ export function makeClient({ get: rawGet, load, save }) {
       }))),
 
     // Ficha do time (seleção ou clube). Não muda: 1 requisição por time, guardada 180 dias.
-    teamInfo: teamId => cached(`af:team:${teamId}`, 180 * DAY, async () => {
-      const r = (await get('/teams', { id: teamId }))[0]?.team;
-      return r ? { id: r.id, name: r.name, country: r.country, national: !!r.national } : null;
+    // cidade do estádio: clássico local (os dois times da mesma cidade)
+    teamInfo: teamId => cached(`af:team2:${teamId}`, 180 * DAY, async () => {
+      const x = (await get('/teams', { id: teamId }))[0], r = x?.team;
+      return r ? { id: r.id, name: r.name, country: r.country, national: !!r.national, city: x.venue?.city || null } : null;
     }),
 
     // Próximos jogos do time, com liga e temporada (calendário muda pouco: 2 h).
