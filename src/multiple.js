@@ -9,39 +9,45 @@
 // com o das outras, e o nosso histórico mostra otimismo do modelo.
 
 export const MULTI = 'multipla';            // a aba da varredura
-export const LEG_P = 0.72;               // chance mínima de cada perna
+// chance mínima de cada perna por linha: o over 2,5 é a linha seguinte, para o jogo em que a casa não tem o 1,5
+export const LEG_P = { 'gO1.5': 0.72, 'gO2.5': 0.6 };
 export const MAX_LEGS = 6;
 export const TARGETS = [3, 4, 6, 8];     // odd total (justa) que o bilhete automático procura
 export const TARGET = 6;
 export const MARGIN = 1.05;              // o bilhete só vale com a odd total ≥ justa × 1,05
 export const STAKE_CAP = 0.005;          // entrada: ¼ Kelly, no máximo 0,5% da banca (múltipla tem variância alta)
-const LEG_IDS = new Set(['gO1.5', 'gO2.5']);
 const r2 = x => Math.round(x * 100) / 100, r3 = x => Math.round(x * 1000) / 1000;
 
-// As pernas possíveis da varredura (jogos que ainda não começaram; sem jogo difícil; contexto que não é contra; com a
-// chance da Pinnacle). Uma por jogo: a de maior chance. Ordem: contexto a favor, depois a chance da Pinnacle.
-export function multiLegs(games, { now = Date.now(), minP = LEG_P } = {}) {
+// Os jogos possíveis da varredura (que ainda não começaram; sem jogo difícil), cada um com as linhas que passam
+// (over 1,5 com 72%+, over 2,5 com 60%+; contexto que não é contra; a nossa chance não mais que 2 pp abaixo da
+// Pinnacle). quoted: a Pinnacle cota a linha neste jogo — sem isso a chance sai do total dela e a casa costuma
+// não ter a linha (o over 1,5 de jogo de muito gol). A perna do jogo: a cotada de maior chance; senão a de maior chance.
+// Ordem: com linha cotada, contexto a favor, a chance da Pinnacle.
+export function multiGames(games, { now = Date.now() } = {}) {
   const out = [];
   for (const g of games) {
     if (g.hard || g.fx.t <= now + 10 * 60e3) continue;
     const ours = new Map((g.scenario || []).map(l => [l.id, l.p_nossa]));
-    const legs = (g.lines || []).filter(l => LEG_IDS.has(l.id) && l.p_pinnacle != null && l.context?.verdict !== 'contra').map(l => {
+    const options = (g.lines || []).filter(l => LEG_P[l.id] && l.p_pinnacle != null && l.context?.verdict !== 'contra').map(l => {
       const p = Math.min(l.p_blend, ours.get(l.id) ?? 1);
       return { key: `${g.fx.id}:${l.id}`, fixtureId: g.fx.id, kickoff: g.fx.t, home: g.fx.home.name, away: g.fx.away.name, competition: g.fx.league.name,
         lineId: l.id, market: l.market, line: l.line, p: r3(p), p_pinnacle: l.p_pinnacle, p_nossa: ours.get(l.id) ?? null, fair: r2(1 / p),
-        pinnacle_odd: l.pinnacle_odd ?? null, context: l.context?.verdict || null, derived: !!l.derived };
-    }).filter(l => l.p >= minP && l.p >= l.p_pinnacle - 0.02);
-    if (legs.length) out.push(legs.sort((a, b) => b.p - a.p)[0]);
+        pinnacle_odd: l.pinnacle_odd ?? null, quoted: !l.derived && l.pinnacle_odd != null, context: l.context?.verdict || null };
+    }).filter(l => l.p >= LEG_P[l.lineId] && l.p >= l.p_pinnacle - 0.02).sort((a, b) => b.quoted - a.quoted || b.p - a.p);
+    if (options.length) out.push({ fixtureId: g.fx.id, options, best: options[0] });
   }
   const fav = l => (l.context === 'a favor' ? 1 : 0);
-  return out.sort((a, b) => fav(b) - fav(a) || b.p_pinnacle - a.p_pinnacle || b.p - a.p);
+  return out.sort((a, b) => b.best.quoted - a.best.quoted || fav(b.best) - fav(a.best) || b.best.p_pinnacle - a.best.p_pinnacle || b.best.p - a.best.p);
 }
+// A perna de cada jogo (a preferida), na ordem de multiGames.
+export const multiLegs = (games, opts) => multiGames(games, opts).map(x => x.best);
 
 // O bilhete automático: as primeiras pernas da lista até a odd justa total chegar no alvo (no máximo MAX_LEGS).
+// Só pernas com a linha cotada pela Pinnacle: as outras a casa costuma não ter (marque à mão se tiver).
 export function autoTicket(legs, { target = TARGET, maxLegs = MAX_LEGS } = {}) {
   const pick = [];
   let fair = 1;
-  for (const l of legs) {
+  for (const l of legs.filter(x => x.quoted)) {
     if (fair >= target || pick.length >= maxLegs) break;
     pick.push(l); fair /= l.p;
   }
