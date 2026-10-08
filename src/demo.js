@@ -128,3 +128,19 @@ export function fixtureOdds(fixtureId) {
     { id: 77, values: c1 });
   return { updatedAt: new Date(Date.now() - 40 * 60e3).toISOString(), fetchedAt: Date.now(), bookmakers: [{ id: 4, name: 'Pinnacle', bets }] };
 }
+
+// Elenco da temporada e escalação (demo): 18 jogadores por time (11 titulares fixos, o camisa 9 artilheiro);
+// o visitante entra sem três titulares, para a conferência mostrar o desfalque.
+export function teamPlayers(teamId) {
+  return Array.from({ length: 18 }, (_, k) => ({ id: teamId * 100 + k + 1, name: `${TEAMS[idxOf(teamId)]?.name.split(' ')[0] || 'Time'} ${k + 1}`,
+    pos: k === 0 ? 'Goalkeeper' : k < 5 ? 'Defender' : k < 8 ? 'Midfielder' : 'Attacker',
+    starts: k < 11 ? 14 - (k % 3) : 2, apps: k < 11 ? 14 : 6, goals: k === 8 ? 7 : k > 8 && k < 11 ? 3 : 0, in_squad: true }));
+}
+export function lineups(fixtureId) {
+  const g = schedule(Math.floor(fixtureId / 1000)).find(x => x.id === fixtureId);
+  if (!g) return [];
+  const xi = (idx, starters, bench) => { const t = TEAMS[idx], ps = teamPlayers(t.id), by = k => ps[k - 1];
+    return { team: t.id, name: t.name, formation: '4-3-3', coach: null, start: starters.map(k => by(k).name), bench: bench.map(k => by(k).name),
+      startIds: starters.map(k => by(k).id), benchIds: bench.map(k => by(k).id) }; };
+  return [xi(g.h, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [12, 13, 14]), xi(g.a, [1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 11], [8, 9])];
+}

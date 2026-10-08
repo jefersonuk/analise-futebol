@@ -185,6 +185,16 @@ details.combos p { margin: 6px 0; }
 .plan ul { margin: 0; padding-left: 18px; }
 .plan li { margin: 6px 0; }
 .plan .chk { font-size: 12px; margin-top: 4px; }
+.plan .verdict { font-size: 13px; border-left: 4px solid var(--muted); background: var(--card); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+.plan .verdict > b { font-size: 14px; }
+.plan .verdict ul { margin: 4px 0 0; padding-left: 4px; list-style: none; }
+.plan .verdict li { margin: 2px 0; }
+.plan .verdict li.pos { font-weight: 400; }
+.plan .v-cheia { border-left-color: var(--accent); }
+.plan .v-meia { border-left-color: var(--warn); }
+.plan .v-nao { border-left-color: var(--bad); }
+.plan .v-esperar { border-left-color: var(--blue); }
+.plan details.xi { font-size: 12px; margin-top: 4px; }
 button.mini { padding: 2px 8px; font-size: 12px; }
 .ctxline { margin: 0 0 8px; font-size: 13px; }
 .live { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; min-width: 0; }
