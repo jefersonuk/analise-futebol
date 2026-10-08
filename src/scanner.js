@@ -1,7 +1,7 @@
 // Varredura: maior chance de ganho nas linhas principais do pré-jogo (consistency.js), só over: escanteios 1T
 // 4 a 5,5 e do jogo 8 a 11; gols 1T 1,5 e do jogo 1,5 e 2,5; chutes (total e no gol); handicap de gols e 1X2 —
 // dos jogos por começar com odds da Pinnacle, pelo mesmo modelo do app. "Melhor do jogo" olha só handicap de
-// gols, gols, chutes e 1X2; escanteios ficam nas abas deles. Liga sem estatística na API (USL Championship,
+// gols, gols e 1X2; escanteios e chutes ficam nas abas deles (chutes: as casas quase não oferecem a linha). Liga sem estatística na API (USL Championship,
 // Liga de Expansión, Primera B…) entra só com gols, handicap de gols e 1X2.
 // Combos: duas pernas no mesmo jogo (resultado + over de gols), com a chance da matriz de placares (combos.js).
 // Cenário (a aba padrão): cada time comparado com os jogos de mesmas características (mando e papel), a motivação
@@ -39,8 +39,9 @@ import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
 export { GOAL_HANDICAP, SHOTS };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
 export const SCAN_MARKETS = MAIN_MARKETS.concat(GOAL_HANDICAP, SHOTS, '1X2');
-// "Melhor do jogo": a melhor linha entre handicap de gols, gols, chutes e 1X2 — escanteios só nas abas deles
-export const BEST_MARKETS = [GOAL_HANDICAP, 'Total de gols', 'Total de gols 1T', ...SHOTS, '1X2'];
+// "Melhor do jogo": a melhor linha entre handicap de gols, gols e 1X2 — escanteios e chutes só nas abas deles
+// (chutes: difícil achar a linha nas casas)
+export const BEST_MARKETS = [GOAL_HANDICAP, 'Total de gols', 'Total de gols 1T', '1X2'];
 // Filtros da tela (abas): cada mercado, e "Chutes" juntando total e no gol
 export const SHOTS_FILTER = 'Chutes';
 const GROUPS = { [SHOTS_FILTER]: SHOTS };

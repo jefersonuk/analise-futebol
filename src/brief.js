@@ -2,7 +2,7 @@
 // (mercados de foco, candidatas e as melhores linhas de cada mercado), para caber numa conversa sem
 // gastar o plano à toa. O texto começa com uma marca que a página do especialista reconhece.
 
-import { CENARIO, COMBOS, LIVE_1H, bestLine } from './scanner.js';
+import { CENARIO, COMBOS, LIVE_1H, SHOTS, SHOTS_FILTER, bestLine } from './scanner.js';
 
 export const SPECIALIST_URL = 'https://claude.ai/artifact/T2QWDJ4U4zzFJSnQumKSBr';
 export const MARK = '#ESPECIALISTA-FUTEBOL v1';
@@ -105,7 +105,9 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
         c1_history_games: g.c1_known, no_history: g.no_history || null, no_corners: g.no_corners || null, no_h2h: g.no_h2h || null,
         context: leanCtx(g.context),
         top_line: lean(top, true),
-        best_by_market: Object.fromEntries(Object.entries(g.best || {}).filter(([, l]) => l && l.id !== top?.id).map(([m, l]) => [m, lean(l)])),
+        // chutes só no filtro Chutes (difícil achar a linha nas casas)
+        best_by_market: Object.fromEntries(Object.entries(g.best || {}).filter(([m, l]) => l && l.id !== top?.id && (market === SHOTS_FILTER || !SHOTS.includes(m)))
+          .map(([m, l]) => [m, lean(l)])),
         live_1h: leanLive(g.live1h),
         combos: (g.combos || []).slice(0, market === COMBOS ? 4 : 2).map(leanCombo),
         scenario: leanScenario(g.context?.scenario, market === CENARIO),

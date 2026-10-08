@@ -59,7 +59,7 @@ const probs = l => `${pct(l.p_blend)} <span class="muted">· ${l.p_pinnacle != n
 const hits = l => [l.history?.home, l.history?.away].map(x => (x && (x.raw?.n ?? x.n) ? (x.hits || `${nb(x.wins)}/${x.n}`) : '—')).join(' · ');
 const thr = l => parseFloat(l.id.match(/-?[\d.]+$/)?.[0]) || 0;
 // Filtros: a melhor linha de cada jogo, cada mercado e os jogos para a entrada ao vivo no 1º tempo.
-// Melhor do jogo: handicap de gols, gols, chutes e 1X2 (escanteios só nas abas deles, e só over).
+// Melhor do jogo: handicap de gols, gols e 1X2 (escanteios e chutes só nas abas deles, e só over).
 // 🎯 Cenário (a padrão): odd perto de 2 pela leitura de cenário dos dois times.
 const FILTERS = [['🎯 Nossa análise', CENARIO], ['Melhor do jogo', null], ...FILTER_KEYS.map(m => [SHORT[m], m]), ['1T ao vivo', LIVE_1H]];
 // Plano ao vivo: odd mínima e chance do over numa linha, no minuto e com os escanteios dados.
@@ -224,11 +224,11 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       p ? `histórico do 1º tempo: ${g.c1_known[0]} e ${g.c1_known[1]} dos últimos 10 jogos` : '',
       esc(g.no_history || ''), esc(g.no_h2h || ''), ...g.alerts.map(esc),
     ].filter(Boolean);
-    // as linhas principais do jogo: os overs de escanteios e gols da lista e a melhor de handicap de gols, de cada
-    // chutes e do 1X2
+    // as linhas principais do jogo: os overs de escanteios e gols da lista e a melhor de handicap de gols e do 1X2;
+    // chutes só na aba Chutes (difícil achar a linha nas casas)
     const totals = g.lines.filter(x => isMain(x.id) && MAIN_MARKETS.includes(x.market))
       .sort((a, b) => MAIN_MARKETS.indexOf(a.market) - MAIN_MARKETS.indexOf(b.market) || thr(a) - thr(b));
-    const all = totals.concat([GOAL_HANDICAP, ...SHOTS, '1X2'].map(m => bestLine(g.lines, { market: m })).filter(Boolean));
+    const all = totals.concat([GOAL_HANDICAP, ...(market === SHOTS_FILTER ? SHOTS : []), '1X2'].map(m => bestLine(g.lines, { market: m })).filter(Boolean));
     const table = all.length ? `<div class="scroll"><table class="mainlines"><tr><th></th><th>Linha</th><th>Nível</th><th>Contexto</th><th>Chance · Pinnacle</th>
       <th>Últ. 10</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th><th>Valor</th></tr>${all.map(l => `<tr class="${top && l.id === top.id ? 'on' : ''}${isBet(l) ? '' : ' weak'}">
         <td>${enterBtn(l, isBet(l))}</td><td>${esc(SHORT[l.market])}: <b>${esc(l.line)}</b></td><td>${tierTag(l)}</td><td>${ctxTag(l)}</td><td>${probs(l)}</td><td class="muted">${hits(l)}</td>

@@ -37,4 +37,10 @@ test('varredura enxuta: um item por jogo, na ordem da tela, com contexto e plano
   // 20 jogos precisam caber numa conversa: até ~7 KB por jogo (com a leitura de cenário e os combos, ~140 KB)
   assert.ok(toText(b).length / b.games.length < 7000, `${Math.round(toText(b).length / b.games.length)} bytes por jogo`);
   assert.equal(briefScan(scan, rankGames(scan.games)).games.length, rankGames(scan.games).length);
+  // chutes só no filtro Chutes (difícil achar a linha nas casas)
+  const shots = m => /chutes/.test(m);
+  assert.ok(b.games.every(g => !shots(g.top_line?.market || '') && !Object.keys(g.best_by_market).some(shots)));
+  const bs = briefScan(scan, pickGames(scan.games, { market: 'Chutes', top: 10 }), { market: 'Chutes' });
+  assert.ok(bs.games.length && bs.games.every(g => shots(g.top_line.market)));
+  assert.ok(bs.games.some(g => Object.keys(g.best_by_market).some(shots)), 'no filtro Chutes, o outro mercado de chutes aparece');
 });

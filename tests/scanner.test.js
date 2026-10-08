@@ -50,7 +50,7 @@ test('varredura: maior chance de ganho nas linhas principais, só com preço da 
   for (const m of MAIN_MARKETS.concat(GOAL_HANDICAP, SHOTS, '1X2')) assert.ok(lines.some(l => l.market === m), m);
   // chutes: a Pinnacle não cota — preço só do modelo (× 1,08), over em qualquer linha
   assert.ok(lines.filter(l => SHOTS.includes(l.market)).every(l => l.model_only && /^(shots|sot)O/.test(l.id) && Math.abs(l.odd_min - l.fair_odd_blend * 1.08) < 0.02));
-  // Melhor do jogo: só handicap de gols, gols, chutes e 1X2 — escanteios ficam nas abas deles
+  // Melhor do jogo: só handicap de gols, gols e 1X2 — escanteios e chutes ficam nas abas deles
   assert.ok(rankGames(scan.games).every(x => BEST_MARKETS.includes(x.line.market)));
   assert.ok(rankGames(scan.games, { market: 'Total de escanteios' }).length > 0);
   assert.ok(rankGames(scan.games, { market: 'Chutes' }).every(x => SHOTS.includes(x.line.market)));
@@ -135,7 +135,11 @@ test('linha do jogo: candidata primeiro, depois a mais consistente; Melhor do jo
   const ah = L('ahA0.5', 'Handicap asiático', 'sólida', 0.62), sh = L('shotsO22.5', 'Total de chutes', 'sólida', 0.6), x1 = L('1', '1X2', 'sólida', 0.59);
   assert.equal(bestLine([o25, c85]).id, 'gO2.5', 'o over de escanteios, mesmo mais consistente, fica na aba de escanteios');
   assert.equal(bestLine([o25, c85], { market: 'Total de escanteios' }).id, 'cornersO8.5');
-  assert.equal(bestLine([o25, ah, sh, x1]).id, 'ahA0.5', 'handicap de gols, gols, chutes e 1X2 disputam o Melhor do jogo');
+  assert.equal(bestLine([o25, ah, sh, x1]).id, 'ahA0.5', 'handicap de gols, gols e 1X2 disputam o Melhor do jogo');
+  const shTop = L('shotsO22.5', 'Total de chutes', 'âncora', 0.9);
+  assert.equal(bestLine([o25, shTop]).id, 'gO2.5', 'chutes, mesmo mais consistentes, ficam na aba Chutes (difícil achar nas casas)');
+  assert.equal(bestLine([shTop]), null);
+  assert.ok(!BEST_MARKETS.some(m => SHOTS.includes(m)));
   assert.equal(bestLine([o25, { ...ah, odd_min_vs_pinnacle_pct: 7 }]).id, 'gO2.5', 'preço difícil perde a vez para a candidata');
   assert.equal(bestLine([sh, L('sotO8.5', 'Total de chutes no gol', 'sólida', 0.7)], { market: 'Chutes' }).id, 'sotO8.5');
   assert.equal(bestLine([L('gU2.5', 'Total de gols', 'âncora', 0.9), o25]).id, 'gO2.5', 'under nunca');
