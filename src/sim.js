@@ -67,15 +67,16 @@ function multiBet(legs, banca, cat) {
 }
 
 // O Plano do dia (plan.js) na simulação: as simples na odd da Pinnacle, os combos na odd mínima (a Pinnacle não cota
-// combo), as múltiplas no produto das odds da Pinnacle. Um por data (plano-AAAA-MM-DD).
-export function buildPlanSim(plan, { banca = 44000 } = {}) {
+// combo), as múltiplas no produto das odds da Pinnacle. id: um por montagem (planview: plano-<hora da varredura>);
+// win: a janela escolhida (h4, d1…); label: o nome do plano no painel.
+export function buildPlanSim(plan, { banca = 44000, id = `plano-${plan.date}`, win = null, label = null } = {}) {
   const bets = [
     ...plan.singles.map(({ g, line }) => base(g, line, 'Plano: simples', line.pinnacle_odd, 'pinnacle', line.entry_brl)),
     ...plan.multis.map(t => multiBet(t.legs, banca, 'Plano: múltipla')),
     ...plan.sameGame.map(({ g, combo }) => base(g, combo, 'Plano: mesmo jogo', combo.odd_min, 'mínima', combo.entry_brl)),
   ];
   const now = new Date().toISOString();
-  return { id: `plano-${plan.date}`, plan: true, date: plan.date, scan_at: plan.scan_at, created_at: now, updated_at: now, window: null, bets };
+  return { id, plan: true, win, label, date: plan.date, scan_at: plan.scan_at, created_at: now, updated_at: now, window: null, bets };
 }
 
 function close(b, winner, detail) {
