@@ -16,6 +16,7 @@ import { buildContext, contextGames, contextText, lineContext, scenarioOf } from
 import { livePlanOf } from './live.js';
 import { applyHard, hardGame } from './hard.js';
 import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
+import { loadClubs } from './clubs.js';
 
 export { stakeFor };
 
@@ -393,7 +394,7 @@ export function repriceDossier(dossier, res, oddsP, teams, banca = 44000) {
   const inj = side => (dossier.teams?.[side]?.injuries || []).map(x => x.match(/^(.*) \((.*?): (.*)\)$/))
     .filter(Boolean).map(([, player, type, reason]) => ({ team: ids[side], player, type, reason }));
   const conditions = conditionsOf({ fx: { home: { id: ids.home, name: names.home }, away: { id: ids.away, name: names.away },
-    league: { name: dossier.fixture.competition || '' } }, hard, injuries: [...inj('home'), ...inj('away')] });
+    league: { name: dossier.fixture.competition || '' } }, hard, injuries: [...inj('home'), ...inj('away')], clubs: c?.clubs || null });
   const scen = scenarioLines(c?.scenario, priced.filter(l => SCEN_MARKETS.includes(l.market)), { banca, hard, conditions }).slice(0, 6);
   return { ...dossier, context: c, data_quality: { ...dossier.data_quality, alerts }, lines_with_pinnacle: priced, lines_anchored: anchored, scenario_lines: scen,
     hard_game: hard, live_1h: hard ? null : livePlanOf(res),
@@ -501,7 +502,10 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
   const h2hExtra = val(6, []);
   let derby = null;   // clássico: os dois times da mesma cidade (cadastro guardado 180 dias)
   if (api.teamInfo) try { derby = derbyOf(await api.teamInfo(fx.home.id), await api.teamInfo(fx.away.id)); } catch { /* sem cadastro */ }
-  const context = buildContext({ rows: res.prep.rows, fx, table, extra: h2hExtra, res, fair, derby });
+  // momento dos times (clubs.js): temporada passada, mercado, começo de temporada e a tabela atual inteira
+  let clubs = null;
+  if (api.transfers && !lg.national) try { clubs = await loadClubs(api, fx, { lid: lg.cross ? fx.league.id : lg.id, table }); } catch { /* sem */ }
+  const context = buildContext({ rows: res.prep.rows, fx, table, extra: h2hExtra, res, fair, derby, clubs });
   const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams: teamsHist, banca, context, hard });
   const { candidatesFocus, candidates } = pickCandidates(priced, anchored);
 
@@ -540,7 +544,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     candidates_focus: candidatesFocus,
     // apostas de cenário (odd perto de 2): as linhas de gols da Pinnacle pela leitura de cenário (scenario.js)
     scenario_lines: scenarioLines(context.ctx.scenario, priced.filter(l => SCEN_MARKETS.includes(l.market)),
-      { banca, hard, conditions: conditionsOf({ fx, hard, injuries }) }).slice(0, 6),
+      { banca, hard, conditions: conditionsOf({ fx, hard, injuries, clubs }) }).slice(0, 6),
     candidates,
     lines_with_pinnacle: priced,
     lines_anchored: anchored,

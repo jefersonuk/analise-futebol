@@ -25,7 +25,8 @@ export function briefGame(d) {
     if (n < (d.focus_markets.includes(l.market) ? 8 : 4)) { keep.add(l.id); byMarket.set(l.market, n + 1); }
   }
   const { lines_with_pinnacle, lines_anchored, model_only_lines, context, live_1h, ...rest } = d;
-  const ctx = context && (({ h2h_extra, ...c }) => c)(context);   // os confrontos crus só servem para refazer as checagens
+  // os confrontos crus só servem para refazer as checagens; o momento dos times vai enxuto (o resumo já está no texto)
+  const ctx = context && (({ h2h_extra, clubs, ...c }) => ({ ...c, clubs: leanClubs(clubs) }))(context);
   return {
     kind: 'jogo',
     dossier: {
@@ -82,7 +83,11 @@ function leanLive(p) {
     odd_min_over: Object.fromEntries([3, 3.5, 4.5].map(L => [`mais de ${nb(L)}`, { sem_escanteio: row(0, L), com_1_escanteio: row(1, L) }])) };
 }
 // Contexto enxuto: o texto pronto (tabela, médias, esperado, confronto direto).
-const leanCtx = c => c && { text: c.text, h2h_games: c.h2h.n };
+// Momento dos times para o especialista: a tabela atual em linhas curtas e quem chegou e saiu (o resumo está no texto).
+const tableNow = t => t?.map(x => `${x.rank}. ${x.name || x.team} — ${x.points} pts em ${x.played} j, saldo ${x.gd > 0 ? '+' : ''}${x.gd}${x.form ? `, ${x.form}` : ''}`);
+const leanClubs = c => c && { table_now: tableNow(c.table_now) || null,
+  market: Object.fromEntries(['home', 'away'].map(k => [k, c[k].market && { chegadas: c[k].market.in, saidas: c[k].market.out }])) };
+const leanCtx = c => c && { text: c.text, h2h_games: c.h2h.n, ...(c.clubs?.table_now ? { table_now: tableNow(c.clubs.table_now) } : {}) };
 
 // A varredura: os jogos na ordem da tela (horário, por padrão), cada um com a linha da lista, a melhor de cada
 // mercado (escanteios 1T, escanteios, gols 1T, gols, handicaps de escanteios e de gols), as outras linhas

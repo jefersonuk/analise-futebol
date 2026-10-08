@@ -145,10 +145,11 @@ export const liveOf = teamId => (isDemo() ? Promise.resolve([]) : client.liveOf(
 export const teamInfo = id => (isDemo() ? Promise.resolve(null) : client.teamInfo(id));
 export const lineups = id => (isDemo() ? Promise.resolve(demo.lineups(id)) : client.lineups(id));
 export const teamPlayers = (id, season) => (isDemo() ? Promise.resolve(demo.teamPlayers(id)) : client.teamPlayers(id, season));
+export const transfers = id => (isDemo() ? Promise.resolve(demo.transfers(id)) : client.transfers(id));
 export const dayOdds = (date, bet = null) => pick('dayOdds', date, bet);
 export const hasLeague = (leagueId, season) => pick('hasLeague', leagueId, season);
 export const stats = () => (isDemo() ? { api: 0, cache: 0 } : client.stats());
 
 // O conjunto que o dossiê do especialista usa (mesma interface do script do Claude Code).
 export const dossierApi = { searchTeams, upcoming, leaguesOf, leagueMatches, teamMatches, attachHalfCorners, fixtureOdds,
-  injuries, standings, headToHead, lastPlayed, indexMatches, dayFixtures, dayOdds, hasLeague, teamInfo, stats, quota: () => remaining };
+  injuries, standings, headToHead, lastPlayed, indexMatches, dayFixtures, dayOdds, hasLeague, teamInfo, transfers, stats, quota: () => remaining };

@@ -54,6 +54,7 @@ export function lineVerdict({ line, rep, names, odds = null, kickoff, doubts = [
   const conds = line.conditions || [];
   const gap = conds.some(c => /pp (acima|abaixo) da Pinnacle/.test(c));
   const cup = conds.some(c => /^copa/.test(c)), youth = conds.some(c => /base\/B/.test(c)), short = conds.some(c => /amostra curta/.test(c));
+  const early = conds.some(c => /^começo de temporada/.test(c));
   let strongNeg = false, explained = false;
 
   // 1) escalação
@@ -99,6 +100,7 @@ export function lineVerdict({ line, rep, names, odds = null, kickoff, doubts = [
   const open = [];
   if (gap && !explained) open.push(`a diferença de ${Math.round(Math.abs(line.diff_pp ?? 0))} pp para a Pinnacle não tem explicação na escalação nem no mercado: é só a nossa leitura (o perfil que mais perdeu no histórico)`);
   if (short) open.push('o cenário tem amostra curta');
+  if (early) open.push('começo de temporada com mudança grande: a escalação não mostra a força nova do time');
   if ((cup || youth) && side && !rep?.[side]?.known) open.push('não deu para conferir o rodízio');
   for (const t of open) add(0, t);
 

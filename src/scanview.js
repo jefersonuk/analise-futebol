@@ -15,6 +15,7 @@ import { bindLive, renderLive } from './liveview.js';
 import { collect } from './odds.js';
 import { isScenario } from './scenario.js';
 import { lineVerdict, lineupReport } from './lineupcheck.js';
+import { clubsHtml } from './clubs.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -235,7 +236,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         <td>${enterBtn(l, isBet(l))}</td><td>${esc(SHORT[l.market])}: <b>${esc(l.line)}</b></td><td>${tierTag(l)}</td><td>${ctxTag(l)}</td><td>${probs(l)}</td><td class="muted">${hits(l)}</td>
         <td>${n2(l.fair_odd_blend)}</td><td><b>${n2(l.odd_min)}</b></td><td class="muted">${n2(l.pinnacle_odd)}</td><td>${valueTxt(l)}</td></tr>`).join('')}</table></div>` : '';
     const c = g.context;
-    const ctx = c ? `<ul class="ctx">${c.text.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+    const ctx = c ? `<ul class="ctx">${c.text.map(t => `<li>${esc(t)}</li>`).join('')}</ul>${clubsHtml(c.clubs, g.fx, esc)}
       ${c.h2h.games.length ? `<details class="h2h"><summary>Confrontos diretos (${c.h2h.games.length}${g.h2h_api ? ', todas as competições' : ', só a base da liga'})</summary>
         <ul>${c.h2h.games.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}` : '';
     return `<article class="scancard" id="scan-${i}" data-g="${i}">

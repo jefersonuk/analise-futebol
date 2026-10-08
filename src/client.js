@@ -176,13 +176,24 @@ export function makeClient({ get: rawGet, load, save }) {
       }))),
 
     // Tabela, com gols pró e contra no total e em casa / fora (as médias da temporada de cada time).
-    standings: (leagueId, season) => cached(`af:std2:${leagueId}:${season}`, 6 * HOUR, async () =>
+    standings: (leagueId, season) => cached(`af:std3:${leagueId}:${season}`, 6 * HOUR, async () =>
       ((await get('/standings', { league: leagueId, season }))[0]?.league.standings || []).flat().map(s => {
         const split = x => (x ? { played: x.played ?? null, gf: x.goals?.for ?? null, ga: x.goals?.against ?? null } : null);
-        return { team: s.team.id, rank: s.rank, points: s.points, played: s.all.played, gd: s.goalsDiff,
+        return { team: s.team.id, name: s.team.name, rank: s.rank, points: s.points, played: s.all.played, gd: s.goalsDiff,
           form: s.form, group: s.group, zone: s.description, gf: s.all.goals?.for ?? null, ga: s.all.goals?.against ?? null,
           home: split(s.home), away: split(s.away) };
       })),
+
+    // Transferências do time nos últimos ~13 meses (chegadas e saídas: data, tipo — valor, empréstimo, livre — e o
+    // outro clube). Mudam devagar: 3 dias. Cobertura da API varia muito por liga.
+    transfers: teamId => cached(`af:tr:${teamId}`, 3 * DAY, async () => {
+      const since = Date.now() - 400 * DAY, seen = new Set();
+      return (await get('/transfers', { team: teamId })).flatMap(r => (r.transfers || []).map(t => ({
+        player: r.player?.name || '?', date: t.date, type: t.type || null, in: t.teams?.in?.id ?? null, inName: t.teams?.in?.name || null,
+        out: t.teams?.out?.id ?? null, outName: t.teams?.out?.name || null })))
+        .filter(t => (t.in === teamId || t.out === teamId) && Date.parse(t.date) >= since)
+        .filter(t => { const k = `${t.player}|${t.date}|${t.in}|${t.out}`; return !seen.has(k) && seen.add(k); });
+    }),
 
     // Confrontos diretos em qualquer competição (os 10 mais recentes encerrados, sem estatística: os
     // escanteios vêm da base quando o jogo está nela). Só muda quando os dois se enfrentam: 3 dias.

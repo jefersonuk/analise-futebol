@@ -16,7 +16,8 @@ test('dossiê enxuto do jogo: mantém foco e candidatas, cabe folgado no limite 
   assert.ok(text.startsWith(`${MARK} jogo\n`));
   assert.deepEqual(JSON.parse(text.slice(text.indexOf('\n') + 1)).dossier.fixture, d.fixture);
   assert.ok(text.length < JSON.stringify(d).length / 2, 'bem menor que o dossiê inteiro');
-  assert.ok(text.length < 120e3, `${text.length} bytes`);
+  // até ~125 KB: com o momento dos times (temporada passada, mercado e a tabela atual de 20 times na demo)
+  assert.ok(text.length < 125e3, `${text.length} bytes`);
   // contexto do jogo e plano ao vivo do 1º tempo vão para o especialista; os confrontos crus, não
   assert.ok(d.context.text.length >= 4 && d.context.h2h_extra && d.live_1h.tables.length === 3);
   assert.ok(b.dossier.context.text.length && !b.dossier.context.h2h_extra);

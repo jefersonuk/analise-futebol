@@ -89,7 +89,7 @@ export const headToHead = (a, b) => [SEASON(), SEASON() - 1].flatMap(s => league
 
 export function standings(leagueId, season) {
   const split = () => ({ played: 0, gf: 0, ga: 0 });
-  const tab = new Map(TEAMS.map(t => [t.id, { team: t.id, points: 0, played: 0, gd: 0, gf: 0, ga: 0, home: split(), away: split() }]));
+  const tab = new Map(TEAMS.map(t => [t.id, { team: t.id, name: t.name, points: 0, played: 0, gd: 0, gf: 0, ga: 0, home: split(), away: split() }]));
   for (const m of leagueMatches(leagueId, season)) {
     const h = tab.get(m.h), a = tab.get(m.a);
     h.played++; a.played++; h.gd += m.hg - m.ag; a.gd += m.ag - m.hg;
@@ -143,4 +143,13 @@ export function lineups(fixtureId) {
     return { team: t.id, name: t.name, formation: '4-3-3', coach: null, start: starters.map(k => by(k).name), bench: bench.map(k => by(k).name),
       startIds: starters.map(k => by(k).id), benchIds: bench.map(k => by(k).id) }; };
   return [xi(g.h, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [12, 13, 14]), xi(g.a, [1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 11], [8, 9])];
+}
+
+// Mercado da demo: o mandante de cada rodada com chegadas (uma paga), o visitante com saídas.
+export function transfers(teamId) {
+  const i = idxOf(teamId), d = k => new Date(Date.now() - k * DAY).toISOString().slice(0, 10), other = k => TEAMS[(i + k) % TEAMS.length];
+  if (i < 0) return [];
+  return i % 2 === 0
+    ? [1, 2, 3, 4, 5, 6].map(k => ({ player: `Reforço ${k}`, date: d(10 * k), type: k === 1 ? '€ 450K' : k === 2 ? 'Loan' : 'Free', in: teamId, inName: TEAMS[i].name, out: other(k).id, outName: other(k).name }))
+    : [1, 2].map(k => ({ player: `Saída ${k}`, date: d(15 * k), type: 'Free', in: other(k).id, inName: other(k).name, out: teamId, outName: TEAMS[i].name }));
 }

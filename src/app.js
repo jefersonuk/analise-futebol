@@ -1,4 +1,5 @@
 import * as api from './api.js';
+import { clubsHtml } from './clubs.js';
 import { METRICS, analyzeMatch, ev, fairOdd, politicaE, sideLabel } from './model.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
@@ -303,7 +304,8 @@ function renderContext() {
   $('#ctxSec').hidden = !c;
   $('#ctx').innerHTML = c ? c.text.map(t => `<li class="info">${esc(t)}</li>`).join('')
     + (c.h2h.games.length ? `<li class="info"><details><summary>Confrontos diretos (${c.h2h.games.length})</summary><ul>
-      ${c.h2h.games.map(g => `<li>${esc(g)}</li>`).join('')}</ul></details></li>` : '') : '';
+      ${c.h2h.games.map(g => `<li>${esc(g)}</li>`).join('')}</ul></details></li>` : '')
+    + (c.clubs ? `<li class="info">${clubsHtml(c.clubs, state.fixture, esc)}</li>` : '') : '';
   const plan = state.dossier?.hard_game ? null : livePlanOf(state.result);   // jogo difícil: sem plano ao vivo
   $('#liveSec').hidden = !plan;
   $('#live').innerHTML = renderLive(plan);

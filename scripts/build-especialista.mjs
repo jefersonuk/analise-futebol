@@ -14,7 +14,7 @@ const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 // No claude.ai o especialista não navega na web: troca a seção de busca por uma instrução sem busca.
 const NO_WEB = `## Sem acesso à web
 
-Você não tem busca na web nesta página. Quando \`desfalques\` vier vazio, diga que os desfalques não foram verificados e o que o Jeferson deve conferir antes de entrar (escalação provável, ausências importantes). Em dados de demonstração (liga "Liga Demo"), diga no topo que é um teste.
+Você não tem busca na web nesta página. Quando \`desfalques\` vier vazio, diga que os desfalques não foram verificados e o que o Jeferson deve conferir antes de entrar (escalação provável, ausências importantes). No começo da temporada, o tamanho do clube, as finanças e as contratações que a API não registra também ficam para ele conferir: diga o que você sabe, marcado como não verificado. Em dados de demonstração (liga "Liga Demo"), diga no topo que é um teste.
 
 `;
 const method = read('prompts/especialista.md').replace(/## Busca na web[\s\S]*?(?=\n## )/, NO_WEB);
