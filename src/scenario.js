@@ -1,76 +1,94 @@
-// Leitura de cenário: como cada time se comporta em jogos com as MESMAS características do de hoje, e não na
-// média da temporada ou nos últimos 10 jogos misturados. Um favorito forte em casa que goleia quando é favorito
-// forte em casa, contra uma zebra que leva goleada quando é zebra forte fora, não é o mesmo jogo que a média
-// diz (lição de 07/10/2026: handicap positivo na zebra acertou 46% contra 65% previstos, com favoritos vencendo
-// por 3 ou 4 gols).
+// Nossa análise primeiro (regra do Jeferson, 08/10/2026): a base é a NOSSA leitura — o modelo de forças da base,
+// corrigido da compressão (favoritism.js goalsCalibration), e o cenário do jogo; a Pinnacle vem depois, como
+// segunda opinião, para concordar ou discordar. Podemos discordar dela: essas entradas ficam marcadas
+// "contra a Pinnacle" e são medidas à parte no app de apostas (acerto e CLV).
 //
-//   papel      pela superioridade de gols esperada ANTES de cada jogo, sem olhar o futuro (favoritism.js, m.sup):
-//              favorito forte (≥ 1 gol), favorito (0,35–1), equilibrado, zebra, zebra forte (≤ −1)
-//   cenário    os jogos do time no mesmo mando e no mesmo papel de hoje; com menos de MIN_N, o mesmo papel em
-//              qualquer mando, depois o mando de hoje com o papel vizinho
-//   além do    em cada jogo, saldo real − saldo esperado (e total real − total esperado): quem passa do esperado
-//   esperado   no cenário (o favorito que goleia, a zebra que desaba) ou fica aquém dele
-//   leitura    a superioridade e o total da Pinnacle corrigidos pelos dois cenários, encolhidos pela amostra
-//              (K = 20 jogos de peso: em 15 jogos o saldo além do esperado ainda erra ~0,4 gol) e com teto de
-//              CAP gol. A chance "pelo cenário" de cada linha é a da Pinnacle sem margem mais o quanto essa
-//              correção move a linha na matriz de placares
-//   motivação  pela tabela: briga pelo título, vaga, rebaixamento, nada a disputar
+//   cenário    cada time comparado com os jogos contra adversários do MESMO NÍVEL do de hoje (forte, médio, fraco
+//              pela força na base) e no mesmo mando — não a média da temporada, nem os últimos 10 misturados. O
+//              Rosenborg que goleia o HamKam em casa e perde do Molde não é o mesmo time contra o líder.
+//   além do    em cada jogo, saldo real − saldo esperado antes dele (já corrigido da compressão) e o mesmo nos gols:
+//   esperado   quem rende acima ou abaixo do esperado nesse tipo de jogo
+//   leitura    nosso saldo e total = modelo corrigido + a correção dos dois cenários, encolhida pela amostra
+//              (K = 20 jogos de peso: em 15 jogos o saldo além do esperado ainda erra ~0,4 gol) e com teto CAP
+//   motivação  pela tabela: título, vaga, rebaixamento, nada a disputar
 //   clássico   os dois times da mesma cidade (cadastro do time na API)
 //
-// Aposta de cenário (odd perto de 2, regra do Jeferson de 08/10/2026: melhor acertar 50% a odd 2 do que 60% a
-// 1,50): linha que a Pinnacle cota com odd de ALVO[0] a ALVO[1], chance pelo cenário ≥ 45%, a Pinnacle pagando
-// pelo menos EDGE acima do que o cenário diz ser justo, cenário com amostra nos dois times e os dois apontando
-// para o mesmo lado. Só over nos gols.
+// Entrada (odd perto de 2, regra de 08/10: melhor acertar 50% a 2,00 com valor do que 60% a 1,50):
+//   aposta      a nossa chance ≥ 45%, odd mínima (nossa justa × 1,05) ≤ 2,70, e a Pinnacle paga a mínima com odd
+//               de 1,80 a 2,70 — o mercado paga o que a nossa leitura pede
+//   entrar se…  passaria, mas depende de algo que só se confirma perto do jogo (condições: escalação de time de
+//               base, rodízio em copa, dúvida, ou a nossa leitura muito longe da Pinnacle) — conferir 30 min antes
+//   na mira     a nossa leitura vê valor, mas a Pinnacle paga abaixo da mínima: entra se a casa pagar ≥ a mínima
+// Só over nos gols.
 
 import { politicaE, scoreMatrix, settle, stakeFor } from './model.js';
 
 export const BANDS = ['favorito forte', 'favorito', 'equilibrado', 'zebra', 'zebra forte'];
 export const bandOf = sup => (sup == null ? null : sup >= 1 ? 0 : sup >= 0.35 ? 1 : sup > -0.35 ? 2 : sup > -1 ? 3 : 4);
-export const MIN_N = 6, MAX_N = 15, K = 20, CAP = 0.6, ALVO = [1.8, 2.7], EDGE = 0.05, P_MIN = 0.45;
+export const LEVELS = ['forte', 'médio', 'fraco'];
+export const MIN_N = 5, MAX_N = 15, K = 20, CAP = 0.6, ALVO = [1.8, 2.7], P_MIN = 0.45, MARGIN = 1.05;
+export const AGREE_PP = 0.04, CONTRA_PP = 0.05, FAR_PP = 0.12;   // concorda / contra a Pinnacle / longe demais (confirmar)
 const YEARS = 3, DAY = 864e5;
 const r2 = x => (x == null || !Number.isFinite(x) ? null : Math.round(x * 100) / 100);
 const avg = xs => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
 const nb = x => String(x).replace('.', ',');
 const n1 = x => (x == null ? '—' : x.toFixed(1).replace('.', ','));
+const n2 = x => (x == null ? '—' : Math.abs(x).toFixed(2).replace('.', ','));
 const sgn1 = x => `${x >= 0 ? '+' : '−'}${n1(Math.abs(x))}`;
+const sgn2 = x => `${x >= 0 ? '+' : '−'}${n2(x)}`;
 const clamp = (x, c) => Math.max(-c, Math.min(c, x));
+const pct = x => `${Math.round(x * 100)}%`;
+const sgnPP = d => `${d >= 0 ? '+' : '−'}${Math.round(Math.abs(d) * 100)} pp`;
 const dateBR = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'America/Sao_Paulo' });
 
-// Jogos de um time (do ponto de vista dele) com a superioridade esperada antes de cada um.
-function games(rows, team, before) {
-  const cut = before - YEARS * 365 * DAY;
+// Nível de cada time na base (terço de cima, do meio ou de baixo pela força de gols: ataque ÷ defesa).
+// fit: res.fits.goals (ratings.js). Times com poucos jogos ficam sem nível.
+export function strengthLevels(fit, minGames = 4) {
+  const out = new Map();
+  if (!fit) return out;
+  const s = [...fit.teams].filter(t => (fit.games.get(t) || 0) >= minGames)
+    .map(t => [t, Math.log(fit.att.get(t)) - Math.log(fit.def.get(t))]).sort((a, b) => b[1] - a[1]);
+  s.forEach(([t], i) => out.set(t, LEVELS[Math.min(2, Math.floor(3 * i / s.length))]));
+  return out;
+}
+
+// Jogos de um time (do ponto de vista dele) com o esperado antes de cada um, corrigido da compressão (cal).
+function games(rows, team, before, levels, cal) {
+  const cut = before - YEARS * 365 * DAY, b = cal?.slope ?? 1, a = cal?.intercept ?? 0, rt = cal?.ratio ?? 1;
   return rows.filter(m => m.t < before && m.t >= cut && m.hg != null && m.sup != null && (m.h === team || m.a === team))
-    .sort((a, b) => b.t - a.t)
+    .sort((x, y) => y.t - x.t)
     .map(m => {
-      const home = m.h === team;
-      return { t: m.t, home, opp: home ? m.an : m.hn, league: m.ln || '', gf: home ? m.hg : m.ag, ga: home ? m.ag : m.hg,
-        sup: home ? m.sup : -m.sup, xt: m.xt ?? null };
+      const home = m.h === team, sup = home ? m.sup : -m.sup;
+      return { t: m.t, home, opp: home ? m.an : m.hn, oppLevel: levels.get(home ? m.a : m.h) || null, league: m.ln || '',
+        gf: home ? m.hg : m.ag, ga: home ? m.ag : m.hg, sup, exp: (home ? a : -a) + b * sup, xt: m.xt != null ? m.xt * rt : null };
     });
 }
 
-// Os jogos do cenário de hoje (mando + papel), afrouxando quando a amostra é curta.
-export function scenarioGames(rows, team, before, venue, band) {
-  const all = games(rows, team, before);
+// Os jogos do cenário de hoje: mesmo mando e adversário do mesmo nível; com amostra curta, o mesmo nível em
+// qualquer mando, depois o mando com o nível vizinho. Sem nível conhecido, o mando de hoje.
+export function scenarioGames(rows, team, before, venue, oppLevel, levels = new Map(), cal = null) {
+  const all = games(rows, team, before, levels, cal), home = venue === 'home', where = home ? 'em casa' : 'fora';
   const pick = (f, how, relaxed) => { const g = all.filter(f).slice(0, MAX_N); return g.length >= MIN_N ? { games: g, how, relaxed } : null; };
-  const where = venue === 'home' ? 'em casa' : 'fora';
-  return pick(g => g.home === (venue === 'home') && bandOf(g.sup) === band, `${where} como ${BANDS[band]}`, null)
-    || pick(g => bandOf(g.sup) === band, `como ${BANDS[band]} (em casa e fora)`, 'qualquer mando')
-    || pick(g => g.home === (venue === 'home') && Math.abs(bandOf(g.sup) - band) <= 1, `${where} como ${BANDS[band]} ou papel vizinho`, 'papel vizinho')
-    || { games: all.filter(g => g.home === (venue === 'home') && bandOf(g.sup) === band), how: `${where} como ${BANDS[band]}`, relaxed: 'amostra curta' };
+  if (!oppLevel) return pick(g => g.home === home, `${where} (nível do adversário desconhecido)`, 'sem nível') || { games: all.filter(g => g.home === home), how: where, relaxed: 'amostra curta' };
+  const L = LEVELS.indexOf(oppLevel), vs = l => `contra times ${l === 'médio' ? 'médios' : l === 'forte' ? 'fortes' : 'fracos'}`;
+  return pick(g => g.home === home && g.oppLevel === oppLevel, `${where} ${vs(oppLevel)}`, null)
+    || pick(g => g.oppLevel === oppLevel, `${vs(oppLevel)} (em casa e fora)`, 'qualquer mando')
+    || pick(g => g.home === home && g.oppLevel && Math.abs(LEVELS.indexOf(g.oppLevel) - L) <= 1, `${where} ${vs(oppLevel)} ou de nível vizinho`, 'nível vizinho')
+    || { games: all.filter(g => g.home === home && g.oppLevel === oppLevel), how: `${where} ${vs(oppLevel)}`, relaxed: 'amostra curta' };
 }
 
 // Perfil de uma lista de jogos do cenário.
 export function scenarioProfile(sel) {
-  const g = sel.games, n = g.length, gd = g.map(x => x.gf - x.ga), wx = g.filter(x => x.xt != null);
+  const g = sel.games, n = g.length, wx = g.filter(x => x.xt != null);
   return {
     how: sel.how, relaxed: sel.relaxed, n,
     w: g.filter(x => x.gf > x.ga).length, d: g.filter(x => x.gf === x.ga).length, l: g.filter(x => x.gf < x.ga).length,
-    gf: r2(avg(g.map(x => x.gf))), ga: r2(avg(g.map(x => x.ga))), gd: r2(avg(gd)), sup: r2(avg(g.map(x => x.sup))),
-    resid: n ? r2(avg(g.map(x => x.gf - x.ga - x.sup))) : null,                  // saldo além do esperado, por jogo
+    gf: r2(avg(g.map(x => x.gf))), ga: r2(avg(g.map(x => x.ga))), gd: r2(avg(g.map(x => x.gf - x.ga))), exp: r2(avg(g.map(x => x.exp))),
+    resid: n ? r2(avg(g.map(x => x.gf - x.ga - x.exp))) : null,                     // saldo além do esperado, por jogo
     tot_resid: wx.length >= MIN_N ? r2(avg(wx.map(x => x.gf + x.ga - x.xt))) : null, // gols além do esperado, por jogo
     win2: n ? r2(g.filter(x => x.gf - x.ga >= 2).length / n) : null, lose2: n ? r2(g.filter(x => x.ga - x.gf >= 2).length / n) : null,
     over25: n ? r2(g.filter(x => x.gf + x.ga >= 3).length / n) : null, btts: n ? r2(g.filter(x => x.gf && x.ga).length / n) : null,
-    games: g.slice(0, 6).map(x => `${dateBR(x.t)} ${x.home ? 'x' : '@'} ${x.opp}: ${x.gf}–${x.ga} (esperado ${sgn1(x.sup)})`),
+    games: g.slice(0, 6).map(x => `${dateBR(x.t)} ${x.home ? 'x' : '@'} ${x.opp}${x.oppLevel ? ` (${x.oppLevel})` : ''}: ${x.gf}–${x.ga} (esperado ${sgn1(x.exp)})`),
   };
 }
 
@@ -86,28 +104,29 @@ export function motivation(t) {
   return null;
 }
 
-// Leitura de cenário de um jogo. rows: a base antes do jogo (prep.rows, com m.sup/m.xt); market: { T, s } — total e
-// superioridade da Pinnacle (ou do modelo, sem ela); table: { home, away } de context.js; derby: texto ou null.
-export function buildScenario({ rows, fx, market, table = null, derby = null }) {
-  if (!market || market.s == null || !(market.T > 0)) return null;
-  const bH = bandOf(market.s), bA = bandOf(-market.s);
-  const H = scenarioProfile(scenarioGames(rows, fx.home.id, fx.t, 'home', bH));
-  const A = scenarioProfile(scenarioGames(rows, fx.away.id, fx.t, 'away', bA));
+// Nossa leitura de um jogo. rows: a base antes do jogo (prep.rows, com m.sup/m.xt); base: { s, T } do nosso modelo
+// (já corrigido); market: { s, T } da Pinnacle ou null; levels: strengthLevels; cal: a correção (goals_cal);
+// table: { home, away } de context.js; derby: texto ou null.
+export function buildScenario({ rows, fx, base, market = null, levels = new Map(), cal = null, table = null, derby = null }) {
+  if (!base || base.s == null || !(base.T > 0)) return null;
+  const lvH = levels.get(fx.away.id) || null, lvA = levels.get(fx.home.id) || null;   // o nível do ADVERSÁRIO de cada um
+  const H = scenarioProfile(scenarioGames(rows, fx.home.id, fx.t, 'home', lvH, levels, cal));
+  const A = scenarioProfile(scenarioGames(rows, fx.away.id, fx.t, 'away', lvA, levels, cal));
   const sh = (x, n) => (x == null || !n ? 0 : x * n / (n + K));
   const rh = sh(H.resid, H.n), ra = sh(A.resid, A.n);   // ra: do ponto de vista do visitante
   const adjSup = r2(clamp((rh - ra) / 2, CAP));
   const adjTot = r2(clamp((sh(H.tot_resid, H.n) + sh(A.tot_resid, A.n)) / 2, CAP));
-  // os dois cenários apontam para o mesmo lado (ou um deles é neutro)?
   const agree = !(Math.abs(rh) >= 0.15 && Math.abs(ra) >= 0.15 && Math.sign(rh) !== Math.sign(-ra));
-  const enough = H.n >= MIN_N && A.n >= MIN_N && !H.relaxed?.startsWith('amostra') && !A.relaxed?.startsWith('amostra');
-  const sup = market.s + adjSup, T = Math.max(0.6, market.T + adjTot);
-  return { band: { home: BANDS[bH], away: BANDS[bA] }, home: H, away: A, adj_sup: adjSup, adj_total: adjTot, agree, enough,
-    market: { sup: r2(market.s), total: r2(market.T), source: market.source }, sup: r2(sup), total: r2(T),
-    motivation: table ? { home: motivation(table.home), away: motivation(table.away) } : null, derby };
+  const enough = H.n >= MIN_N && A.n >= MIN_N && H.relaxed !== 'amostra curta' && A.relaxed !== 'amostra curta';
+  const sup = base.s + adjSup, T = Math.max(0.6, base.T + adjTot);
+  return { band: { home: BANDS[bandOf(sup)], away: BANDS[bandOf(-sup)] }, level: { home: lvA, away: lvH }, home: H, away: A,
+    adj_sup: adjSup, adj_total: adjTot, agree, enough,
+    base: { sup: r2(base.s), total: r2(base.T), calibrated: !!cal }, market: market ? { sup: r2(market.s), total: r2(market.T) } : null,
+    sup: r2(sup), total: r2(T), motivation: table ? { home: motivation(table.home), away: motivation(table.away) } : null, derby };
 }
 
-// Chance de uma linha de gols numa matriz de placares (total T, superioridade s), sem o push, como a Pinnacle
-// precifica; null fora de 1X2/handicap/gols do jogo.
+// Chance de uma linha de gols numa matriz de placares (total T, saldo s), sem o push, como a Pinnacle precifica;
+// null fora de 1X2/handicap/gols do jogo.
 const AH = /^ah([HA])(-?[\d.]+)$/, GO = /^g([OU])([\d.]+)$/;
 function probAt(id, T, s0) {
   const s = Math.max(-T + 0.15, Math.min(T - 0.15, s0));
@@ -121,52 +140,75 @@ function probAt(id, T, s0) {
   if ((m = id.match(GO))) return cond(m[1] === 'O' ? settle(tot, -m[2]) : settle(neg(tot), +m[2]));
   return null;
 }
-// Quanto o cenário move a chance de uma linha: a matriz corrigida pelo cenário menos a matriz do mercado. Somado à
-// chance sem margem da própria Pinnacle, isola o efeito do cenário (a matriz não reproduz cada linha da Pinnacle).
+// A nossa chance de uma linha (modelo corrigido + cenário) e a do modelo sozinho (sem o cenário).
+export const scenarioProb = (id, sc) => (sc ? probAt(id, sc.total, sc.sup) : null);
+export const modelProb = (id, sc) => (sc ? probAt(id, sc.base.total, sc.base.sup) : null);
+// Quanto o cenário move a linha sobre o nosso modelo.
 export function scenarioDelta(id, sc) {
-  if (!sc) return null;
-  const a = probAt(id, sc.total, sc.sup), b = probAt(id, sc.market.total, sc.market.sup);
+  const a = scenarioProb(id, sc), b = modelProb(id, sc);
   return a == null || b == null ? null : a - b;
 }
-// Chance da linha pelo cenário, a partir da chance de referência p (a da Pinnacle sem margem, ou a da linha).
-export const scenarioProb = (id, sc, p) => { const d = scenarioDelta(id, sc); return d == null || p == null ? null : Math.min(0.99, Math.max(0.01, p + d)); };
 
-// As linhas da Pinnacle pela leitura de cenário: chance pelo cenário, EV na odd da Pinnacle e se é aposta de cenário.
-// lines: as linhas precificadas (dossier.js priceLines, com pinnacle_odd e p_pinnacle); hard: jogo difícil.
-export function scenarioLines(sc, lines, { banca = 44000, hard = null } = {}) {
+// Condições do jogo que só se confirmam perto do horário (entrar se…). hard: hard.js; injuries: desfalques da API
+// ({ team, player, type, reason }).
+const CUP = /cup|copa|pokal|coupe|coppa|taça|taca|beker|kupa|pucar|trophy|shield|supercopa/i;
+export function conditionsOf({ fx, hard = null, injuries = [] }) {
+  const out = [];
+  if (hard?.reasons?.some(r => /base, reservas|competição de base/.test(r))) out.push('time de base/B: o elenco muda toda semana — confirmar a escalação');
+  if (CUP.test(fx.league?.name || '') || fx.league?.type === 'Cup') out.push('copa: risco de rodízio — confirmar a escalação');
+  const doubt = injuries.filter(i => /question|doubt|dúvida/i.test(`${i.type} ${i.reason}`));
+  if (doubt.length) out.push(`dúvida: ${doubt.slice(0, 4).map(i => `${i.player} (${i.team === fx.home.id ? fx.home.name : fx.away.name})`).join(', ')} — confirmar se joga`);
+  return out;
+}
+// O jogo não tem base para a nossa leitura (ligas diferentes sem jogos entre elas): nada de entrada.
+const unmeasured = hard => hard?.reasons?.some(r => /entre times das duas ligas/.test(r));
+
+// As linhas da Pinnacle pela nossa leitura. lines: as linhas precificadas (dossier.js priceLines: pinnacle_odd,
+// p_pinnacle); conditions: conditionsOf; hard: jogo difícil (hard.js). Cada linha: a nossa chance, a do modelo
+// sem o cenário, a da Pinnacle, a diferença, a odd mínima e o status (aposta, entrar se…, na mira, sem aposta).
+export function scenarioLines(sc, lines, { banca = 44000, hard = null, conditions = [] } = {}) {
   if (!sc) return [];
   const out = [];
   for (const l of lines) {
-    if (!l.pinnacle_odd || l.p_pinnacle == null || /^(gU|g1)/.test(l.id)) continue;   // só over, e só gols do jogo
-    const pc = scenarioProb(l.id, sc, l.p_pinnacle);
-    if (pc == null) continue;
-    const odd = l.pinnacle_odd, ev = pc * odd - 1, side = /^(1|ahH)/.test(l.id) ? 1 : /^(2|ahA)/.test(l.id) ? -1 : 0;
-    const why = [];
-    if (odd < ALVO[0] || odd > ALVO[1]) why.push(`odd da Pinnacle ${nb(odd.toFixed(2))} fora do alvo ${nb(ALVO[0].toFixed(2))}–${nb(ALVO[1].toFixed(2))}`);
-    if (pc < P_MIN) why.push(`chance pelo cenário ${Math.round(pc * 100)}% (abaixo de ${Math.round(P_MIN * 100)}%)`);
-    if (ev < EDGE) why.push(`o cenário não vê valor na odd da Pinnacle (${ev >= 0 ? '+' : ''}${Math.round(ev * 100)}%)`);
-    if (!sc.enough) why.push('cenário com amostra curta');
-    if (side && !sc.agree) why.push('os dois cenários apontam para lados opostos');
-    if (hard) why.push('jogo difícil de analisar');
+    if (/^(gU|g1)/.test(l.id)) continue;   // só over, e só gols do jogo
+    const p = scenarioProb(l.id, sc);
+    if (p == null) continue;
+    const pm = modelProb(l.id, sc), pp = l.p_pinnacle ?? null, odd = l.pinnacle_odd ?? null;
+    const diff = pp != null ? p - pp : null, oddMin = MARGIN / p, pe = politicaE(oddMin);
+    const why = [];   // o que falta para ser entrada
+    if (p < P_MIN) why.push(`a nossa chance é ${pct(p)} (abaixo de ${pct(P_MIN)})`);
+    if (pe.factor === 0) why.push(`odd mínima ${nb(oddMin.toFixed(2))} acima de 3,00`);
+    else if (oddMin > ALVO[1]) why.push(`odd mínima ${nb(oddMin.toFixed(2))} acima do alvo de ${nb(ALVO[1].toFixed(2))}`);
+    if (unmeasured(hard)) why.push('ligas diferentes sem jogos entre elas: a diferença de nível não está medida');
     if (l.inviable) why.push(l.inviable);
-    const oddMin = Math.max(ALVO[0], 1.03 / pc), pe = politicaE(oddMin);
-    if (pe.factor === 0) why.push('odd mínima acima de 3,00');
-    const { history, context, ...base } = l;   // o histórico de 10 jogos e as checagens são da lente de consistência
-    out.push({ ...base, scenario: true, p_scenario: r2(pc), p_blend: r2(pc), ev_pinnacle: r2(ev), fair_odd_blend: r2(1 / pc), odd_min: r2(oddMin),
-      odd_min_vs_pinnacle_pct: r2((oddMin / odd - 1) * 100), tier: ev >= 0.1 && sc.home.n >= 8 && sc.away.n >= 8 ? 'cenário forte' : 'cenário',
-      priced_by: 'cenário', bet: !why.length, why_not: why, ...stakeFor(pc, oddMin, banca) });
+    const cond = [...conditions];
+    if (diff != null && Math.abs(diff) >= FAR_PP) cond.push(`a nossa leitura está ${Math.round(Math.abs(diff) * 100)} pp ${diff > 0 ? 'acima' : 'abaixo'} da Pinnacle — conferir escalação e notícias`);
+    if (!sc.enough) cond.push('cenário com amostra curta — conferir escalação');
+    // o mercado paga a nossa mínima? (sem odd da Pinnacle na linha, depende da casa)
+    const pays = odd != null && odd >= oddMin && odd >= ALVO[0] && odd <= ALVO[1];
+    const status = why.length ? 'sem aposta' : !pays ? 'na mira' : cond.length ? 'entrar se' : 'aposta';
+    const contra = diff != null && diff >= CONTRA_PP;
+    const { history, context, ...rest } = l;   // o histórico de 10 jogos e as checagens são da lente de consistência
+    out.push({ ...rest, scenario: true, ours: true, p_nossa: r2(p), p_scenario: r2(p), p_model_cal: r2(pm), p_blend: r2(p),
+      diff_pp: diff == null ? null : r2(diff * 100), agrees: diff == null ? null : Math.abs(diff) < AGREE_PP, contra,
+      ev_pinnacle: odd ? r2(p * odd - 1) : null, fair_odd_blend: r2(1 / p), odd_min: r2(oddMin),
+      odd_min_vs_pinnacle_pct: odd ? r2((oddMin / odd - 1) * 100) : null,
+      // de onde vem a diferença para a Pinnacle: o nosso modelo (corrigido) e o cenário
+      why: pp != null ? `modelo ${sgnPP(pm - pp)} · cenário ${sgnPP(p - pm)}` : `modelo ${pct(pm)} · cenário ${sgnPP(p - pm)}`,
+      status, bet: status === 'aposta', conditional: status === 'entrar se', conditions: status === 'entrar se' ? cond : [], why_not: why,
+      tier: contra ? 'contra a Pinnacle' : 'nossa análise', priced_by: 'nossa análise', ...stakeFor(p, oddMin, banca) });
   }
   // handicap −0,5 é a própria vitória: fica só o 1X2
-  const ids = new Set(out.map(l => l.id));
+  const ids = new Set(out.map(l => l.id)), RANK = { aposta: 0, 'entrar se': 1, 'na mira': 2, 'sem aposta': 3 };
   return out.filter(l => !((l.id === 'ahH-0.5' && ids.has('1')) || (l.id === 'ahA-0.5' && ids.has('2'))))
-    .sort((a, b) => b.bet - a.bet || b.ev_pinnacle - a.ev_pinnacle);
+    .sort((a, b) => RANK[a.status] - RANK[b.status] || (b.ev_pinnacle ?? -1) - (a.ev_pinnacle ?? -1) || b.p_nossa - a.p_nossa);
 }
 
 // Clássico local: os dois times da mesma cidade (cadastro do time na API: venue.city).
-const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
 export const derbyOf = (a, b) => (a?.city && b?.city && norm(a.city) === norm(b.city) ? `clássico local (${a.city})` : null);
 
-// Checagem de contexto "cenário" de uma linha (context.js): a chance pelo cenário contra a da linha.
+// Checagem de contexto "cenário" de uma linha (context.js): quanto o cenário move a linha sobre o nosso modelo.
 export function scenarioSignal(id, sc, p) {
   const d = scenarioDelta(id, sc);
   if (d == null || !sc.enough) return null;
@@ -176,18 +218,19 @@ export function scenarioSignal(id, sc, p) {
     text: `pelo cenário ${Math.round(pc * 100)}% (linha ${Math.round(p * 100)}%, ${d >= 0 ? '+' : '−'}${Math.round(Math.abs(d) * 100)} pp)${side ? ` · linha ${who}` : ''}` };
 }
 
-// Frases do cenário para o contexto do jogo.
+// Frases da nossa leitura para o contexto do jogo.
 export function scenarioText(sc, names) {
   if (!sc || (!sc.home.n && !sc.away.n)) return [];
   const one = (p, n) => (p.n ? `${n} ${p.how} (${p.n} jogo${p.n > 1 ? 's' : ''}${p.relaxed ? `, ${p.relaxed}` : ''}): ${p.w}V ${p.d}E ${p.l}D, ${n1(p.gf)}–${n1(p.ga)} por jogo, `
     + `venceu por 2+ em ${Math.round(p.win2 * p.n)}, perdeu por 2+ em ${Math.round(p.lose2 * p.n)}, `
     + `${Math.abs(p.resid) < 0.05 ? 'saldo no esperado' : `${sgn1(p.resid)} gol de saldo ${p.resid > 0 ? 'acima' : 'abaixo'} do esperado`}`
     : `${n} ${p.how}: sem jogos`);
-  const out = [`Cenário — ${one(sc.home, names.home)} · ${one(sc.away, names.away)}.`];
-  const n2 = x => Math.abs(x).toFixed(2).replace('.', ',');
-  const lean = Math.abs(sc.adj_sup) >= 0.1 ? `${sc.adj_sup > 0 ? names.home : names.away} ${n2(sc.adj_sup)} gol além do que a Pinnacle precifica` : 'em linha com a Pinnacle no saldo';
-  out.push(`Leitura de cenário: ${lean}${Math.abs(sc.adj_total) >= 0.1 ? `; ${sc.adj_total >= 0 ? '+' : '−'}${n2(sc.adj_total)} gol no total` : ''}`
-    + `${!sc.agree ? ' (os dois cenários discordam: pouca confiança)' : ''}${!sc.enough ? ' (amostra curta)' : ''}.`);
+  const lv = sc.level && (sc.level.home || sc.level.away) ? ` (nível na base: ${names.home} ${sc.level.home || '—'}, ${names.away} ${sc.level.away || '—'})` : '';
+  const out = [`Cenário${lv} — ${one(sc.home, names.home)} · ${one(sc.away, names.away)}.`];
+  const fav = s => (Math.abs(s) < 0.1 ? 'jogo parelho' : `${s > 0 ? names.home : names.away} ${n2(s)} gol melhor`);
+  const mk = sc.market ? `; a Pinnacle diz ${fav(sc.market.sup)}, total ${n1(sc.market.total)} — ${Math.abs(sc.sup - sc.market.sup) < 0.15 ? 'concorda' : `discordamos em ${n2(sc.sup - sc.market.sup)} gol`}` : '';
+  out.push(`Nossa leitura: ${fav(sc.sup)}, ${n1(sc.total)} gols (modelo${sc.base.calibrated ? ' corrigido' : ''} ${sgn2(sc.base.sup)}, cenário ${sgn2(sc.adj_sup)})${mk}`
+    + `${!sc.agree ? ' (os dois cenários discordam entre si: pouca confiança)' : ''}${!sc.enough ? ' (amostra curta)' : ''}.`);
   const mv = sc.motivation;
   if (mv && (mv.home || mv.away)) out.push(`Motivação: ${[mv.home && `${names.home} ${mv.home}`, mv.away && `${names.away} ${mv.away}`].filter(Boolean).join(' · ')}.`);
   if (sc.derby) out.push(`Clássico: ${sc.derby} — jogo de rivalidade foge do padrão; desconfie de goleada e de handicap alto.`);

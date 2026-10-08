@@ -84,11 +84,11 @@ test('combos de um jogo: chance da matriz da Pinnacle, correlação e as regras 
   assert.deepEqual(comboLines({ res, fair: new Map(), teams, names: nm }), []);
 });
 
-test('varredura: filtro Combos com os melhores combos, aposta primeiro; v 9', async () => {
+test('varredura: filtro Combos com os melhores combos, aposta primeiro; v 10', async () => {
   let n = 0;
   const api = { ...demo, stats: () => ({ api: n, cache: 0 }) };
   const scan = await scanDay(api, { date: '2026-10-01', top: 10, budget: 5000 });
-  assert.equal(scan.v, 9);
+  assert.equal(scan.v, 10);
   const r = rankGames(scan.games, { market: COMBOS });
   assert.ok(r.every(x => x.line.combo && x.g.combos.includes(x.line)));
   for (let i = 1; i < r.length; i++) assert.ok(isBet(r[i - 1].line) >= isBet(r[i].line), 'apostas primeiro');
