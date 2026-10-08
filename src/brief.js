@@ -124,6 +124,18 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
   };
 }
 
+// Múltipla (multiple.js): o bilhete montado na aba (pernas, chance de acertar tudo, justa, mínima, odd da casa e EV) e os
+// jogos das pernas com o contexto, como na varredura.
+export function briefMulti(scan, ticket) {
+  const ids = new Set((ticket?.legs || []).map(l => l.fixtureId));
+  const base = briefScan(scan, scan.games.filter(g => ids.has(g.fx.id)).sort((a, b) => a.fx.t - b.fx.t).map(g => ({ g, line: null })), { market: 'múltipla' });
+  return { ...base, filter: 'múltipla (uma perna de over de gols por jogo)',
+    multiple: ticket && { pernas: ticket.n, p_acertar_todas: ticket.p_all, p_pinnacle_todas: ticket.p_pinnacle_all, odd_justa: ticket.fair, odd_minima: ticket.min,
+      odd_casa: ticket.odd, ev: ticket.ev, entrada_brl: ticket.stake, veredito: ticket.verdict, aposte_ate: new Date(ticket.first_kickoff).toISOString(),
+      legs: ticket.legs.map(l => ({ jogo: `${l.home} x ${l.away}`, kickoff: new Date(l.kickoff).toISOString(), competicao: l.competition, linha: l.line, p: l.p,
+        p_pinnacle: l.p_pinnacle, p_nossa: l.p_nossa, justa: l.fair, minima: l.min, odd_casa: l.house, contexto: l.context })) } };
+}
+
 export const toText = brief => `${MARK} ${brief.kind}\n${JSON.stringify(brief)}`;
 
 // Copia para a área de transferência (no clique) e abre o especialista numa nova aba.

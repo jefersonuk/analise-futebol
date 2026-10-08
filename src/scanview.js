@@ -7,7 +7,7 @@
 import { CENARIO, COMBOS, FILTER_KEYS, GOAL_HANDICAP, LIVE_1H, MAIN_MARKETS, SHOTS, SHOTS_FILTER, bestLine, pickGames, scanDay } from './scanner.js';
 import { bindTooltips, renderDashboard } from './dashboard.js';
 import { load, save } from './store.js';
-import { bindSpecialist, briefScan } from './brief.js';
+import { bindSpecialist, briefMulti, briefScan } from './brief.js';
 import { isMain } from './consistency.js';
 import { isBet, isCandidate } from './dossier.js';
 import { contextLine } from './context.js';
@@ -16,6 +16,7 @@ import { collect } from './odds.js';
 import { isScenario } from './scenario.js';
 import { lineVerdict, lineupReport } from './lineupcheck.js';
 import { clubsHtml } from './clubs.js';
+import { MAX_LEGS, MULTI, TARGETS, TARGET, autoTicket, multiLegs, multiLine, ticketOf } from './multiple.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -63,7 +64,8 @@ const thr = l => parseFloat(l.id.match(/-?[\d.]+$/)?.[0]) || 0;
 // Filtros: a melhor linha de cada jogo, cada mercado e os jogos para a entrada ao vivo no 1º tempo.
 // Melhor do jogo: handicap de gols, gols e 1X2 (escanteios e chutes só nas abas deles, e só over).
 // 🎯 Cenário (a padrão): odd perto de 2 pela leitura de cenário dos dois times.
-const FILTERS = [['🎯 Nossa análise', CENARIO], ['Melhor do jogo', null], ...FILTER_KEYS.map(m => [SHORT[m], m]), ['1T ao vivo', LIVE_1H]];
+// 🎟️ Múltipla: uma perna de over de gols por jogo, montada em bilhete (multiple.js).
+const FILTERS = [['🎯 Nossa análise', CENARIO], ['Melhor do jogo', null], ...FILTER_KEYS.map(m => [SHORT[m], m]), ['🎟️ Múltipla', MULTI], ['1T ao vivo', LIVE_1H]];
 // Plano ao vivo: odd mínima e chance do over numa linha, no minuto e com os escanteios dados.
 const liveCell = (plan, c, m, L) => {
   const x = plan?.tables.find(t => t.corners === c)?.rows.find(r => r.minute === m)?.cells.find(z => z.line === L);
@@ -100,6 +102,8 @@ const comboCells = c => `<td><b>${esc(c.line)}</b></td><td>${tierTag(c)}</td><td
 
 export function initScan({ api, openEntry, analyzeFixture, banca }) {
   let scan = null, market = CENARIO, order = 'time', ranked = [];
+  // bilhete da múltipla: alvo, pernas marcadas (null = o automático), odds da casa por perna e a total
+  const multi = { target: TARGET, picked: null, house: new Map(), total: null, ticket: null };
   $('#scanDate').innerHTML = [['Próximas 4 horas (amplia até 12 h se faltar jogo)', WINDOW], ['Hoje (dia todo)', dayStr(0)], ['Amanhã', dayStr(1)]]
     .map(([t, v]) => `<option value="${v}">${t}${v === WINDOW ? '' : ` (${v.split('-').reverse().slice(0, 2).join('/')})`}</option>`).join('');
   $('#scanBudget').value = localStorage.getItem(BUDGET_KEY) || 1500;
@@ -107,6 +111,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
 
   async function showSaved() {
     scan = await load(`af:scan:${$('#scanDate').value}`);
+    Object.assign(multi, { picked: null, house: new Map(), total: null });
     render();
   }
   $('#scanDate').onchange = showSaved;
@@ -119,6 +124,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     $('#scanRun').disabled = true;
     try {
       scan = await scanDay(api.dossierApi, { ...win, budget, banca, onProgress: t => msg(t) });
+      Object.assign(multi, { picked: null, house: new Map(), total: null });
       await save(`af:scan:${v}`, scan);
       msg(scan.games.length ? '' : scan.hours ? `Nenhum jogo com odds da Pinnacle nas próximas ${scan.hours} horas.` : 'Nenhum jogo com odds da Pinnacle nesta data.');
       render();
@@ -130,9 +136,9 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const out = $('#scanOut');
     $('#scanSpec').hidden = !scan?.games.length;
     if (!scan) { out.innerHTML = ''; return; }
-    const top = scan.top || 20, live = market === LIVE_1H, combos = market === COMBOS, cen = market === CENARIO;
+    const top = scan.top || 20, live = market === LIVE_1H, combos = market === COMBOS, cen = market === CENARIO, mult = market === MULTI;
     const ok = scan.v >= (cen ? 10 : combos ? 8 : 7);
-    ranked = ok ? pickGames(scan.games, { market, top, order }) : [];
+    ranked = ok && !mult ? pickGames(scan.games, { market, top, order }) : [];
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const chips = FILTERS.map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
     const orders = [['Horário', 'time'], ['Chance de ganho', 'chance']].map(([t, o]) => `<button class="${order === o ? 'on' : ''}" data-o="${o}">${t}</button>`).join('');
@@ -197,10 +203,10 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>${cornersLine(scan.corners_report)}${old}
       <div class="chips" id="scanChips">${chips}</div>
       <div class="chips" id="scanOrder"><span class="muted">Ordem:</span>${orders}</div>
-      ${ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`
+      ${mult ? multiView() : ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`
         : ok ? `<p class="muted">${cen ? 'Nenhum jogo com aposta ou "entrar se…" pela nossa análise (nossa chance ≥ 45% com a Pinnacle pagando a mínima, odd 1,80–2,70). A nossa leitura de cada jogo está nos cartões das outras abas, com as linhas "na mira".' : combos ? 'Nenhum combo com chance ≥ 60% e odd mínima 1,50–3,00 nos jogos analisados.' : live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
           : 'Nenhum jogo com linha principal jogável (chance ≥ 60%, odd mínima 1,50–3,00) neste filtro.'}</p>` : ''}
-      ${skipped}${cards}`;
+      ${mult ? '' : `${skipped}${cards}`}`;
     bindTooltips(out);
     bindLive(out, { banca });
   }
@@ -250,6 +256,42 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       ${renderLive(g.live1h)}
       ${top ? renderDashboard([top], g.teams) : ''}
     </article>`;
+  }
+
+  // Múltipla (multiple.js): as pernas possíveis da varredura, o bilhete (automático pelo alvo ou marcado à mão), a odd
+  // da casa (por perna ou a total) e o veredito com a entrada. Uma perna por jogo, só over de gols do jogo.
+  function multiView() {
+    const legs = multiLegs(scan.games);
+    const intro = `<p class="muted">Múltipla = uma perna por jogo, só over de gols do jogo, com chance ≥ 72% (a <b>menor</b> entre a nossa e a da
+      mistura com a Pinnacle: numa múltipla o erro de cada perna se multiplica). <b>A conta que manda</b>: com odds justas, a chance de acertar
+      tudo é 1 ÷ odd total — odd 6 acerta ~17%, sejam 3 pernas ou 6; "perna segura" não muda isso. O que muda é a <b>margem da casa</b>, que se
+      multiplica a cada perna (5 pernas com 5% de margem: −23%). Por isso cada perna tem a sua <b>mínima</b>: se a casa pagar menos numa perna,
+      troque a perna. Aposte antes do início da primeira; entrada pequena (¼ Kelly, até 0,5% da banca).</p>`;
+    if (!legs.length) return `${intro}<p class="muted">Nenhuma perna possível nesta varredura (over de gols com chance ≥ 72%, com a Pinnacle, em jogo que não é difícil e ainda não começou).</p>`;
+    if (!multi.picked) multi.picked = new Set(autoTicket(legs, { target: multi.target }).map(l => l.key));
+    const chosen = legs.filter(l => multi.picked.has(l.key));
+    const t = multi.ticket = ticketOf(chosen, { house: multi.house, houseTotal: multi.total, banca });
+    const tl = new Map((t?.legs || []).map(l => [l.key, l]));
+    const targets = TARGETS.map(x => `<button class="${multi.target === x ? 'on' : ''}" data-mt="${x}">odd ${x}</button>`).join('');
+    const VERD = { vale: ['pos', '✅ vale: a casa paga a mínima'], 'no limite': ['', '⚠️ no limite: acima da justa, abaixo da mínima (sem margem de segurança)'],
+      'não vale': ['neg', '❌ não vale: a casa paga menos que a justa — a margem dela come o bilhete'], 'sem odd': ['muted', 'digite a odd da casa (total ou de cada perna)'] };
+    const [vc, vt] = VERD[t?.verdict || 'sem odd'];
+    const sum = !t ? '<p class="muted">Marque as pernas do bilhete.</p>' : `<div class="multisum">
+      <div><b>${t.n} perna${t.n > 1 ? 's' : ''}</b> · acerta todas em <b>${pct(t.p_all)}</b> <span class="muted">(Pinnacle ${pct(t.p_pinnacle_all)})</span>
+        · odd justa <b>${n2(t.fair)}</b> · mínima <b>${n2(t.min)}</b> · aposte até <b>${hour(t.first_kickoff)}</b>${t.n > MAX_LEGS ? ` · <span class="neg">mais de ${MAX_LEGS} pernas: cada perna a mais é mais margem da casa</span>` : ''}</div>
+      <div>Odd total na casa: <input id="mTotal" type="number" step="0.01" min="1" inputmode="decimal" value="${t.odd ?? ''}" placeholder="${n2(t.min)}">
+        <span class="${vc}">${vt}</span>${t.ev != null ? ` · EV <b class="${t.ev > 0 ? 'pos' : 'neg'}">${(t.ev * 100).toFixed(1).replace('.', ',')}%</b>` : ''}
+        ${t.stake ? ` · entrada <b>R$ ${t.stake}</b>` : t.odd ? ' · <b>sem entrada</b>' : ''}
+        ${t.n < 2 ? '<span class="muted">· marque 2 pernas ou mais</span>' : `<button class="enter" id="mEnter"${t.verdict === 'não vale' ? ' title="a odd da casa não paga a justa"' : ''}>➕ Registrar múltipla</button>`}</div></div>`;
+    const row = l => { const x = tl.get(l.key), on = multi.picked.has(l.key);
+      return `<tr class="${on ? '' : 'weak'}${x?.below ? ' bad' : ''}"><td><input type="checkbox" data-mpick="${esc(l.key)}"${on ? ' checked' : ''}></td>
+        <td>${hour(l.kickoff)}</td><td>${esc(l.home)} x ${esc(l.away)}</td><td class="muted">${esc(l.competition)}</td><td>Gols: <b>${esc(l.line)}</b></td>
+        <td><b>${pct(l.p)}</b></td><td class="muted">${pct(l.p_pinnacle)}${l.pinnacle_odd ? ` · ${n2(l.pinnacle_odd)}` : ''}</td><td>${l.context ? `<span class="tag ${CTX_CLS[l.context] || ''}">${esc(l.context)}</span>` : '—'}</td>
+        <td>${n2(l.fair)}</td><td><b>${x ? n2(x.min) : '—'}</b></td>
+        <td>${on ? `<input class="mleg" type="number" step="0.01" min="1" inputmode="decimal" data-mleg="${esc(l.key)}" value="${multi.house.get(l.key) ?? ''}">${x?.below ? ' <span class="neg">abaixo da mínima</span>' : ''}` : ''}</td></tr>`; };
+    return `${intro}<div class="chips" id="multiTarget"><span class="muted">Bilhete automático até a odd justa:</span>${targets}</div>${sum}
+      <div class="scroll"><table class="scanrank multitab"><tr><th></th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Perna</th><th>Chance</th><th>Pinnacle</th><th>Contexto</th>
+        <th>Justa</th><th>Mínima na múltipla</th><th>Odd da casa</th></tr>${legs.map(row).join('')}</table></div>`;
   }
 
   // Para confirmar: as entradas "entrar se…" de todos os jogos, na ordem da hora de conferir (30 min antes), com o botão
@@ -326,9 +368,24 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       <div class="scroll"><table class="mainlines"><tr><th></th>${comboHead}</tr>${rows}</table></div></details>`;
   }
 
+  // múltipla: marcar/desmarcar perna e as odds da casa (ao sair do campo)
+  $('#scanOut').addEventListener('change', e => {
+    const pk = e.target.closest('[data-mpick]');
+    if (pk) { const k = pk.dataset.mpick; if (pk.checked) multi.picked.add(k); else multi.picked.delete(k); multi.total = null; render(); return; }
+    const lg = e.target.closest('[data-mleg]');
+    if (lg) { const v = parseFloat(lg.value); if (v > 1) multi.house.set(lg.dataset.mleg, v); else multi.house.delete(lg.dataset.mleg); multi.total = null; render(); return; }
+    if (e.target.id === 'mTotal') { const v = parseFloat(e.target.value); multi.total = v > 1 ? v : null; render(); }
+  });
   $('#scanOut').addEventListener('click', e => {
     const ck = e.target.closest('[data-check]');
     if (ck) { checkFixture(Number(ck.dataset.check), ck); return; }
+    const mt = e.target.closest('[data-mt]');
+    if (mt) { multi.target = Number(mt.dataset.mt); multi.picked = null; render(); return; }
+    if (e.target.closest('#mEnter') && multi.ticket) {
+      const t = multi.ticket, line = multiLine(t);
+      openEntry(line.id, t.odd, { line, fx: { id: line.id, t: t.first_kickoff, home: { name: 'Múltipla' }, away: { name: `${t.n} jogos` }, league: { name: 'várias ligas' } }, btn: e.target });
+      return;
+    }
     const m = e.target.closest('#scanChips button');
     if (m) { market = m.dataset.m || null; render(); return; }
     const o = e.target.closest('#scanOrder button');
@@ -372,6 +429,6 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     }
   }, 60e3);
 
-  bindSpecialist($('#scanSpec'), () => scan && briefScan(scan, ranked, { market, order }));
+  bindSpecialist($('#scanSpec'), () => scan && (market === MULTI ? briefMulti(scan, multi.ticket) : briefScan(scan, ranked, { market, order })));
   showSaved();
 }

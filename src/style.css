@@ -222,3 +222,9 @@ table.tablenow { border-collapse: collapse; font-size: 12px; margin: 4px 0; }
 table.tablenow th, table.tablenow td { padding: 2px 8px; text-align: right; border-bottom: 1px solid var(--line); }
 table.tablenow th:nth-child(2), table.tablenow td:nth-child(2) { text-align: left; }
 table.tablenow tr.on td { color: var(--blue); font-weight: 600; }
+
+/* múltipla */
+.multisum { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0; display: grid; gap: 6px; font-size: 14px; }
+.multisum input { width: 90px; }
+table.multitab input.mleg { width: 70px; }
+table.multitab tr.bad td { background: color-mix(in srgb, var(--bad) 12%, transparent); }

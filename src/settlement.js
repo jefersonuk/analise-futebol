@@ -7,6 +7,7 @@ import { history } from './dashboard.js';
 import { collect } from './odds.js';
 import { statsOf } from './client.js';
 import { isCombo, liveCombo, settleCombo } from './combos.js';
+import { settleMulti } from './multiple.js';
 
 const BASE = 'https://v3.football.api-sports.io';
 const FINISHED = new Set(['FT', 'AET', 'PEN']);
@@ -43,9 +44,42 @@ export function settleLine(lineId, game, homeName = 'Mandante') {
   return bar ? { winner: WINNER[bar.res], value: bar.v, what: h.what, threshold: h.threshold } : null;
 }
 
+// Múltipla (multiple.js): os jogos das pernas numa requisição; uma perna perdida perde o bilhete (mesmo com jogos
+// por terminar); todas ganhas ganha. CLV: a odd tomada contra o produto das justas de fechamento da Pinnacle.
+async function checkMulti(meta, oddTaken) {
+  const legs = meta.legs || [], fs = new Map();
+  for (let i = 0; i < legs.length; i += 20) for (const f of await get('/fixtures', { ids: legs.slice(i, i + 20).map(l => l.fixtureId).join('-') })) fs.set(f.fixture.id, f);
+  const res = legs.map(l => {
+    const f = fs.get(l.fixtureId);
+    if (!f) return { l, r: null, txt: `${l.home} x ${l.away}: não encontrado` };
+    const st = f.fixture.status.short;
+    if (NO_MATCH.has(st)) return { l, r: 'VOID', txt: `${l.home} x ${l.away}: não disputado` };
+    if (!FINISHED.has(st)) return { l, r: null, txt: `${l.home} x ${l.away}: ${f.fixture.status.long}` };
+    const g = gameOf(f), x = settleLine(l.lineId, g, f.teams.home.name);
+    return { l, r: x?.winner ?? null, txt: `${f.teams.home.name} ${g.gf}–${g.ga} ${f.teams.away.name} ${x?.winner === 'A' ? '✅' : x?.winner === 'RED' ? '❌' : '↩'}` };
+  });
+  const s = settleMulti(res.map(x => x.r)), detail = `múltipla ${res.filter(x => x.r === 'A').length}/${legs.length}: ${res.map(x => x.txt).join(' · ')}`;
+  if (!s.done) return { status: 'pendente', detail };
+  if (s.manual) return { status: 'manual', detail: `${detail} — perna anulada: a casa recalcula a odd (marque à mão)` };
+  let clv = null, closingFair = null;
+  if (s.winner === 'A' || legs.every(l => fs.get(l.fixtureId) && FINISHED.has(fs.get(l.fixtureId).fixture.status.short))) {
+    try {
+      let prod = 1;
+      for (const l of legs) {
+        const p = collect((await get('/odds', { fixture: l.fixtureId, bookmaker: 4 }))[0]?.bookmakers || []).fair.get(l.lineId);
+        if (!p) { prod = null; break; }
+        prod /= p;
+      }
+      if (prod) { closingFair = prod; clv = oddTaken / prod - 1; }
+    } catch { /* odds já expiraram na API */ }
+  }
+  return { status: 'encerrado', winner: s.winner, detail, clv, closingFair };
+}
+
 // meta: o que a análise gravou na aposta (fixtureId, lineId, home, away, odd tomada, priced_by…).
 export async function checkBet(meta, oddTaken) {
   if (!apiKey()) throw new Error('sem a chave da API-Football: abra o app de análise e salve a chave em ⚙️ Chave');
+  if (meta.multi) return checkMulti(meta, oddTaken);
   const f = (await get('/fixtures', { id: meta.fixtureId }))[0];
   if (!f) throw new Error(`jogo ${meta.fixtureId} não encontrado na API`);
   const st = f.fixture.status.short;
@@ -130,6 +164,15 @@ export async function liveFixtures(ids, { needC1 = new Set(), c1 = new Map() } =
     }
   }
   return out;
+}
+
+// Múltipla ao vivo: cada perna como está agora (liveLine) e o placar do bilhete. info: Map(fixtureId -> liveFixtures).
+export function liveMulti(legs, info) {
+  const each = (legs || []).map(l => { const v = info.get(l.fixtureId);
+    return { home: l.home, away: l.away, linha: l.linha, status: v?.status || null, live: !!v?.live, finished: !!v?.finished, elapsed: v?.elapsed ?? null,
+      goals: v?.goals || null, line: v && !['NS', 'TBD'].includes(v.status) ? liveLine(l.lineId, v) : null }; });
+  const won = each.filter(x => x.line?.locked && x.line.now === 'A').length, lost = each.filter(x => x.line?.locked && x.line.now === 'RED').length;
+  return { multi: true, legs: each, won, lost, n: each.length };
 }
 
 // A linha com o jogo como está agora: o valor, o resultado se o jogo acabasse agora, se já está decidida

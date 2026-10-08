@@ -36,7 +36,7 @@ const MARKET = {
   'Ambas marcam': 'Ambas Marcam', 'Total de escanteios': 'Escanteios', 'Escanteios por time': 'Escanteios',
   'Total escanteios 1T': 'Escanteios', 'Handicap escanteios 1T': 'Escanteios', 'Handicap de escanteios': 'Escanteios',
   'Resultado escanteios': 'Escanteios', 'Resultado escanteios 1T': 'Escanteios', 'Corrida de escanteios': 'Escanteios', 'Total de chutes': 'Total de Chutes',
-  'Total de chutes no gol': 'Total de Chutes', Combo: 'Combo (criar aposta)',
+  'Total de chutes no gol': 'Total de Chutes', Combo: 'Combo (criar aposta)', 'Múltipla': 'Múltipla',
 };
 
 const localStr = t => { const d = new Date(t); return new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 16); };
@@ -44,6 +44,7 @@ const localStr = t => { const d = new Date(t); return new Date(d - d.getTimezone
 // line: linha do dossiê; fx: jogo. Formato que o app de apostas grava como aposta de valor: a stake vai
 // em R$ (é como o app de apostas guarda) e stakeNat na moeda da casa, só para conferência.
 export function buildEntry({ line, fx, casa, currency, odd, stake, stakeNat = null }) {
+  if (line.multi) return buildMulti({ line, casa, currency, odd, stake, stakeNat });
   return {
     id: `an${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString(), v: 2,
     casa, cur: currency || 'BRL', odd, stake, stakeNat: stakeNat ?? stake, sport: 'Futebol', market: MARKET[line.market] || line.market,
@@ -62,6 +63,24 @@ export function buildEntry({ line, fx, casa, currency, odd, stake, stakeNat = nu
       // nossa análise: a nossa chance (modelo corrigido + cenário) contra a Pinnacle — "contra a Pinnacle" medida à parte
       ...(line.ours ? { ours: true, contra_pinnacle: !!line.contra, diff_pp: line.diff_pp, p_model_cal: line.p_model_cal, status: line.status,
         conditions: line.conditions?.length ? line.conditions : undefined } : {}),
+    },
+  };
+}
+
+// Múltipla (multiple.js): as pernas vão em analise.legs; fixtureId/kickoff são os da última perna (a conferência espera o
+// último jogo; uma perna perdida antes liquida na hora) e first_kickoff o da primeira (o ao vivo começa nela).
+function buildMulti({ line, casa, currency, odd, stake, stakeNat }) {
+  const last = line.legs.reduce((a, b) => (Date.parse(b.kickoff) > Date.parse(a.kickoff) ? b : a));
+  return {
+    id: `an${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString(), v: 2,
+    casa, cur: currency || 'BRL', odd, stake, stakeNat: stakeNat ?? stake, sport: 'Futebol', market: 'Múltipla',
+    event: `Múltipla (${line.legs.length}) — ${line.legs.map(l => `${l.home} x ${l.away} ${l.linha}`).join(' · ')}`,
+    date: localStr(line.first_kickoff), oddMkt: line.fair_odd_blend, prob: line.p_blend,
+    analise: {
+      multi: true, legs: line.legs, fixtureId: last.fixtureId, lineId: 'multi', kickoff: last.kickoff, first_kickoff: new Date(line.first_kickoff).toISOString(),
+      competition: [...new Set(line.legs.map(l => l.competition))].join(', '),
+      mercado: 'Múltipla', linha: `${line.legs.length} pernas · over de gols`, tier: 'múltipla',
+      p_blend: line.p_blend, p_pinnacle: line.p_pinnacle, fair_odd: line.fair_odd_blend, odd_min: line.odd_min, pinnacle_odd: null, priced_by: 'pinnacle',
     },
   };
 }
