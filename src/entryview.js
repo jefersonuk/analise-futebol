@@ -25,7 +25,7 @@ const SEND = 'Registrar no app de apostas';
 // análise de 02–05/10/2026, as que passavam nessa regra acertaram 64%; as outras, 41%. A entrada manual
 // não passa por essas regras.
 // aposta de cenário (odd perto de 2) segue a regra de valor do cenário, não o piso de 60%
-const belowFloor = line => !line.scenario && !(line.p_blend >= HIT_MIN);
+const belowFloor = line => !line.scenario && !line.multi && !(line.p_blend >= HIT_MIN);
 const offRule = (line, odd) => [line.blocked && 'jogo difícil de analisar (só over de gols com a odd da Pinnacle)',
   line.scenario && line.conditional && `entrar se… (${line.conditions.join('; ')}) — confirmou?`,
   line.scenario && line.status === 'sem aposta' && `sem aposta pela nossa análise (${line.why_not?.[0] || 'não passa na regra'})`,
@@ -90,6 +90,7 @@ export function initEntry({ getLine, getFixture }) {
           : 'Sem jogo da API ou sem linha reconhecida: o resultado é marcado à mão no app de apostas.') + '</span>');
     } else if (belowFloor(line)) out.push(`<span class="neg"><b>Acerta ${pct(line.p_blend)}: abaixo do piso de 60%.</b> Esta linha não entra (marque "Minha análise" para registrar mesmo assim).</span>`);
     else if (line.blocked) out.push('<span class="neg">Jogo difícil de analisar (base/reservas ou ligas diferentes): aqui só over de gols com a odd da Pinnacle.</span>');
+    else if (line.multi) out.push(`<span class="muted"><b>Múltipla de ${line.legs.length} perna${line.legs.length > 1 ? 's' : ''}</b>: acerta todas em ${pct(line.p_blend)} (Pinnacle ${pct(line.p_pinnacle)}). Uma perna perdida perde tudo; entrada pequena (até 0,5% da banca).</span>`);
     else if (line.scenario) out.push(`<span class="muted"><b>Nossa análise</b>: nossa ${pct(line.p_nossa)}${line.p_pinnacle != null ? ` · Pinnacle ${pct(line.p_pinnacle)} (${line.diff_pp >= 0 ? '+' : ''}${Math.round(line.diff_pp)} pp: ${esc(line.why)})` : ''}`
       + `${line.contra ? ' · <b>contra a Pinnacle</b>' : ''}${line.conditional ? ` — <span class="neg">entrar se: ${esc(line.conditions.join('; '))}</span>`
         : line.status === 'sem aposta' ? ` — <span class="neg">sem aposta: ${esc(line.why_not.join('; '))}</span>` : ''}.</span>`);
@@ -97,13 +98,13 @@ export function initEntry({ getLine, getFixture }) {
     else if (line.p_blend < HIT_IDEAL) out.push('<span class="muted">Acerto acima do piso (60%) e abaixo do ideal (70%).</span>');
     if (odd > 1 && line.p_blend != null) {
       const evv = line.p_blend * odd - 1;
-      out.push(`EV nessa odd ${line.scenario ? 'pela nossa análise' : 'pelo modelo'}: <b class="${evv > 0 ? 'pos' : 'neg'}">${(evv * 100).toFixed(1).replace('.', ',')}%</b> (acerto ${pct(line.p_blend)})`);
+      out.push(`EV nessa odd ${line.multi ? 'pela chance do bilhete' : line.scenario ? 'pela nossa análise' : 'pelo modelo'}: <b class="${evv > 0 ? 'pos' : 'neg'}">${(evv * 100).toFixed(1).replace('.', ',')}%</b> (acerto ${pct(line.p_blend)})`);
       if (!manual() && odd < line.odd_min) out.push(`<span class="neg">Abaixo da odd mínima ${num(line.odd_min)}: a margem de segurança some.</span>`);
-      if (!manual() && odd < 1.5) out.push('<span class="neg">Fora do seu núcleo (odd abaixo de 1,50).</span>');
+      if (!manual() && !line.multi && odd < 1.5) out.push('<span class="neg">Fora do seu núcleo (odd abaixo de 1,50).</span>');
     }
     if (stake > 0 && cur !== 'BRL') out.push(r ? `<span class="muted">= ${cash(stake * r)} na cotação do app de apostas (${cash(r)} por ${SYMBOL[cur]})</span>`
       : `<span class="neg">Sem cotação de ${cur} no app de apostas: abra o app de apostas uma vez para ele buscar.</span>`);
-    out.push(`<span class="muted">Stake do Modelo F: ${cash(entry.stakeBRL)}${cur !== 'BRL' && r ? ` = ${cash(entry.stakeBRL / r, cur)}` : ''}.</span>`);
+    out.push(`<span class="muted">${line?.multi ? 'Entrada da múltipla (¼ Kelly, até 0,5% da banca)' : 'Stake do Modelo F'}: ${cash(entry.stakeBRL)}${cur !== 'BRL' && r ? ` = ${cash(entry.stakeBRL / r, cur)}` : ''}.</span>`);
     if (h?.value != null && stake > h.value) out.push(`<span class="neg">Stake maior que o saldo da casa (${cash(h.value, cur)}).</span>`);
     if (h?.limited) out.push('<span class="neg">Casa marcada como limitada no app de apostas.</span>');
     if (h?.name && autoCheck(fx, line) && sentRecently(fx.id, line.id, h.name)) out.push('<span class="neg">Você já enviou esta linha nesta casa há pouco. Enviar de novo registra outra aposta.</span>');
@@ -148,17 +149,20 @@ export function initEntry({ getLine, getFixture }) {
   function open(id, odd = null, ctx = null) {
     const line = ctx?.line || getLine(id), app = betsApp(), fx = ctx?.fx || getFixture();
     if (!line || !fx) return;
-    entry = { line, fx, houses: app.houses, rates: app.rates, stakeBRL: app.stake ?? line.entry_brl, btn: ctx?.btn, confirmDup: false, confirmOff: false,
+    // múltipla: a entrada é a dela (pequena), não a stake do Modelo F
+    entry = { line, fx, houses: app.houses, rates: app.rates, stakeBRL: line.multi ? line.entry_brl || 50 : app.stake ?? line.entry_brl, btn: ctx?.btn, confirmDup: false, confirmOff: false,
       typedLine: false, typedGame: false };
     $('#enTitle').textContent = `${line.market}: ${line.line}`;
     $('#enGame').textContent = `${fx.home.name} x ${fx.away.name} · ${fx.league.name} · ${hour(fx.t)}`;
     $('#enFacts').hidden = false;
     $('#enFacts').innerHTML = [
-      line.scenario ? ['Nossa análise', `${line.status === 'entrar se' ? 'entrar se…' : line.status} · nossa ${pct(line.p_nossa)} <span class="muted">(Pinnacle ${line.p_pinnacle != null ? pct(line.p_pinnacle) : '—'}; ${esc(line.why)})</span>${line.contra ? ' · <b>contra a Pinnacle</b>' : ''}`]
+      line.multi ? ['Múltipla', `${line.legs.length} perna${line.legs.length > 1 ? 's' : ''} · acerta todas em ${pct(line.p_blend)} <span class="muted">(Pinnacle ${pct(line.p_pinnacle)})</span>`]
+        : line.scenario ? ['Nossa análise', `${line.status === 'entrar se' ? 'entrar se…' : line.status} · nossa ${pct(line.p_nossa)} <span class="muted">(Pinnacle ${line.p_pinnacle != null ? pct(line.p_pinnacle) : '—'}; ${esc(line.why)})</span>${line.contra ? ' · <b>contra a Pinnacle</b>' : ''}`]
         : ['Consistência', `${line.tier} · acerta ${pct(line.p_blend)} <span class="muted">(piso 60%, ideal 70%)</span>`],
       ['Preço justo', num(line.fair_odd_blend)],
       ['Odd mínima', `<b>${num(line.odd_min)}</b>`],
-      line.combo ? ['Pernas separadas', `${num(line.odd_indep)} <span class="muted">(produto das justas; a Pinnacle não cota combos — a chance sai da matriz de placares dela)</span>`]
+      line.multi ? ['Pernas', line.legs.map(l => `${esc(l.home)} x ${esc(l.away)} ${esc(l.linha)} <span class="muted">(${pct(l.p)}, mínima ${num(l.odd_min)})</span>`).join('<br>')]
+        : line.combo ? ['Pernas separadas', `${num(line.odd_indep)} <span class="muted">(produto das justas; a Pinnacle não cota combos — a chance sai da matriz de placares dela)</span>`]
         : ['Pinnacle', line.pinnacle_odd ? num(line.pinnacle_odd) : line.derived ? 'não cota esta linha (derivada do total dela)' : 'sem odd (modelo ancorado)'],
     ].map(([k, v]) => `<span class="muted">${k}</span><span>${v}</span>`).join('');
     $('#enManual').checked = false;
