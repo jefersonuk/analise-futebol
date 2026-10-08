@@ -148,11 +148,31 @@ export function makeClient({ get: rawGet, load, save }) {
     lineups: async fixtureId => (await get('/fixtures/lineups', { fixture: fixtureId })).map(r => ({
       team: r.team.id, name: r.team.name, formation: r.formation || null, coach: r.coach?.name || null,
       start: (r.startXI || []).map(x => x.player?.name).filter(Boolean), bench: (r.substitutes || []).map(x => x.player?.name).filter(Boolean),
+      startIds: (r.startXI || []).map(x => x.player?.id).filter(Boolean), benchIds: (r.substitutes || []).map(x => x.player?.id).filter(Boolean),
     })),
+
+    // Jogadores do time na temporada (titular em quantos jogos, gols, posição; só os jogos por este time) e se ainda
+    // estão no elenco: para saber quem é titular habitual na conferência da escalação. 1 dia; 2 a 4 requisições.
+    teamPlayers: (teamId, season) => cached(`af:pl:${teamId}:${season}`, DAY, async () => {
+      let squad = new Set();
+      try { squad = new Set(((await get('/players/squads', { team: teamId }))[0]?.players || []).map(p => p.id)); } catch { /* sem elenco */ }
+      const out = new Map();
+      for (let page = 1, total = 1; page <= total && page <= 6; page++) {
+        const res = await get('/players', { team: teamId, season, page });
+        total = res.paging?.total || total;
+        for (const r of res) {
+          const st = (r.statistics || []).filter(s => s.team?.id === teamId), sum = f => st.reduce((t, s) => t + (f(s) || 0), 0);
+          out.set(r.player.id, { id: r.player.id, name: r.player.name, pos: st.find(s => s.games?.position)?.games.position || null,
+            starts: sum(s => s.games?.lineups), apps: sum(s => s.games?.appearences), goals: sum(s => s.goals?.total),
+            in_squad: squad.size ? squad.has(r.player.id) : null });
+        }
+      }
+      return [...out.values()].filter(p => p.apps > 0);
+    }),
 
     injuries: fixtureId => cached(`af:inj:${fixtureId}`, 3 * HOUR, async () =>
       (await get('/injuries', { fixture: fixtureId })).map(r => ({
-        team: r.team.id, player: r.player.name, type: r.player.type, reason: r.player.reason,
+        team: r.team.id, id: r.player.id, player: r.player.name, type: r.player.type, reason: r.player.reason,
       }))),
 
     // Tabela, com gols pró e contra no total e em casa / fora (as médias da temporada de cada time).

@@ -14,6 +14,7 @@ import { contextLine } from './context.js';
 import { bindLive, renderLive } from './liveview.js';
 import { collect } from './odds.js';
 import { isScenario } from './scenario.js';
+import { lineVerdict, lineupReport } from './lineupcheck.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -262,33 +263,38 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       <button class="ghost mini" data-check="${g.fx.id}">Conferir agora</button><div class="chk" id="chk-${g.fx.id}"></div></li>`).join('')}</ul></div>`;
   }
 
-  // Conferir um jogo: escalação dos dois times (com as dúvidas da API escaladas ou não) e a linha da Pinnacle agora
-  // contra a da varredura (caiu = o mercado veio para o nosso lado)
+  // Conferir um jogo (lineupcheck.js): a escalação de cada time contra os titulares habituais da temporada, as dúvidas
+  // da API, a Pinnacle agora (e se a API já atualizou depois da escalação) e o veredito de cada linha: entrada cheia,
+  // meia entrada, não entrar ou esperar a escalação
   async function checkFixture(fxId, btn) {
     const g = scan.games.find(x => x.fx.id === fxId), el = $(`#chk-${fxId}`);
     if (!g || !el) return;
-    btn.disabled = true; el.textContent = 'Conferindo escalação e linha da Pinnacle…';
+    btn.disabled = true; el.textContent = 'Conferindo escalação, titulares da temporada e linha da Pinnacle…';
     const [lu, od] = await Promise.all([api.lineups(fxId).catch(e => ({ error: e.message })), api.fixtureOdds(fxId).catch(() => null)]);
+    const names = { home: g.fx.home.name, away: g.fx.away.name }, sideId = { home: g.fx.home.id, away: g.fx.away.id };
+    let rep = null;
     const out = [];
-    if (lu?.error) out.push(`escalação: erro da API (${esc(lu.error)})`);
-    else if (!lu?.length) out.push('escalação ainda não saiu (a API publica 20 a 40 min antes do jogo) — confira de novo mais perto');
-    else {
-      const doubt = (g.injuries || []).filter(i => i.type === 'Questionable');
-      for (const t of lu) {
-        const d = doubt.filter(i => i.team === t.team).map(i => `${esc(i.player)} ${t.start.includes(i.player) ? '<b class="pos">escalado</b>' : '<b class="neg">fora</b>'}`);
-        out.push(`<b>${esc(t.name)}</b>${t.formation ? ` (${esc(t.formation)})` : ''}: ${t.start.map(esc).join(', ')}${d.length ? ` · dúvidas: ${d.join(', ')}` : ''}`);
-      }
+    if (lu?.error) out.push(`<p class="neg">escalação: erro da API (${esc(lu.error)})</p>`);
+    else if (lu?.length) {
+      const xi = k => lu.find(t => t.team === sideId[k]);
+      const pl = await Promise.all(['home', 'away'].map(k => (xi(k) && api.teamPlayers ? api.teamPlayers(sideId[k], g.fx.league.season).catch(() => null) : null)));
+      rep = { home: lineupReport(pl[0], xi('home')), away: lineupReport(pl[1], xi('away')) };
     }
-    if (od?.bookmakers?.length) {
-      const now = collect(od.bookmakers).odds;
-      for (const l of (g.scenario || []).filter(x => x.conditional || x.bet)) {
-        const v = now.get(l.id);
-        if (!v || !l.pinnacle_odd) continue;
-        const mv = v < l.pinnacle_odd - 0.005 ? '<b class="pos">caiu: o mercado veio para o nosso lado</b>' : v > l.pinnacle_odd + 0.005 ? '<b class="neg">subiu: o mercado foi contra</b>' : 'parada';
-        out.push(`Pinnacle ${esc(l.line)}: ${n2(l.pinnacle_odd)} → <b>${n2(v)}</b> (${mv})${v >= l.odd_min ? '' : ` · <span class="neg">abaixo da nossa mínima ${n2(l.odd_min)}</span>`}`);
-      }
+    const inXI = (i, t) => (i.id && t?.startIds ? t.startIds.includes(i.id) : t?.start.includes(i.player));
+    const doubts = (g.injuries || []).filter(i => i.type === 'Questionable').map(i => {
+      const side = i.team === sideId.home ? 'home' : 'away', t = lu?.length ? lu.find(x => x.team === i.team) : null;
+      return { player: i.player, side, plays: t ? inXI(i, t) : null };
+    });
+    const now = od?.bookmakers?.length ? collect(od.bookmakers).odds : null;
+    const lines = (g.scenario || []).filter(x => x.conditional || x.bet).slice(0, 3);
+    for (const l of lines) {
+      const v = lineVerdict({ line: l, rep, names, odds: { now: now?.get(l.id) ?? null, updatedAt: od?.updatedAt }, kickoff: g.fx.t, doubts });
+      const stake = v.stake == null ? '' : v.verdict === 'meia' ? ` · R$ ${v.stake} (metade de ${l.entry_brl})` : v.stake ? ` · R$ ${v.stake}` : '';
+      out.push(`<div class="verdict v-${v.verdict}"><b>${esc(v.title)}</b> · ${esc(SHORT[l.market] || l.market)} ${esc(l.line)}${stake}
+        <ul>${v.reasons.map(r => `<li class="${r.sign > 0 ? 'pos' : r.sign < 0 ? 'neg' : ''}">${r.sign > 0 ? '＋ ' : r.sign < 0 ? '－ ' : '· '}${esc(r.text)}</li>`).join('')}</ul></div>`);
     }
-    el.innerHTML = out.map(x => `<div>${x}</div>`).join('') || 'Sem dados novos.';
+    if (lu?.length) out.push(`<details class="xi"><summary>Escalações</summary>${lu.map(t => `<div><b>${esc(t.name)}</b>${t.formation ? ` (${esc(t.formation)})` : ''}: ${t.start.map(esc).join(', ')}</div>`).join('')}</details>`);
+    el.innerHTML = out.join('') || 'Sem dados novos.';
     btn.disabled = false;
   }
 
