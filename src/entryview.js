@@ -27,6 +27,7 @@ const SEND = 'Registrar no app de apostas';
 // aposta de cenário (odd perto de 2) segue a regra de valor do cenário, não o piso de 60%
 const belowFloor = line => !line.scenario && !(line.p_blend >= HIT_MIN);
 const offRule = (line, odd) => [line.blocked && 'jogo difícil de analisar (só over de gols com a odd da Pinnacle)',
+  line.scenario && !line.bet && `sem aposta de cenário (${line.why_not?.[0] || 'não passa na regra'})`,
   line.tier === 'especulativa' && 'linha especulativa (pior cenário ou histórico dos times abaixo do piso)',
   odd < line.odd_min && `odd abaixo da mínima ${num(line.odd_min)}`].filter(Boolean);
 
