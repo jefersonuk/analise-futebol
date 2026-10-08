@@ -76,3 +76,24 @@ test('varredura do dia da demo: o plano sai com as três partes possíveis e sem
   assert.ok(plan.singles.length <= SINGLES[1] && plan.sameGame.length <= SAME_GAME && plan.multis.length <= 2);
   assert.ok(ids.length > 0, 'a demo rende alguma entrada');
 });
+
+test('janela de horas a partir de agora: exata no plano (expand: false), crescente na varredura (padrão)', async () => {
+  const now = Date.UTC(2026, 9, 8, 15);
+  const fx = (id, h) => ({ id, t: now + h * H, league: { id: 9, season: 2026, name: 'Liga' }, home: { id: id * 10, name: `A${id}` }, away: { id: id * 10 + 1, name: `B${id}` } });
+  const list = [fx(1, 0.5), fx(2, 0.9), fx(3, 3), fx(4, 7)];
+  const api = { stats: () => ({ api: 0 }), dayFixtures: async () => list, dayOdds: async () => list.map(f => ({ fixture: f.id, bookmakers: [{ bets: [{ id: 1 }] }] })),
+    hasLeague: async () => true, leagueMatches: async () => [], attachHalfCorners: async (a, b, ms) => ms };
+  const exact = await scanDay(api, { hours: 1, now, top: 20, half: false, expand: false });
+  assert.equal(exact.fixtures, 2, 'só os jogos da próxima hora');
+  assert.equal(exact.hours, 1);
+  assert.ok(exact.window.to - exact.window.from <= H);
+  const grown = await scanDay(api, { hours: 1, now, top: 20, half: false });
+  assert.ok(grown.hours > 1 && grown.fixtures === 4, 'a varredura amplia quando falta jogo');
+});
+
+test('simulação do plano: uma por montagem, com o nome da janela', () => {
+  const plan = { date: '2026-10-08', scan_at: new Date(NOW).toISOString(), singles: [], sameGame: [], multis: [] };
+  const sim = buildPlanSim(plan, { id: 'plano-123', win: 'h4', label: '08/10, 13:12–17:12 (próximas 4 h)' });
+  assert.equal(sim.id, 'plano-123'); assert.equal(sim.win, 'h4'); assert.match(sim.label, /próximas 4 h/);
+  assert.equal(buildPlanSim(plan).id, 'plano-2026-10-08', 'sem id: um por data');
+});

@@ -315,7 +315,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         <td>${n2(b.odd)} <span class="muted">${b.odd_src === 'pinnacle' ? 'Pin' : 'mín.'}</span></td><td>${pct(b.p)}</td>
         <td title="${esc(b.detail || '')}">${b.status === 'aberta' ? `<span class="muted">${esc(b.detail || 'aberta')}</span>` : `${RES[b.winner]} <span class="muted">${esc(b.detail || '')}</span>`}</td>
         <td class="${cls(b.profit_u)}">${b.profit_u == null ? '' : sg(b.profit_u)}</td><td class="${cls(b.profit_brl)}">${b.profit_brl == null ? '' : sg(b.profit_brl, 0)}</td></tr>`).join('');
-      return `<div class="simcard"><div><b>${sim.plan ? `📋 Plano de ${sim.date.split('-').reverse().slice(0, 2).join('/')}` : `Varredura de ${when}`}</b> · ${t.n} entradas · ${t.done} encerradas${t.open ? `, ${t.open} em aberto` : ''} ·
+      return `<div class="simcard"><div><b>${sim.plan ? `📋 Plano ${esc(sim.label || sim.date.split('-').reverse().slice(0, 2).join('/'))}` : `Varredura de ${when}`}</b> · ${t.n} entradas · ${t.done} encerradas${t.open ? `, ${t.open} em aberto` : ''} ·
         <b class="${cls(t.profit_u)}">${sg(t.profit_u)} u</b> (yield ${pc(t.yield)}) · <span class="${cls(t.profit_brl)}">R$ ${sg(t.profit_brl, 0)}</span>
         ${t.clv != null ? ` · CLV médio ${pc(t.clv)}` : ''}
         <button class="ghost mini" data-simcheck="${sim.id}"${sims.busy ? ' disabled' : ''}>🔄 Conferir resultados</button>

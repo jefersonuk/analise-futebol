@@ -187,7 +187,8 @@ export function pickGames(games, { market = null, top = 20, order = 'time' } = {
 // api: o mesmo conjunto do dossiê (dayFixtures, dayOdds, hasLeague, leagueMatches, attachHalfCorners, standings,
 // headToHead, stats). Janela: hours (as próximas N horas a partir de now) ou date (o dia inteiro, AAAA-MM-DD).
 // half: false pula a 2ª passada (histórico dos escanteios do 1º tempo) — o Plano do dia não usa escanteio do 1º tempo.
-export async function scanDay(api, { date = null, hours = null, now = Date.now(), top = 20, budget = 1500, banca = 44000, half = true, onProgress = () => {} }) {
+// expand: false mantém a janela de horas pedida, mesmo com poucos jogos (o Plano do dia: a janela é a do operador).
+export async function scanDay(api, { date = null, hours = null, now = Date.now(), top = 20, budget = 1500, banca = 44000, half = true, expand = true, onProgress = () => {} }) {
   const used = (() => { const s0 = api.stats().api; return () => api.stats().api - s0; })();
   const skipped = [];
   const from = now + 10 * 60e3;
@@ -211,7 +212,7 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
       to = now + span * 3600e3;
       for (const d of new Set([brDate(now), brDate(to)])) await loadDate(d);
       fixtures = inWindow(to);
-      if (fixtures.filter(f => odds.has(f.id)).length >= Math.ceil(top * 1.5) || span >= Math.max(hours, MAX_HOURS)) break;
+      if (!expand || fixtures.filter(f => odds.has(f.id)).length >= Math.ceil(top * 1.5) || span >= Math.max(hours, MAX_HOURS)) break;
       span = Math.min(span + STEP_HOURS, Math.max(hours, MAX_HOURS));
     }
   } else { await loadDate(date); fixtures = inWindow(to); }
