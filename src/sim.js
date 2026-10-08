@@ -7,13 +7,13 @@
 //   linhas          em cada mercado da varredura (gols, gols 1T, handicap de gols, 1X2, escanteios, escanteios 1T,
 //                   chutes), a linha do jogo naquela aba quando ela é aposta
 //   combo           o combo do jogo na aba Combos, quando é aposta
-//   múltipla        o bilhete automático da aba Múltipla (alvo padrão), com 2 pernas ou mais
+//   múltipla        os bilhetes por faixa de horário da aba Múltipla (alvo e faixa padrão), com 2 pernas ou mais
 // Odd: a da Pinnacle na própria linha; quando a Pinnacle não cota (linha derivada, só do modelo, combo), a odd mínima
 // do app (odd_src = 'mínima'). Lucro em unidades (stake fixa de 1) e em R$ (a entrada proposta pelo app).
 
 import { COMBOS, FILTER_KEYS, bestLine } from './scanner.js';
 import { isBet } from './dossier.js';
-import { TARGET, autoTicket, multiLegs, settleMulti, ticketOf } from './multiple.js';
+import { TARGET, bandTickets, multiLegs, settleMulti, ticketOf } from './multiple.js';
 
 export const CATS = ['nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T', 'Handicap gols', '1X2', 'Escanteios', 'Escanteios 1T',
   'Chutes', 'Combo', 'Múltipla'];
@@ -49,9 +49,8 @@ export function buildSim(scan, { banca = 44000 } = {}) {
     const cb = (g.combos || []).find(isBet);
     if (cb) bets.push(base(g, cb, 'Combo', cb.odd_min, 'mínima', cb.entry_brl));
   }
-  // múltipla: o bilhete automático, como a aba montava na hora da varredura
-  const legs = autoTicket(multiLegs(scan.games, { now: at }), { target: TARGET });
-  if (legs.length >= 2) {
+  // múltipla: os bilhetes por faixa de horário, como a aba montava na hora da varredura (só linha cotada)
+  for (const legs of bandTickets(multiLegs(scan.games, { now: at }).filter(l => l.quoted), { target: TARGET })) {
     const odd = legs.reduce((t, l) => t * l.pinnacle_odd, 1), t = ticketOf(legs, { houseTotal: odd, banca });
     bets.push({ key: `Múltipla|${legs.map(l => l.key).join(',')}`, cat: 'Múltipla', fixtureId: null, kickoff: Math.min(...legs.map(l => l.kickoff)),
       home: `Múltipla (${legs.length})`, away: '', competition: [...new Set(legs.map(l => l.competition))].join(', '), lineId: 'multi', market: 'Múltipla',

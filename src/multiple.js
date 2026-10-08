@@ -36,9 +36,11 @@ export function multiGames(games, { now = Date.now() } = {}) {
     }).filter(l => l.p >= LEG_P[l.lineId] && l.p >= l.p_pinnacle - 0.02).sort((a, b) => b.quoted - a.quoted || b.p - a.p);
     if (options.length) out.push({ fixtureId: g.fx.id, options, best: options[0] });
   }
-  const fav = l => (l.context === 'a favor' ? 1 : 0);
-  return out.sort((a, b) => b.best.quoted - a.best.quoted || fav(b.best) - fav(a.best) || b.best.p_pinnacle - a.best.p_pinnacle || b.best.p - a.best.p);
+  return out.sort((a, b) => legOrder(a.best, b.best));
 }
+// Preferência entre pernas: linha cotada, contexto a favor, a chance da Pinnacle, a nossa.
+const fav = l => (l.context === 'a favor' ? 1 : 0);
+export const legOrder = (a, b) => b.quoted - a.quoted || fav(b) - fav(a) || b.p_pinnacle - a.p_pinnacle || b.p - a.p;
 // A perna de cada jogo (a preferida), na ordem de multiGames.
 export const multiLegs = (games, opts) => multiGames(games, opts).map(x => x.best);
 
@@ -52,6 +54,29 @@ export function autoTicket(legs, { target = TARGET, maxLegs = MAX_LEGS } = {}) {
     pick.push(l); fair /= l.p;
   }
   return pick;
+}
+
+// Bilhetes por faixa de horário, do mais próximo ao mais longe: a faixa começa no jogo mais cedo que sobrou e vai até
+// `band` depois; dentro dela, as melhores pernas (legOrder) até a odd justa do alvo (no máximo MAX_LEGS). O que sobra
+// na faixa entra no bilhete seguinte; perna que não fecha bilhete de 2 fica de fora. Cada jogo entra em um bilhete só.
+// legs: as pernas que podem entrar (quem chama decide: cotadas, sem jogo que já tem entrada).
+export const BANDS = [1, 2, 3];          // horas
+export const BAND = 2;
+export function bandTickets(legs, { target = TARGET, band = BAND, maxLegs = MAX_LEGS } = {}) {
+  let pool = [...legs].sort((a, b) => a.kickoff - b.kickoff);
+  const out = [];
+  while (pool.length) {
+    const start = pool[0].kickoff, inBand = pool.filter(l => l.kickoff < start + band * 3600e3).sort(legOrder);
+    const pick = [];
+    let fair = 1;
+    for (const l of inBand) { if (fair >= target || pick.length >= maxLegs) break; pick.push(l); fair /= l.p; }
+    if (pick.length >= 2) {
+      out.push(pick.sort((a, b) => a.kickoff - b.kickoff));
+      const used = new Set(pick.map(l => l.key));
+      pool = pool.filter(l => !used.has(l.key));
+    } else pool = pool.slice(1);
+  }
+  return out;
 }
 
 // A conta do bilhete. house: Map(key -> odd da casa na perna) e/ou houseTotal (a odd total que a casa mostra).
