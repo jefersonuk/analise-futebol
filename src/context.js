@@ -126,14 +126,18 @@ export function buildContext({ rows, fx, table = [], extra = [], res, fair = nul
     h2h: { n: h.length, years: H2H_YEARS, home_record: { w: h.filter(g => g.gf > g.ga).length, d: h.filter(g => g.gf === g.ga).length,
       l: h.filter(g => g.gf < g.ga).length }, profile: profile(h), games: h.map(g => h2hRow(g, H.name)) },
   };
-  // nossa leitura (scenario.js): o nosso modelo (já corrigido da compressão) + o cenário pelos jogos contra adversários do
-  // mesmo nível; a Pinnacle (saldo do 1X2 e total dela) só como comparação
-  const pin = fair?.size ? impliedTotal(fair, 'g', 1)?.implied_total : null, g = res.pred?.goals;
-  const market = pin && res.favor?.source === 'pinnacle_1x2' ? { s: res.favor.sup, T: pin } : null;
-  ctx.scenario = g ? buildScenario({ rows, fx, base: { s: g.h - g.a, T: g.h + g.a }, market, levels: strengthLevels(res.fits?.goals),
-    cal: res.anchors?.goals_cal || null, table: ctx.table, derby }) : null;
+  ctx.scenario = scenarioOf({ rows, fx, res, fair, table: ctx.table, derby });
   ctx.text = contextText(ctx, names);
   return { ctx, games, names };
+}
+
+// Nossa leitura (scenario.js): o nosso modelo (já corrigido da compressão) + o cenário pelos jogos contra adversários do
+// mesmo nível; a Pinnacle (saldo do 1X2 e total dela) só como comparação. Também refaz a leitura de uma análise guardada.
+export function scenarioOf({ rows, fx, res, fair = null, table = null, derby = null }) {
+  const pin = fair?.size ? impliedTotal(fair, 'g', 1)?.implied_total : null, g = res.pred?.goals;
+  const market = pin && res.favor?.source === 'pinnacle_1x2' ? { s: res.favor.sup, T: pin } : null;
+  return g ? buildScenario({ rows, fx, base: { s: g.h - g.a, T: g.h + g.a }, market, levels: strengthLevels(res.fits?.goals),
+    cal: res.anchors?.goals_cal || null, table, derby }) : null;
 }
 
 // ---- checagens por linha ----

@@ -205,8 +205,8 @@ function openSnapshot(snap) {
   $('#fixSel').innerHTML = `<option value="0">${hour(fx.t)} · ${esc(fx.home.name)} x ${esc(fx.away.name)} · ${esc(fx.league.name)}</option>`;
   $('#teamSel').hidden = false; $('#fixSel').hidden = false;
   state.fixture = fx; state.matches = snap.matches; state.oddsP = snap.oddsP; state.dossier = snap.dossier;
-  // guardada antes do favoritismo: calcula a superioridade pré-jogo dos jogos e a calibração agora
-  if (!snap.favor || !snap.matches.some(m => m.sup != null)) { const fv = favorFor(snap.matches); state.matches = fv.matches; state.favor = fv.cal; }
+  // guardada antes do favoritismo ou da correção do modelo de gols: calcula a superioridade pré-jogo e a calibração agora
+  if (!snap.favor?.goals || !snap.matches.some(m => m.sup != null && m.xt != null)) { const fv = favorFor(snap.matches); state.matches = fv.matches; state.favor = fv.cal; }
   else state.favor = snap.favor;
   state.odds.clear(); state.books.clear(); state.pinn.clear();
   state.market = 'Todos'; state.my = null; state.savedAt = snap.savedAt;
