@@ -64,11 +64,14 @@ const leanCombo = c => c && {
 // (o texto do cenário já vai em context.text; aqui só os números, e os jogos só na aba Cenário)
 const leanSide = (p, games) => p && { how: p.how, relaxed: p.relaxed || undefined, n: p.n, wdl: `${p.w}-${p.d}-${p.l}`, gf: p.gf, ga: p.ga, resid: p.resid,
   tot_resid: p.tot_resid ?? undefined, win2: p.win2, lose2: p.lose2, games: games ? p.games.slice(0, 4) : undefined };
-const leanScenario = (c, games) => c && { band: c.band, adj_sup: c.adj_sup, adj_total: c.adj_total, agree: c.agree, enough: c.enough,
+// nossa leitura: o modelo corrigido (base), o cenário (correção), o resultado e a Pinnacle ao lado
+const leanScenario = (c, games) => c && { ours: { sup: c.sup, total: c.total }, model: c.base, scenario_adj: { sup: c.adj_sup, total: c.adj_total },
+  pinnacle: c.market || undefined, level: c.level, band: c.band, agree: c.agree, enough: c.enough,
   motivation: c.motivation || undefined, derby: c.derby || undefined, home: leanSide(c.home, games), away: leanSide(c.away, games) };
-const leanScenLine = l => l && { line: `${l.market}: ${l.line}`, pinnacle_odd: l.pinnacle_odd, p_pinnacle: l.p_pinnacle, p_scenario: l.p_scenario,
-  ev_at_pinnacle: l.ev_pinnacle, odd_min: l.odd_min, bet: l.bet, tier: l.bet ? l.tier : undefined, why_not: l.bet ? undefined : l.why_not[0],
-  entry_brl: l.bet ? l.entry_brl : undefined };
+const leanScenLine = l => l && { line: `${l.market}: ${l.line}`, status: l.status, p_ours: l.p_nossa, p_model: l.p_model_cal, p_pinnacle: l.p_pinnacle,
+  diff_pp: l.diff_pp, why: l.why, contra_pinnacle: l.contra || undefined, pinnacle_odd: l.pinnacle_odd, odd_min: l.odd_min,
+  conditions: l.conditions?.length ? l.conditions : undefined, why_not: l.status === 'sem aposta' ? l.why_not[0] : undefined,
+  entry_brl: l.bet || l.conditional ? l.entry_brl : undefined };
 // Plano ao vivo enxuto: odd mínima (e chance) do over 3, 3,5 e 4,5 nos minutos 0, 5, 8 e 10, sem escanteio e com 1.
 function leanLive(p) {
   if (!p) return null;
@@ -89,7 +92,7 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
     kind: 'varredura',
     date: scan.date, window: scan.window ? { hours: scan.hours, from: new Date(scan.window.from).toISOString(), to: new Date(scan.window.to).toISOString() } : null,
     order: order === 'time' ? 'horário (o mais próximo primeiro)' : 'chance de ganho',
-    filter: market === LIVE_1H ? 'ao vivo 1º tempo' : market === COMBOS ? 'combos de duas pernas' : market === CENARIO ? 'cenário (odd perto de 2)' : market || 'melhor do jogo',
+    filter: market === LIVE_1H ? 'ao vivo 1º tempo' : market === COMBOS ? 'combos de duas pernas' : market === CENARIO ? 'nossa análise (odd perto de 2)' : market || 'melhor do jogo',
     generated_at: scan.generated_at, fixtures: scan.fixtures, with_odds: scan.with_odds, with_1h: scan.with_1h ?? null,
     asked_hours: scan.asked_hours ?? null, corners_report: scan.corners_report ?? null,
     games: ranked.map(({ g, line }, i) => {
@@ -106,7 +109,8 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
         live_1h: leanLive(g.live1h),
         combos: (g.combos || []).slice(0, market === COMBOS ? 4 : 2).map(leanCombo),
         scenario: leanScenario(g.context?.scenario, market === CENARIO),
-        scenario_lines: (g.scenario || []).filter((l, k) => l.bet || k < (market === CENARIO ? 3 : 1)).slice(0, 4).map(leanScenLine),
+        scenario_lines: (g.scenario || []).filter((l, k) => l.bet || l.conditional || k < (market === CENARIO ? 3 : 1)).slice(0, 4).map(leanScenLine),
+        injuries: g.injuries?.length ? g.injuries.slice(0, 10).map(i => `${i.player} (${i.team === g.fx.home.id ? 'mandante' : 'visitante'}: ${i.type === 'Questionable' ? 'dúvida' : i.reason})`) : undefined,
       };
     }),
     skipped: scan.skipped.map(s => `${s.fx.home.name} x ${s.fx.away.name} (${s.fx.league.name}): ${s.why}`),

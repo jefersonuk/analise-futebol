@@ -15,7 +15,7 @@ import { favorFor } from './favoritism.js';
 import { buildContext, contextGames, lineContext } from './context.js';
 import { livePlanOf } from './live.js';
 import { applyHard, hardGame } from './hard.js';
-import { derbyOf, scenarioLines } from './scenario.js';
+import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
 
 export { stakeFor };
 
@@ -527,7 +527,8 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     focus_markets: FOCUS,
     candidates_focus: candidatesFocus,
     // apostas de cenário (odd perto de 2): as linhas de gols da Pinnacle pela leitura de cenário (scenario.js)
-    scenario_lines: scenarioLines(context.ctx.scenario, priced.filter(l => SCEN_MARKETS.includes(l.market)), { banca, hard }).slice(0, 6),
+    scenario_lines: scenarioLines(context.ctx.scenario, priced.filter(l => SCEN_MARKETS.includes(l.market)),
+      { banca, hard, conditions: conditionsOf({ fx, hard, injuries }) }).slice(0, 6),
     candidates,
     lines_with_pinnacle: priced,
     lines_anchored: anchored,

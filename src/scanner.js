@@ -34,7 +34,7 @@ import { buildContext } from './context.js';
 import { livePlanOf } from './live.js';
 import { hardGame } from './hard.js';
 import { comboLines } from './combos.js';
-import { derbyOf, scenarioLines } from './scenario.js';
+import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
 
 export { GOAL_HANDICAP, SHOTS };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
@@ -125,11 +125,14 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
   const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
   // combos de duas pernas (resultado + over de gols), pela matriz de placares da Pinnacle + modelo
   const combos = comboLines({ res, fair, teams, names, banca, hard });
-  // leitura de cenário: as linhas de gols da Pinnacle (1X2, handicap, over) pelo cenário dos dois times
-  const scenario = scenarioLines(context.ctx.scenario, priced.filter(l => ['1X2', GOAL_HANDICAP, 'Total de gols'].includes(l.market)), { banca, hard }).slice(0, 6);
+  // nossa análise: as linhas de gols da Pinnacle (1X2, handicap, over) pela nossa leitura, com as condições do jogo
+  // (entrar se…: escalação de time de base, copa, dúvida); a Pinnacle como segunda opinião
+  const conditions = conditionsOf({ fx, hard, injuries: extra.injuries || [] });
+  const scenario = scenarioLines(context.ctx.scenario, priced.filter(l => ['1X2', GOAL_HANDICAP, 'Total de gols'].includes(l.market)),
+    { banca, hard, conditions }).slice(0, 6);
   const a = res.anchors, h1 = !noCorners;
   return {
-    fx, teams, lines, best, combos, scenario, alerts, odds_age_min: ageMin, team_base: teamBase, no_corners: noCorners,
+    fx, teams, lines, best, combos, scenario, conditions, injuries: extra.injuries || null, alerts, odds_age_min: ageMin, team_base: teamBase, no_corners: noCorners,
     favor: res.favor && Object.fromEntries(Object.entries(res.favor).map(([k, v]) => [k, typeof v === 'number' ? r2(v) : v])),
     favor_text: favorSummary(res.favor, names),
     c1_known: teams.map(t => t.games.filter(g => g.c1).length),
@@ -158,8 +161,10 @@ function cornersStatus(lines, noCorners) {
 // consistência. market LIVE_1H: os jogos com plano ao vivo do 1º tempo, pelos escanteios esperados no 1º tempo.
 export function rankGames(games, opts = {}) {
   // só jogos com aposta de cenário: linha "sem aposta" na lista vira sugestão (07/10: 23 apostas em linhas sem aposta)
-  if (opts.market === CENARIO) return games.filter(g => g.scenario?.some(l => l.bet)).map(g => ({ g, line: g.scenario.find(l => l.bet) }))
-    .sort((a, b) => b.line.ev_pinnacle - a.line.ev_pinnacle);
+  // nossa análise: jogos com aposta ou "entrar se…" (condicional), aposta primeiro e maior valor primeiro
+  if (opts.market === CENARIO) return games.filter(g => g.scenario?.some(l => l.bet || l.conditional))
+    .map(g => ({ g, line: g.scenario.find(l => l.bet) || g.scenario.find(l => l.conditional) }))
+    .sort((a, b) => b.line.bet - a.line.bet || (b.line.ev_pinnacle ?? 0) - (a.line.ev_pinnacle ?? 0));
   if (opts.market === COMBOS) return games.filter(g => g.combos?.length).map(g => ({ g, line: g.combos.find(isBet) || g.combos[0] }))
     .sort((a, b) => isBet(b.line) - isBet(a.line) || byConsistency(a.line, b.line));
   if (opts.market === LIVE_1H) return games.filter(g => g.live1h).map(g => ({ g, line: null }))
@@ -312,12 +317,14 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
     if (!api.headToHead && !api.teamInfo) continue;
     if (used() + 1 > budget) { g.no_h2h = 'confronto direto só da base da liga (orçamento de requisições)'; continue; }
     onProgress(`Confronto direto ${gk}/${kept.length}: ${g.fx.home.name} x ${g.fx.away.name} · ${used()} requisições`);
-    let h2h = null, derby = null;
+    let h2h = null, derby = null, injuries = null;
     if (api.headToHead) try { h2h = await api.headToHead(g.fx.home.id, g.fx.away.id); } catch (e) { g.no_h2h = `confronto direto da API falhou: ${e.message}`; }
     if (api.teamInfo && used() + 2 <= budget) try { derby = derbyOf(await api.teamInfo(g.fx.home.id), await api.teamInfo(g.fx.away.id)); } catch { /* sem cadastro */ }
-    if (!h2h && !derby) continue;
+    // desfalques e dúvidas (guardados 3 h): entram nas condições do jogo (entrar se…)
+    if (api.injuries && used() + 1 <= budget) try { injuries = await api.injuries(g.fx.id); } catch { /* sem desfalques */ }
+    if (!h2h && !derby && !injuries) continue;
     const key = g.team_base ? `tp${g.fx.league.id}` : g.fx.league.id;
-    const a = analyze(g.fx, base.get(key), oddsOf(g.fx), banca, g.team_base, favorBy.get(key), { table: tableBy.get(g.fx.league.id), h2h, derby });
+    const a = analyze(g.fx, base.get(key), oddsOf(g.fx), banca, g.team_base, favorBy.get(key), { table: tableBy.get(g.fx.league.id), h2h, derby, injuries });
     if (!a.skip) Object.assign(g, a);
   }
   const keep = keepOf();
@@ -326,11 +333,12 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   // resumo dos escanteios: por que um jogo tem ou não tem linha de escanteios na lista
   const cornersReport = games.reduce((o, g) => { const k = g.corners?.status || 'sem linha'; o[k] = (o[k] || 0) + 1; return o; }, {});
   for (const g of games) if (g.corners?.source && g.corners.status !== 'sem linha') cornersReport[`preço ${g.corners.source}`] = (cornersReport[`preço ${g.corners.source}`] || 0) + 1;
-  // v 9: leitura de cenário (aba padrão), motivação e clássico; v 8: combos de duas pernas; v 7: só over, chutes e 1X2, "Melhor do jogo" sem escanteios; v 6: jogo difícil de analisar (base/reservas,
+  // v 10: nossa análise primeiro (modelo corrigido + cenário por nível do adversário; Pinnacle como segunda opinião) e
+  // condições do jogo; v 9: leitura de cenário (aba padrão), motivação e clássico; v 8: combos de duas pernas; v 7: só over, chutes e 1X2, "Melhor do jogo" sem escanteios; v 6: jogo difícil de analisar (base/reservas,
   // ligas diferentes); v 5: piso de 60% de acerto e odd mínima com
   // piso de 1,50; v 4: janela de horas, contexto e plano ao vivo do 1º tempo. A tela avisa quando a varredura
   // guardada é de antes
-  return { v: 9, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
+  return { v: 10, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
     generated_at: new Date(now).toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }

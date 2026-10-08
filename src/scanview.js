@@ -12,6 +12,7 @@ import { isMain } from './consistency.js';
 import { isBet, isCandidate } from './dossier.js';
 import { contextLine } from './context.js';
 import { bindLive, renderLive } from './liveview.js';
+import { collect } from './odds.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -59,7 +60,7 @@ const thr = l => parseFloat(l.id.match(/-?[\d.]+$/)?.[0]) || 0;
 // Filtros: a melhor linha de cada jogo, cada mercado e os jogos para a entrada ao vivo no 1º tempo.
 // Melhor do jogo: handicap de gols, gols, chutes e 1X2 (escanteios só nas abas deles, e só over).
 // 🎯 Cenário (a padrão): odd perto de 2 pela leitura de cenário dos dois times.
-const FILTERS = [['🎯 Cenário', CENARIO], ['Melhor do jogo', null], ...FILTER_KEYS.map(m => [SHORT[m], m]), ['1T ao vivo', LIVE_1H]];
+const FILTERS = [['🎯 Nossa análise', CENARIO], ['Melhor do jogo', null], ...FILTER_KEYS.map(m => [SHORT[m], m]), ['1T ao vivo', LIVE_1H]];
 // Plano ao vivo: odd mínima e chance do over numa linha, no minuto e com os escanteios dados.
 const liveCell = (plan, c, m, L) => {
   const x = plan?.tables.find(t => t.corners === c)?.rows.find(r => r.minute === m)?.cells.find(z => z.line === L);
@@ -74,11 +75,17 @@ const corrTag = c => {
       : '<span class="tag">independentes</span>';
 };
 // Cenário: a linha, a chance da Pinnacle e a pelo cenário, o valor na odd dela e a leitura curta dos dois times
-const scenTag = l => `<span class="tag ${l.bet ? 'ok' : ''}" title="${esc(l.bet ? 'aposta de cenário' : l.why_not.join('; '))}">${l.bet ? l.tier : 'sem aposta'}</span>`;
-const scenHead = '<th>Linha</th><th>Cenário</th><th>Pinnacle</th><th>Chance: Pinnacle → cenário</th><th>Valor no cenário</th><th>Mínima</th><th>Entrada</th>';
-const scenCells = l => `<td>${esc(SHORT[l.market] || l.market)}: <b>${esc(l.line)}</b></td><td>${scenTag(l)}</td><td>${n2(l.pinnacle_odd)}</td>
-  <td>${pct(l.p_pinnacle)} → <b>${pct(l.p_scenario)}</b></td><td><span class="${l.ev_pinnacle >= 0.05 ? 'pos' : l.ev_pinnacle < 0 ? 'neg' : 'muted'}">${signed(Math.round(l.ev_pinnacle * 100))}%</span></td>
-  <td><b>${n2(l.odd_min)}</b></td><td class="muted">${l.bet && l.entry_brl ? `R$ ${l.entry_brl} · ${l.politica_e}` : '—'}</td>`;
+// Nossa análise: status da linha (aposta, entrar se…, na mira, sem aposta), a nossa chance e a da Pinnacle, a diferença
+// e de onde ela vem (o nosso modelo corrigido e o cenário), a odd mínima e a entrada
+const STATUS = { aposta: ['ok', 'aposta'], 'entrar se': ['mid', 'entrar se…'], 'na mira': ['', 'na mira'], 'sem aposta': ['no', 'sem aposta'] };
+const scenTag = l => { const [c, t] = STATUS[l.status] || STATUS['sem aposta'];
+  const tip = l.status === 'entrar se' ? l.conditions.join('; ') : l.status === 'na mira' ? `a Pinnacle paga ${n2(l.pinnacle_odd)}: entra se a casa pagar ≥ ${n2(l.odd_min)}` : l.why_not.join('; ');
+  return `<span class="tag ${c}" title="${esc(tip)}">${t}</span>${l.contra ? ' <span class="tag mid" title="a nossa chance está 5 pp ou mais acima da Pinnacle">contra a Pinnacle</span>' : ''}`; };
+const diffTxt = l => (l.diff_pp == null ? '—' : `<span class="${l.diff_pp >= 5 ? 'pos' : l.diff_pp <= -5 ? 'neg' : 'muted'}">${signed(Math.round(l.diff_pp))} pp</span>`);
+const scenHead = '<th>Linha</th><th>Status</th><th>Nossa</th><th>Pinnacle</th><th>Diferença</th><th>De onde vem</th><th>Mínima</th><th>Entrada</th>';
+const scenCells = l => `<td>${esc(SHORT[l.market] || l.market)}: <b>${esc(l.line)}</b></td><td>${scenTag(l)}</td><td><b>${pct(l.p_nossa)}</b></td>
+  <td>${l.pinnacle_odd ? `${n2(l.pinnacle_odd)} <span class="muted">· ${pct(l.p_pinnacle)}</span>` : '—'}</td><td>${diffTxt(l)}</td><td class="muted small">${esc(l.why)}</td>
+  <td><b>${n2(l.odd_min)}</b></td><td class="muted">${(l.bet || l.conditional) && l.entry_brl ? `R$ ${l.entry_brl} · ${l.politica_e}` : '—'}</td>`;
 const prof = (p, n) => (p?.n ? `${esc(n)} ${esc(p.how)}: ${p.w}V ${p.d}E ${p.l}D, ${nb(p.gf.toFixed(1))}–${nb(p.ga.toFixed(1))}, ${signed(nb(p.resid.toFixed(1)))} além do esperado` : `${esc(n)}: sem jogos no cenário`);
 const scenShort = g => { const c = g.context?.scenario; return c ? `${prof(c.home, g.fx.home.name)} · ${prof(c.away, g.fx.away.name)}` : '—'; };
 // ➕ no começo de cada linha (a tabela rola para a direita no celular e na tela estreita): cheio quando é aposta pelo
@@ -121,7 +128,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     $('#scanSpec').hidden = !scan?.games.length;
     if (!scan) { out.innerHTML = ''; return; }
     const top = scan.top || 20, live = market === LIVE_1H, combos = market === COMBOS, cen = market === CENARIO;
-    const ok = scan.v >= (cen ? 9 : combos ? 8 : 7);
+    const ok = scan.v >= (cen ? 10 : combos ? 8 : 7);
     ranked = ok ? pickGames(scan.games, { market, top, order }) : [];
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const chips = FILTERS.map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
@@ -141,29 +148,32 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
           <td>${liveCell(p, 0, 0, 3.5)}</td><td>${liveCell(p, 0, 5, 3.5)}</td><td>${liveCell(p, 0, 10, 3.5)}</td><td>${liveCell(p, 1, 10, 3.5)}</td></tr>`;
       }
       if (combos) return `<tr ${go} class="${isBet(line) ? '' : 'weak'}">${game}${comboCells(line)}</tr>`;
-      if (cen) return `<tr ${go} class="${line.bet ? '' : 'weak'}">${game}${scenCells(line)}<td class="muted small">${scenShort(g)}</td></tr>`;
+      if (cen) return `<tr ${go} class="${line.bet ? '' : 'weak'}">${game}${scenCells(line)}<td class="muted small">${line.conditional ? `<b>conferir ${hour(g.fx.t - 30 * 60e3)}</b>: ${esc(line.conditions.join('; '))}` : scenShort(g)}</td></tr>`;
       const gap = priceGap(line);
       return `<tr ${go} class="${isBet(line) ? '' : 'weak'}">${game}<td>${esc(SHORT[line.market] || line.market)}: <b>${esc(line.line)}</b></td>
         <td>${tierTag(line)}${gap ? ` <span class="tag price" title="sem aposta: a odd mínima fica ${gapTxt(line)}; casa soft raramente paga mais de 5% acima">+${gap1(line)}% Pin</span>` : ''}</td>
         <td>${ctxTag(line)}</td><td>${probs(line)}</td><td class="muted">${hits(line)}</td><td>${n2(line.fair_odd_blend)}</td><td><b>${n2(line.odd_min)}</b></td>
         <td class="muted">${line.pinnacle_odd ? n2(line.pinnacle_odd) : '—'}</td><td>${valueTxt(line)}</td></tr>`;
     }).join('');
-    const head = cen ? `<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th>${scenHead}<th>Leitura dos dois times</th></tr>` : combos ? `<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th>${comboHead}</tr>` : live
+    const head = cen ? `<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th>${scenHead}<th>Leitura dos dois times / o que conferir</th></tr>` : combos ? `<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th>${comboHead}</tr>` : live
       ? '<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Esperado 1T</th><th>+3,5 no 0\'</th><th>5\' sem esc.</th><th>10\' sem esc.</th><th>10\' com 1</th></tr>'
       : '<tr><th>#</th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Linha</th><th>Nível</th><th>Contexto</th><th>Chance · Pinnacle</th><th>Últ. 10 (casa · fora)</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th><th>Valor</th></tr>';
     const cards = ranked.map(({ g, line }, i) => card(g, line, i)).join('');
     const skipped = scan.skipped.length ? `<details class="skipped"><summary>${scan.skipped.length} jogos com odds que ficaram de fora</summary><ul>
       ${scan.skipped.map(s => `<li>${hour(s.fx.t)} ${esc(s.fx.home.name)} x ${esc(s.fx.away.name)} <span class="muted">(${esc(s.fx.league.name)}): ${esc(s.why)}</span></li>`).join('')}</ul></details>` : '';
     const nBet = live ? 0 : cen ? ranked.filter(x => x.line.bet).length : ranked.filter(x => isBet(x.line)).length;
-    const old = ok ? '' : cen ? '<p class="msg">Varredura feita antes da leitura de cenário: toque em Varrer jogos de novo.</p>' : combos ? '<p class="msg">Varredura feita antes dos combos: toque em Varrer jogos de novo.</p>'
+    const nCond = cen ? ranked.filter(x => x.line.conditional).length : 0;
+    const old = ok ? '' : cen ? '<p class="msg">Varredura feita antes da "nossa análise primeiro": toque em Varrer jogos de novo.</p>' : combos ? '<p class="msg">Varredura feita antes dos combos: toque em Varrer jogos de novo.</p>'
       : '<p class="msg">Varredura feita antes da regra "só over" (com chutes e 1X2, e o Melhor do jogo sem escanteios): toque em Varrer jogos de novo.</p>';
     const explain = cen
-      ? `<p class="muted"><b>${nBet} ${nBet === 1 ? 'jogo com aposta de cenário' : 'jogos com aposta de cenário'}</b>. Cada time é comparado com os jogos de
-        <b>mesmas características</b> do de hoje — mesmo mando e mesmo papel (favorito forte, favorito, equilibrado, zebra, zebra forte, pela superioridade
-        esperada antes de cada jogo) — e não com a média da temporada: o favorito que goleia quando é favorito em casa, a zebra que desaba quando é zebra fora.
-        O saldo e os gols além do esperado nesses jogos corrigem o que a Pinnacle precifica (com peso pela amostra), e a tabela (motivação) e o clássico
-        entram na leitura. <b>Aposta de cenário</b>: odd da Pinnacle de 1,80 a 2,70, chance pelo cenário ≥ 45%, a Pinnacle pagando pelo menos 5% acima do
-        justo pelo cenário, amostra nos dois times e os dois cenários apontando para o mesmo lado. Só over nos gols. Entre com odd ≥ a mínima.</p>`
+      ? `<p class="muted"><b>${nBet} ${nBet === 1 ? 'aposta para entrar já' : 'apostas para entrar já'}</b>${nCond ? ` · <b>${nCond} "entrar se…"</b> (conferir perto do jogo)` : ''}.
+        A chance é a <b>nossa</b>: o modelo de forças da base, corrigido da compressão (o modelo via favorito e zebra mais perto do que são), mais o cenário —
+        cada time contra adversários do <b>mesmo nível</b> do de hoje e no mesmo mando, com o saldo e os gols além do esperado (peso pela amostra) —, a tabela
+        (motivação) e o clássico. A <b>Pinnacle</b> vem ao lado, como segunda opinião: <b>diferença</b> = nossa − Pinnacle e <b>de onde vem</b> (modelo e
+        cenário). <b>Aposta</b>: nossa chance ≥ 45%, odd mínima (nossa justa × 1,05) até 2,70 e a Pinnacle pagando a mínima com odd de 1,80 a 2,70.
+        <b>Entrar se…</b>: passaria, mas depende de algo que só se confirma perto do jogo (escalação de base, copa, dúvida, ou a nossa leitura 12 pp ou mais
+        longe da Pinnacle) — confira 30 min antes. <b>Contra a Pinnacle</b>: a nossa chance 5 pp ou mais acima da dela; fica marcada no app de apostas para
+        medirmos. Só over nos gols.</p>${planList()}`
       : combos
       ? `<p class="muted"><b>${nBet} ${nBet === 1 ? 'jogo com combo para apostar' : 'jogos com combo para apostar'}</b>. Combo = duas pernas no mesmo jogo ("criar aposta"):
         um resultado (vitória, dupla chance, empate anula ou handicap ±1,5) + over de gols. A chance sai da matriz de placares da Pinnacle (1X2 e total de
@@ -185,7 +195,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       <div class="chips" id="scanChips">${chips}</div>
       <div class="chips" id="scanOrder"><span class="muted">Ordem:</span>${orders}</div>
       ${ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`
-        : ok ? `<p class="muted">${cen ? 'Nenhum jogo com aposta de cenário (odd da Pinnacle 1,80–2,70 com valor de 5% pelo cenário, amostra e os dois cenários de acordo). A leitura de cenário de cada jogo está nos cartões das outras abas.' : combos ? 'Nenhum combo com chance ≥ 60% e odd mínima 1,50–3,00 nos jogos analisados.' : live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
+        : ok ? `<p class="muted">${cen ? 'Nenhum jogo com aposta ou "entrar se…" pela nossa análise (nossa chance ≥ 45% com a Pinnacle pagando a mínima, odd 1,80–2,70). A nossa leitura de cada jogo está nos cartões das outras abas, com as linhas "na mira".' : combos ? 'Nenhum combo com chance ≥ 60% e odd mínima 1,50–3,00 nos jogos analisados.' : live ? 'Nenhum jogo com plano ao vivo do 1º tempo (sem estatística de escanteios).'
           : 'Nenhum jogo com linha principal jogável (chance ≥ 60%, odd mínima 1,50–3,00) neste filtro.'}</p>` : ''}
       ${skipped}${cards}`;
     bindTooltips(out);
@@ -194,9 +204,10 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
 
   function card(g, line, i) {
     const top = (line && !line.combo && !line.scenario ? line : null) || bestLine(g.lines), p = g.pinnacle_1h, e = g.expected_1h;
-    const sb = market === CENARIO && g.scenario?.find(l => l.bet);
+    const sb = market === CENARIO && (g.scenario?.find(l => l.bet) || g.scenario?.find(l => l.conditional));
     const facts = [
-      sb ? `<b>aposta de cenário</b>: ${esc(SHORT[sb.market])} ${esc(sb.line)} — Pinnacle ${n2(sb.pinnacle_odd)} (${pct(sb.p_pinnacle)}), pelo cenário ${pct(sb.p_scenario)}, procure odd ≥ ${n2(sb.odd_min)}` : '',
+      sb ? `<b>${sb.bet ? 'aposta' : 'entrar se…'} (nossa análise)</b>: ${esc(SHORT[sb.market])} ${esc(sb.line)} — nossa ${pct(sb.p_nossa)}, Pinnacle ${n2(sb.pinnacle_odd)} (${pct(sb.p_pinnacle)}), procure odd ≥ ${n2(sb.odd_min)}`
+        + `${sb.conditional ? ` · conferir às ${hour(g.fx.t - 30 * 60e3)}: ${esc(sb.conditions.join('; '))}` : ''}` : '',
       g.hard ? `<b>⚠️ jogo difícil de analisar</b> (${esc(g.hard.reasons.join('; '))}): só over de gols com a odd da Pinnacle, com metade da entrada` : '',
       !top ? '<b>sem linha principal jogável</b> (odd mínima 1,50–3,00)'
         : isBet(top) ? `<b>${sb ? 'consistência (odd baixa)' : 'aposta'}</b>: ${esc(SHORT[top.market])} ${esc(top.line)} acerta ${pct(top.p_blend)} (Pinnacle ${top.p_pinnacle != null ? pct(top.p_pinnacle) : '—'}), procure odd ≥ ${n2(top.odd_min)}`
@@ -238,17 +249,60 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     </article>`;
   }
 
-  // Leitura de cenário do jogo: as linhas da Pinnacle pelo cenário (aberta na aba Cenário) e os jogos de cada time
+  // Para confirmar: as entradas "entrar se…" de todos os jogos, na ordem da hora de conferir (30 min antes), com o botão
+  // que busca a escalação (a API publica 20 a 40 min antes) e a linha atual da Pinnacle
+  function planList() {
+    const items = scan.games.flatMap(g => (g.scenario || []).filter(l => l.conditional).slice(0, 1).map(l => ({ g, l })))
+      .filter(x => !started(x.g)).sort((a, b) => a.g.fx.t - b.g.fx.t);
+    if (!items.length) return '';
+    return `<div class="plan"><h4>⏰ Para confirmar (${items.length})</h4><ul>${items.map(({ g, l }) => `<li>
+      <b>${hour(g.fx.t - 30 * 60e3)}</b> · ${esc(g.fx.home.name)} x ${esc(g.fx.away.name)} (${hour(g.fx.t)}) — ${esc(SHORT[l.market] || l.market)}: <b>${esc(l.line)}</b>,
+      odd ≥ ${n2(l.odd_min)} · <span class="muted">${esc(l.conditions.join('; '))}</span>
+      <button class="ghost mini" data-check="${g.fx.id}">Conferir agora</button><div class="chk" id="chk-${g.fx.id}"></div></li>`).join('')}</ul></div>`;
+  }
+
+  // Conferir um jogo: escalação dos dois times (com as dúvidas da API escaladas ou não) e a linha da Pinnacle agora
+  // contra a da varredura (caiu = o mercado veio para o nosso lado)
+  async function checkFixture(fxId, btn) {
+    const g = scan.games.find(x => x.fx.id === fxId), el = $(`#chk-${fxId}`);
+    if (!g || !el) return;
+    btn.disabled = true; el.textContent = 'Conferindo escalação e linha da Pinnacle…';
+    const [lu, od] = await Promise.all([api.lineups(fxId).catch(e => ({ error: e.message })), api.fixtureOdds(fxId).catch(() => null)]);
+    const out = [];
+    if (lu?.error) out.push(`escalação: erro da API (${esc(lu.error)})`);
+    else if (!lu?.length) out.push('escalação ainda não saiu (a API publica 20 a 40 min antes do jogo) — confira de novo mais perto');
+    else {
+      const doubt = (g.injuries || []).filter(i => i.type === 'Questionable');
+      for (const t of lu) {
+        const d = doubt.filter(i => i.team === t.team).map(i => `${esc(i.player)} ${t.start.includes(i.player) ? '<b class="pos">escalado</b>' : '<b class="neg">fora</b>'}`);
+        out.push(`<b>${esc(t.name)}</b>${t.formation ? ` (${esc(t.formation)})` : ''}: ${t.start.map(esc).join(', ')}${d.length ? ` · dúvidas: ${d.join(', ')}` : ''}`);
+      }
+    }
+    if (od?.bookmakers?.length) {
+      const now = collect(od.bookmakers).odds;
+      for (const l of (g.scenario || []).filter(x => x.conditional || x.bet)) {
+        const v = now.get(l.id);
+        if (!v || !l.pinnacle_odd) continue;
+        const mv = v < l.pinnacle_odd - 0.005 ? '<b class="pos">caiu: o mercado veio para o nosso lado</b>' : v > l.pinnacle_odd + 0.005 ? '<b class="neg">subiu: o mercado foi contra</b>' : 'parada';
+        out.push(`Pinnacle ${esc(l.line)}: ${n2(l.pinnacle_odd)} → <b>${n2(v)}</b> (${mv})${v >= l.odd_min ? '' : ` · <span class="neg">abaixo da nossa mínima ${n2(l.odd_min)}</span>`}`);
+      }
+    }
+    el.innerHTML = out.map(x => `<div>${x}</div>`).join('') || 'Sem dados novos.';
+    btn.disabled = false;
+  }
+
+  // Nossa análise do jogo: a nossa leitura (modelo corrigido + cenário), a Pinnacle ao lado e as linhas com o status
   function scenarioBlock(g) {
     const c = g.context?.scenario;
     if (!c || !g.scenario?.length) return '';
-    const rows = g.scenario.map(l => `<tr class="${l.bet ? '' : 'weak'}"><td>${enterBtn(l, l.bet)}</td>${scenCells(l)}
-      <td class="muted small">${l.bet ? '' : esc(l.why_not.join('; '))}</td></tr>`).join('');
+    const rows = g.scenario.map(l => `<tr class="${l.bet || l.conditional ? '' : 'weak'}"><td>${enterBtn(l, l.bet || l.conditional)}</td>${scenCells(l)}
+      <td class="muted small">${l.conditional ? esc(l.conditions.join('; ')) : l.status === 'na mira' ? `entra se a casa pagar ≥ ${n2(l.odd_min)}` : l.bet ? '' : esc(l.why_not.join('; '))}</td></tr>`).join('');
     const games = (p, n) => (p?.games?.length ? `<li><b>${esc(n)} ${esc(p.how)}</b>${p.relaxed ? ` <span class="muted">(${esc(p.relaxed)})</span>` : ''}: ${p.games.map(esc).join(' · ')}</li>` : '');
-    const best = g.scenario.find(l => l.bet);
-    return `<details class="combos"${market === CENARIO ? ' open' : ''}><summary>🎯 Leitura de cenário${best ? `: <b>${esc(SHORT[best.market])} ${esc(best.line)}</b> a partir de ${n2(best.odd_min)}` : ' (sem aposta)'}</summary>
-      <p class="muted">Papel de hoje: ${esc(g.fx.home.name)} ${esc(c.band.home)} · ${esc(g.fx.away.name)} ${esc(c.band.away)} (superioridade ${c.market.source === 'pinnacle' ? 'da Pinnacle' : 'do modelo'}: ${signed(nb(c.market.sup.toFixed(2)))}).
-        Correção pelo cenário: ${signed(nb(c.adj_sup.toFixed(2)))} gol no saldo do mandante, ${signed(nb(c.adj_total.toFixed(2)))} no total${c.agree ? '' : ' — os dois cenários discordam'}${c.enough ? '' : ' — amostra curta'}.</p>
+    const best = g.scenario.find(l => l.bet) || g.scenario.find(l => l.conditional);
+    const read = (g.context.text || []).find(t => t.startsWith('Nossa leitura'));
+    const inj = g.injuries?.length ? `<p class="muted small">Desfalques e dúvidas (API): ${g.injuries.slice(0, 8).map(i => `${esc(i.player)} (${esc(i.team === g.fx.home.id ? g.fx.home.name : g.fx.away.name)}, ${esc(i.type === 'Questionable' ? 'dúvida' : i.reason || i.type)})`).join(' · ')}</p>` : '';
+    return `<details class="combos"${market === CENARIO ? ' open' : ''}><summary>🎯 Nossa análise${best ? `: <b>${esc(SHORT[best.market])} ${esc(best.line)}</b> a partir de ${n2(best.odd_min)}${best.conditional ? ' (entrar se…)' : ''}` : ' (sem aposta)'}</summary>
+      <p class="muted">${esc(read || '')} Nível na base: ${esc(g.fx.home.name)} ${esc(c.level?.home || '—')}, ${esc(g.fx.away.name)} ${esc(c.level?.away || '—')}.</p>${inj}
       <ul class="ctx">${games(c.home, g.fx.home.name)}${games(c.away, g.fx.away.name)}</ul>
       <div class="scroll"><table class="mainlines"><tr><th></th>${scenHead}<th></th></tr>${rows}</table></div></details>`;
   }
@@ -265,6 +319,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   }
 
   $('#scanOut').addEventListener('click', e => {
+    const ck = e.target.closest('[data-check]');
+    if (ck) { checkFixture(Number(ck.dataset.check), ck); return; }
     const m = e.target.closest('#scanChips button');
     if (m) { market = m.dataset.m || null; render(); return; }
     const o = e.target.closest('#scanOrder button');
@@ -296,6 +352,17 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     if (await analyzeFixture(fx, national)) $('#out').scrollIntoView({ block: 'start' });
     btn.disabled = false;
   }
+
+  // Com a página aberta e a aba Nossa análise na tela: de 40 min antes do jogo até o início, cada "entrar se…" é
+  // conferido sozinho a cada 5 min (escalação e linha da Pinnacle). Sem aviso com a página fechada.
+  const lastCheck = new Map();
+  setInterval(() => {
+    if (document.hidden || !scan || market !== CENARIO) return;
+    for (const btn of document.querySelectorAll('#scanOut [data-check]')) {
+      const id = Number(btn.dataset.check), g = scan.games.find(x => x.fx.id === id), now = Date.now();
+      if (g && now >= g.fx.t - 40 * 60e3 && now < g.fx.t && now - (lastCheck.get(id) || 0) > 5 * 60e3) { lastCheck.set(id, now); checkFixture(id, btn); }
+    }
+  }, 60e3);
 
   bindSpecialist($('#scanSpec'), () => scan && briefScan(scan, ranked, { market, order }));
   showSaved();

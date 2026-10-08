@@ -144,6 +144,12 @@ export function makeClient({ get: rawGet, load, save }) {
       return { updatedAt: r?.update || null, fetchedAt: Date.now(), bookmakers: r?.bookmakers || [] };
     },
 
+    // Escalação (a API publica 20 a 40 min antes do jogo). Sem cache: quem chama quer saber se já saiu.
+    lineups: async fixtureId => (await get('/fixtures/lineups', { fixture: fixtureId })).map(r => ({
+      team: r.team.id, name: r.team.name, formation: r.formation || null, coach: r.coach?.name || null,
+      start: (r.startXI || []).map(x => x.player?.name).filter(Boolean), bench: (r.substitutes || []).map(x => x.player?.name).filter(Boolean),
+    })),
+
     injuries: fixtureId => cached(`af:inj:${fixtureId}`, 3 * HOUR, async () =>
       (await get('/injuries', { fixture: fixtureId })).map(r => ({
         team: r.team.id, player: r.player.name, type: r.player.type, reason: r.player.reason,

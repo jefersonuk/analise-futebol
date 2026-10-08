@@ -280,7 +280,8 @@ const resplit = (p, d) => {
 
 // share1hBelow: abaixo dessa cobertura de escanteios do 1º tempo, o 1º tempo sai dos escanteios do jogo
 // × fração do 1º tempo (a varredura do dia usa 0,5; a análise de um jogo, só quando não há ajuste).
-// favor: calibração favoritismo → escanteios da base (favoritism.js, { corners, corners1h }).
+// favor: calibração da base (favoritism.js): escanteios por gol de superioridade e a correção da compressão do
+// modelo de gols (favor.goals: saldo × slope + intercept, total × ratio), aplicada antes de tudo.
 export function analyzeMatch(matches, home, away, refTime, { fair = null, share1hBelow = 0, favor = null } = {}) {
   const prep = prepare(matches, refTime);
   const fits = {}, pred = {}, phi = { goals: 1 }, anchors = {};
@@ -293,6 +294,15 @@ export function analyzeMatch(matches, home, away, refTime, { fair = null, share1
       if (k === 'corners1h') phi.corners1hDiff = r.diff;
       if (k === 'corners') phi.cornersDiff = r.diff;
     }
+  }
+  // Correção da compressão do modelo de gols na base (favoritism.js goalsCalibration): o saldo esticado e o total
+  // reescalado como os jogos passados mostram. Guardada em anchors.goals_cal.
+  const gc = favor?.goals;
+  if (pred.goals && gc && (gc.slope !== 1 || gc.intercept || gc.ratio !== 1)) {
+    const g = pred.goals, s0 = g.h - g.a, T0 = g.h + g.a, s1 = gc.intercept + gc.slope * s0, T1 = T0 * gc.ratio;
+    const sc = Math.max(-(T1 - 0.2), Math.min(T1 - 0.2, s1));
+    pred.goals = { ...g, h: (T1 + sc) / 2, a: (T1 - sc) / 2 };
+    anchors.goals_cal = { ...gc, sup_before: s0, sup_after: sc, total_before: T0, total_after: T1 };
   }
   // Favoritismo e divisão dos escanteios. Quem deve ter mais escanteios vem do mercado, como o total:
   // 1º o handicap de escanteios da Pinnacle (56), 2º os escanteios por time dela (57/58), 3º o favoritismo

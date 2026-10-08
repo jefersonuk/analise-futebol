@@ -15,7 +15,7 @@
 import { recentGames } from './insights.js';
 import { history } from './dashboard.js';
 import { impliedTotal } from './model.js';
-import { buildScenario, scenarioSignal, scenarioText } from './scenario.js';
+import { buildScenario, scenarioSignal, scenarioText, strengthLevels } from './scenario.js';
 
 const DAY = 864e5;
 export const H2H_YEARS = 5;   // confronto mais antigo que isso não entra: elencos e técnicos já são outros
@@ -126,11 +126,12 @@ export function buildContext({ rows, fx, table = [], extra = [], res, fair = nul
     h2h: { n: h.length, years: H2H_YEARS, home_record: { w: h.filter(g => g.gf > g.ga).length, d: h.filter(g => g.gf === g.ga).length,
       l: h.filter(g => g.gf < g.ga).length }, profile: profile(h), games: h.map(g => h2hRow(g, H.name)) },
   };
-  // cenário: o saldo e o total que a Pinnacle precifica (sem ela, o modelo), corrigidos pelos jogos de mesmas características
+  // nossa leitura (scenario.js): o nosso modelo (já corrigido da compressão) + o cenário pelos jogos contra adversários do
+  // mesmo nível; a Pinnacle (saldo do 1X2 e total dela) só como comparação
   const pin = fair?.size ? impliedTotal(fair, 'g', 1)?.implied_total : null, g = res.pred?.goals;
-  const market = res.favor?.sup != null && (pin || g) ? { s: res.favor.sup, T: pin || g.h + g.a,
-    source: res.favor.source === 'pinnacle_1x2' && pin ? 'pinnacle' : 'modelo' } : null;
-  ctx.scenario = buildScenario({ rows, fx, market, table: ctx.table, derby });
+  const market = pin && res.favor?.source === 'pinnacle_1x2' ? { s: res.favor.sup, T: pin } : null;
+  ctx.scenario = g ? buildScenario({ rows, fx, base: { s: g.h - g.a, T: g.h + g.a }, market, levels: strengthLevels(res.fits?.goals),
+    cal: res.anchors?.goals_cal || null, table: ctx.table, derby }) : null;
   ctx.text = contextText(ctx, names);
   return { ctx, games, names };
 }

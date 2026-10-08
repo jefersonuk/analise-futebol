@@ -59,6 +59,9 @@ export function buildEntry({ line, fx, casa, currency, odd, stake, stakeNat = nu
       ...(line.manual ? { manual: true } : {}),
       // aposta de cenário: a chance é a do cenário; a Pinnacle cota a linha (o CLV é medido contra ela)
       ...(line.scenario ? { scenario: true, p_scenario: line.p_scenario, ev_pinnacle: line.ev_pinnacle } : {}),
+      // nossa análise: a nossa chance (modelo corrigido + cenário) contra a Pinnacle — "contra a Pinnacle" medida à parte
+      ...(line.ours ? { ours: true, contra_pinnacle: !!line.contra, diff_pp: line.diff_pp, p_model_cal: line.p_model_cal, status: line.status,
+        conditions: line.conditions?.length ? line.conditions : undefined } : {}),
     },
   };
 }

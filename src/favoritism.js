@@ -96,6 +96,25 @@ export function calibrate(matches, pre = preMatch(matches)) {
   return { n: rows.length, corners: relation(rows, 'd'), corners1h: relation(rows, 'd1'), bins, cornersPerGoal };
 }
 
+// Compressão do modelo de gols (lição de 08/10/2026: nas apostas, o modelo deu Zamalek +1 a 89% contra 36% da
+// Pinnacle e perdeu 0–3). Forças encolhidas por pseudo-jogos e 70% xG-proxy deixam favorito e azarão mais perto do
+// que são. Medida na própria base, fora da amostra (a superioridade de cada jogo sai só dos jogos anteriores):
+//   saldo real ≈ a + b · saldo esperado      (b > 1: o modelo encolhe a diferença)
+//   total real ≈ r · total esperado
+// a, b e r encolhidos para "sem correção" com GOALS_N0 jogos de peso, e com teto. analyzeMatch aplica na previsão.
+export const GOALS_N0 = 400;
+const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+export function goalsCalibration(matches, pre) {
+  const rows = matches.filter(m => m.hg != null && pre.has(m.id)).map(m => ({ sup: pre.get(m.id).sup, xt: pre.get(m.id).xt, gd: m.hg - m.ag, tot: m.hg + m.ag }));
+  if (rows.length < 100) return null;
+  const s = ols(rows.map(r => [r.sup]), rows.map(r => r.gd));
+  if (!s) return null;
+  const n = rows.length, w = n / (n + GOALS_N0);
+  const xt = rows.reduce((t, r) => t + r.xt, 0), tot = rows.reduce((t, r) => t + r.tot, 0);
+  return { n, raw_slope: r3(s[1]), raw_intercept: r3(s[0]), raw_ratio: r3(tot / xt),
+    slope: r3(clamp(1 + (s[1] - 1) * w, 0.8, 1.6)), intercept: r3(clamp(s[0] * w, -0.3, 0.3)), ratio: r3(clamp(1 + (tot / xt - 1) * w, 0.85, 1.2)) };
+}
+
 // Diferença de escanteios (mandante − visitante) esperada no jogo de hoje com o favoritismo do mercado.
 export const cornerDiff = (rel, dc, sup) => (rel?.useful ? rel.coef[0] + rel.coef[1] * dc + rel.coef[2] * sup : null);
 
@@ -108,7 +127,7 @@ export function favorFor(matches) {
   if (memo.has(key)) return memo.get(key);
   const pre = preMatch(matches), cal = calibrate(matches, pre);
   const out = { matches: matches.map(m => (pre.has(m.id) ? { ...m, sup: pre.get(m.id).sup, xt: pre.get(m.id).xt } : m)),
-    cal: { n: cal.n, cornersPerGoal: cal.cornersPerGoal } };
+    cal: { n: cal.n, cornersPerGoal: cal.cornersPerGoal, goals: goalsCalibration(matches, pre) } };
   if (memo.size > 40) memo.delete(memo.keys().next().value);
   memo.set(key, out);
   return out;
