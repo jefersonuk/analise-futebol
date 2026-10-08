@@ -129,3 +129,29 @@ test('análise completa: o dossiê traz as linhas da nossa análise', async () =
   assert.ok(d.context.scenario?.base);
   assert.ok(d.scenario_lines.every(l => l.ours && !l.history && !/^gU/.test(l.id)));
 });
+
+test('reabrir análise guardada antes da nossa análise: refaz a leitura com o modelo atual, sem quebrar', async () => {
+  const { buildDossier, repriceDossier } = await import('../src/dossier.js');
+  const { favorFor } = await import('../src/favoritism.js');
+  const { analyzeMatch } = await import('../src/model.js');
+  const { collect } = await import('../src/odds.js');
+  const { recentGames } = await import('../src/insights.js');
+  const season = new Date().getUTCFullYear();
+  const fv = favorFor(demo.leagueMatches(1, season).concat(demo.leagueMatches(1, season - 1)));
+  const f = demo.upcoming(demo.searchTeams('')[0].id)[0], oddsP = demo.fixtureOdds(f.id);
+  const d = await buildDossier({ ...demo, quota: () => null }, { fx: f, matches: fv.matches, lg: f.league, oddsPayload: oddsP, favor: fv.cal });
+  // o formato da versão anterior: sem o modelo separado do cenário (sc.base), linhas de cenário antigas
+  const old = { ...d, context: { ...d.context, scenario: { band: { home: 'favorito', away: 'zebra' }, home: { n: 6 }, away: { n: 6 }, sup: 0.5, total: 2.6,
+    adj_sup: 0.1, adj_total: 0, derby: 'clássico local (Cairo)' } }, scenario_lines: [{ id: 'gO2.5', scenario: true }] };
+  assert.deepEqual(scenarioLines(old.context.scenario, d.lines_with_pinnacle), []);
+  assert.deepEqual(scenarioText(old.context.scenario, { home: 'A', away: 'B' }), []);
+  assert.equal(scenarioSignal('1', old.context.scenario, 0.5), null);
+  const res = analyzeMatch(fv.matches, f.home.id, f.away.id, f.t, { fair: collect(oddsP.bookmakers).fair, favor: fv.cal });
+  const teams = [['home', f.home], ['away', f.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(res.prep, t.id) }));
+  const again = repriceDossier(old, res, oddsP, teams);
+  assert.ok(again.context.scenario?.base, 'leitura refeita no formato atual');
+  assert.equal(again.context.scenario.derby, 'clássico local (Cairo)', 'o clássico guardado continua');
+  assert.ok(again.context.text.some(t => t.startsWith('Nossa leitura')));
+  assert.deepEqual(again.scenario_lines.map(l => l.id), d.scenario_lines.map(l => l.id));
+  assert.ok(again.scenario_lines.every(l => l.ours && l.status));
+});

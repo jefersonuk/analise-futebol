@@ -12,7 +12,7 @@ import { history } from './dashboard.js';
 import { GOAL_HANDICAP, MAIN_LINES, ODD_FLOOR, SHOTS, consistency, isMain, isMainLine, rankScore, rankTier, underOk, valueOf } from './consistency.js';
 import { HALF_FROM } from './client.js';
 import { favorFor } from './favoritism.js';
-import { buildContext, contextGames, lineContext } from './context.js';
+import { buildContext, contextGames, contextText, lineContext, scenarioOf } from './context.js';
 import { livePlanOf } from './live.js';
 import { applyHard, hardGame } from './hard.js';
 import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
@@ -373,17 +373,29 @@ export function repriceDossier(dossier, res, oddsP, teams, banca = 44000) {
   const alerts = (dossier.data_quality?.alerts || []).filter(a => !/^modelo contra o mercado/.test(a));
   const contra = contraAlert(res.favor, { home: fx.home.name, away: fx.away.name });
   if (contra) alerts.push(contra);
-  // contexto guardado (tabela, confronto da API) + os jogos da base para as checagens de cada linha
-  const c = dossier.context, ids = { home: dossier.teams?.home?.id, away: dossier.teams?.away?.id };
-  const context = c && ids.home && ids.away ? { ctx: c, names: { home: fx.home.name, away: fx.away.name },
-    games: contextGames(res.prep.rows, ids.home, ids.away, Date.parse(dossier.fixture.kickoff), c.h2h_extra || []) } : null;
+  // contexto guardado (tabela, confronto da API) + os jogos da base para as checagens de cada linha; a nossa leitura é
+  // refeita com o modelo atual (a guardada pode ser de antes da correção do modelo, num formato que não serve mais)
+  const ids = { home: dossier.teams?.home?.id, away: dossier.teams?.away?.id }, names = { home: fx.home.name, away: fx.away.name };
+  const kick = Date.parse(dossier.fixture.kickoff);
+  let c = dossier.context;
+  if (c && ids.home && ids.away) {
+    const sfx = { home: { id: ids.home, name: names.home }, away: { id: ids.away, name: names.away }, t: kick };
+    c = { ...c, scenario: scenarioOf({ rows: res.prep.rows, fx: sfx, res, fair, table: c.table, derby: c.scenario?.derby ?? null }) };
+    c.text = contextText(c, names);
+  }
+  const context = c && ids.home && ids.away ? { ctx: c, names, games: contextGames(res.prep.rows, ids.home, ids.away, kick, c.h2h_extra || []) } : null;
   // jogo difícil: o guardado; análise de antes da regra recalcula pela base
   const hard = dossier.hard_game !== undefined ? dossier.hard_game : ids.home && ids.away ? hardGame({ rows: res.prep.rows,
     fx: { home: { id: ids.home, name: fx.home.name }, away: { id: ids.away, name: fx.away.name }, league: { name: dossier.fixture.competition } } }) : null;
   if (hard && !alerts.some(a => a.startsWith('jogo difícil'))) alerts.push(`jogo difícil de analisar (${hard.reasons.join('; ')}): só over de gols com a odd da Pinnacle, com metade da entrada`);
   const { priced, anchored, modelOnly } = priceLines(res, { odds, fair, alerts, teams, banca, context, hard });
-  const scen = c?.scenario ? scenarioLines(c.scenario, priced.filter(l => SCEN_MARKETS.includes(l.market)), { banca, hard }).slice(0, 6) : [];
-  return { ...dossier, data_quality: { ...dossier.data_quality, alerts }, lines_with_pinnacle: priced, lines_anchored: anchored, scenario_lines: scen,
+  // condições do "entrar se…": copa/base e as dúvidas guardadas no dossiê ("Fulano (Questionable: motivo)")
+  const inj = side => (dossier.teams?.[side]?.injuries || []).map(x => x.match(/^(.*) \((.*?): (.*)\)$/))
+    .filter(Boolean).map(([, player, type, reason]) => ({ team: ids[side], player, type, reason }));
+  const conditions = conditionsOf({ fx: { home: { id: ids.home, name: names.home }, away: { id: ids.away, name: names.away },
+    league: { name: dossier.fixture.competition || '' } }, hard, injuries: [...inj('home'), ...inj('away')] });
+  const scen = scenarioLines(c?.scenario, priced.filter(l => SCEN_MARKETS.includes(l.market)), { banca, hard, conditions }).slice(0, 6);
+  return { ...dossier, context: c, data_quality: { ...dossier.data_quality, alerts }, lines_with_pinnacle: priced, lines_anchored: anchored, scenario_lines: scen,
     hard_game: hard, live_1h: hard ? null : livePlanOf(res),
     model_only_lines: modelOnly, ...pickCandidates(priced, anchored),
     favoritism: res.favor && { summary: favorSummary(res.favor, { home: fx.home.name, away: fx.away.name }), ...res.favor } };

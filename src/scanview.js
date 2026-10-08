@@ -13,6 +13,7 @@ import { isBet, isCandidate } from './dossier.js';
 import { contextLine } from './context.js';
 import { bindLive, renderLive } from './liveview.js';
 import { collect } from './odds.js';
+import { isScenario } from './scenario.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -294,7 +295,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   // Nossa análise do jogo: a nossa leitura (modelo corrigido + cenário), a Pinnacle ao lado e as linhas com o status
   function scenarioBlock(g) {
     const c = g.context?.scenario;
-    if (!c || !g.scenario?.length) return '';
+    if (!isScenario(c) || !g.scenario?.length) return '';   // varredura de antes da nossa análise: sem o bloco
     const rows = g.scenario.map(l => `<tr class="${l.bet || l.conditional ? '' : 'weak'}"><td>${enterBtn(l, l.bet || l.conditional)}</td>${scenCells(l)}
       <td class="muted small">${l.conditional ? esc(l.conditions.join('; ')) : l.status === 'na mira' ? `entra se a casa pagar ≥ ${n2(l.odd_min)}` : l.bet ? '' : esc(l.why_not.join('; '))}</td></tr>`).join('');
     const games = (p, n) => (p?.games?.length ? `<li><b>${esc(n)} ${esc(p.how)}</b>${p.relaxed ? ` <span class="muted">(${esc(p.relaxed)})</span>` : ''}: ${p.games.map(esc).join(' · ')}</li>` : '');

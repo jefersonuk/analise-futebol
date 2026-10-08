@@ -141,8 +141,10 @@ function probAt(id, T, s0) {
   return null;
 }
 // A nossa chance de uma linha (modelo corrigido + cenário) e a do modelo sozinho (sem o cenário).
-export const scenarioProb = (id, sc) => (sc ? probAt(id, sc.total, sc.sup) : null);
-export const modelProb = (id, sc) => (sc ? probAt(id, sc.base.total, sc.base.sup) : null);
+// Leitura no formato atual (análises guardadas antes da nossa análise não têm o modelo separado do cenário).
+export const isScenario = sc => sc?.base?.total != null && sc.total != null;
+export const scenarioProb = (id, sc) => (isScenario(sc) ? probAt(id, sc.total, sc.sup) : null);
+export const modelProb = (id, sc) => (isScenario(sc) ? probAt(id, sc.base.total, sc.base.sup) : null);
 // Quanto o cenário move a linha sobre o nosso modelo.
 export function scenarioDelta(id, sc) {
   const a = scenarioProb(id, sc), b = modelProb(id, sc);
@@ -167,7 +169,7 @@ const unmeasured = hard => hard?.reasons?.some(r => /entre times das duas ligas/
 // p_pinnacle); conditions: conditionsOf; hard: jogo difícil (hard.js). Cada linha: a nossa chance, a do modelo
 // sem o cenário, a da Pinnacle, a diferença, a odd mínima e o status (aposta, entrar se…, na mira, sem aposta).
 export function scenarioLines(sc, lines, { banca = 44000, hard = null, conditions = [] } = {}) {
-  if (!sc) return [];
+  if (!isScenario(sc)) return [];
   const out = [];
   for (const l of lines) {
     if (/^(gU|g1)/.test(l.id)) continue;   // só over, e só gols do jogo
@@ -220,7 +222,7 @@ export function scenarioSignal(id, sc, p) {
 
 // Frases da nossa leitura para o contexto do jogo.
 export function scenarioText(sc, names) {
-  if (!sc || (!sc.home.n && !sc.away.n)) return [];
+  if (!isScenario(sc) || (!sc.home?.n && !sc.away?.n)) return [];
   const one = (p, n) => (p.n ? `${n} ${p.how} (${p.n} jogo${p.n > 1 ? 's' : ''}${p.relaxed ? `, ${p.relaxed}` : ''}): ${p.w}V ${p.d}E ${p.l}D, ${n1(p.gf)}–${n1(p.ga)} por jogo, `
     + `venceu por 2+ em ${Math.round(p.win2 * p.n)}, perdeu por 2+ em ${Math.round(p.lose2 * p.n)}, `
     + `${Math.abs(p.resid) < 0.05 ? 'saldo no esperado' : `${sgn1(p.resid)} gol de saldo ${p.resid > 0 ? 'acima' : 'abaixo'} do esperado`}`
