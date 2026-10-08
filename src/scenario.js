@@ -22,6 +22,7 @@
 // Só over nos gols.
 
 import { politicaE, scoreMatrix, settle, stakeFor } from './model.js';
+import { earlyRisk } from './clubs.js';
 
 export const BANDS = ['favorito forte', 'favorito', 'equilibrado', 'zebra', 'zebra forte'];
 export const bandOf = sup => (sup == null ? null : sup >= 1 ? 0 : sup >= 0.35 ? 1 : sup > -0.35 ? 2 : sup > -1 ? 3 : 4);
@@ -152,10 +153,12 @@ export function scenarioDelta(id, sc) {
 }
 
 // Condições do jogo que só se confirmam perto do horário (entrar se…). hard: hard.js; injuries: desfalques da API
-// ({ team, player, type, reason }).
+// ({ team, player, type, reason }); clubs: clubs.js (começo de temporada com mudança de divisão ou de elenco).
 const CUP = /cup|copa|pokal|coupe|coppa|taça|taca|beker|kupa|pucar|trophy|shield|supercopa/i;
-export function conditionsOf({ fx, hard = null, injuries = [] }) {
+export function conditionsOf({ fx, hard = null, injuries = [], clubs = null }) {
   const out = [];
+  const early = earlyRisk(clubs, { home: fx.home.name, away: fx.away.name });
+  if (early.length) out.push(`começo de temporada com mudança grande (${early.join('; ')}): a força de hoje ainda não está nos dados — conferir escalação e notícias`);
   if (hard?.reasons?.some(r => /base, reservas|competição de base/.test(r))) out.push('time de base/B: o elenco muda toda semana — confirmar a escalação');
   if (CUP.test(fx.league?.name || '') || fx.league?.type === 'Cup') out.push('copa: risco de rodízio — confirmar a escalação');
   const doubt = injuries.filter(i => /question|doubt|dúvida/i.test(`${i.type} ${i.reason}`));

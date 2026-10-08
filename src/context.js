@@ -16,6 +16,7 @@ import { recentGames } from './insights.js';
 import { history } from './dashboard.js';
 import { impliedTotal } from './model.js';
 import { buildScenario, scenarioSignal, scenarioText, strengthLevels } from './scenario.js';
+import { clubsText } from './clubs.js';
 
 const DAY = 864e5;
 export const H2H_YEARS = 5;   // confronto mais antigo que isso não entra: elencos e técnicos já são outros
@@ -111,15 +112,16 @@ function h2hRow(g, home) {
 }
 
 // Contexto do jogo. rows: jogos da base antes do jogo (prep.rows); table: api.standings; extra: api.headToHead;
-// res: analyzeMatch; fair: Pinnacle sem margem; derby: clássico (texto) ou null. Devolve { ctx (vai para a tela e o
-// especialista), games }.
-export function buildContext({ rows, fx, table = [], extra = [], res, fair = null, derby = null }) {
+// res: analyzeMatch; fair: Pinnacle sem margem; derby: clássico (texto) ou null; clubs: clubs.js (temporada passada,
+// mercado, começo de temporada, tabela atual). Devolve { ctx (vai para a tela e o especialista), games }.
+export function buildContext({ rows, fx, table = [], extra = [], res, fair = null, derby = null, clubs = null }) {
   const H = fx.home, A = fx.away, names = { home: H.name, away: A.name };
   const games = contextGames(rows, H.id, A.id, fx.t, extra);
   const tab = table?.length ? { home: tableRow(table, H.id, A.id), away: tableRow(table, A.id, H.id) } : null;
   const h = games.h2h;
   const ctx = {
     table: tab && (tab.home || tab.away) ? tab : null,
+    clubs,
     last10: { home: profile(games.homeAll), away: profile(games.awayAll) },
     venue10: { home: profile(games.homeVenue), away: profile(games.awayVenue) },
     expected: expected(res, fair),
@@ -233,10 +235,12 @@ function situation(t) {
 // Leitura do contexto em frases curtas, na ordem em que um especialista olha.
 export function contextText(ctx, names) {
   const out = [], t = ctx.table, v = ctx.venue10, e = ctx.expected, h = ctx.h2h;
-  if (t?.home && t?.away) {
+  if (t?.home && t?.away && !t.home.played && !t.away.played) out.push('Tabela: o campeonato ainda não começou para os dois (nenhum jogo).');
+  else if (t?.home && t?.away) {
     const one = (x, n) => `${n} ${ord(x)} (${x.points} pts em ${x.played} jogos${situation(x) ? `, ${situation(x)}` : ''})`;
     out.push(`Tabela: ${one(t.home, names.home)} · ${one(t.away, names.away)}.`);
   }
+  out.push(...clubsText(ctx.clubs, names));
   const sh = t?.home?.home, sa = t?.away?.away;
   if (sh && sa) out.push(`Gols na temporada: ${names.home} em casa marca ${n1(sh.gf_pg)} e sofre ${n1(sh.ga_pg)} por jogo (${sh.played} jogos) · `
     + `${names.away} fora marca ${n1(sa.gf_pg)} e sofre ${n1(sa.ga_pg)} (${sa.played} jogos).`);

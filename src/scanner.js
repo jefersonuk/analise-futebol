@@ -35,6 +35,7 @@ import { livePlanOf } from './live.js';
 import { hardGame } from './hard.js';
 import { comboLines } from './combos.js';
 import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
+import { loadClubs } from './clubs.js';
 
 export { GOAL_HANDICAP, SHOTS };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
@@ -118,7 +119,8 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
   // jogo difícil de analisar (base/reservas, ou ligas diferentes sem jogos entre elas): só over de gols da Pinnacle
   const hard = hardGame({ fx, rows: res.prep.rows });
   if (hard) alerts.push(`jogo difícil de analisar: ${hard.reasons.join('; ')}`);
-  const context = buildContext({ rows: res.prep.rows, fx, table: extra.table || [], extra: extra.h2h || [], res, fair, derby: extra.derby || null });
+  const context = buildContext({ rows: res.prep.rows, fx, table: extra.table || [], extra: extra.h2h || [], res, fair, derby: extra.derby || null,
+    clubs: extra.clubs || null });
   // as linhas principais: com preço da Pinnacle (direto ou derivado do total que ela cota) e, nos escanteios
   // que ela não cota neste jogo, só do modelo (margem de 8%; só vira aposta se for âncora)
   const { priced, anchored } = priceLines(res, { odds, fair, alerts, teams, banca, only: l => markets.includes(l.market), context, hard });
@@ -128,7 +130,7 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
   const combos = comboLines({ res, fair, teams, names, banca, hard });
   // nossa análise: as linhas de gols da Pinnacle (1X2, handicap, over) pela nossa leitura, com as condições do jogo
   // (entrar se…: escalação de time de base, copa, dúvida); a Pinnacle como segunda opinião
-  const conditions = conditionsOf({ fx, hard, injuries: extra.injuries || [] });
+  const conditions = conditionsOf({ fx, hard, injuries: extra.injuries || [], clubs: extra.clubs || null });
   const scenario = scenarioLines(context.ctx.scenario, priced.filter(l => ['1X2', GOAL_HANDICAP, 'Total de gols'].includes(l.market)),
     { banca, hard, conditions }).slice(0, 6);
   const a = res.anchors, h1 = !noCorners;
@@ -323,9 +325,12 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
     if (api.teamInfo && used() + 2 <= budget) try { derby = derbyOf(await api.teamInfo(g.fx.home.id), await api.teamInfo(g.fx.away.id)); } catch { /* sem cadastro */ }
     // desfalques e dúvidas (guardados 3 h): entram nas condições do jogo (entrar se…)
     if (api.injuries && used() + 1 <= budget) try { injuries = await api.injuries(g.fx.id); } catch { /* sem desfalques */ }
-    if (!h2h && !derby && !injuries) continue;
+    // momento dos times (clubs.js): temporada passada, mercado, começo de temporada e a tabela atual inteira
+    let clubs = null;
+    if (api.transfers) try { clubs = await loadClubs(api, g.fx, { table: tableBy.get(g.fx.league.id) || [], budget: n => used() + n <= budget }); } catch { /* sem */ }
+    if (!h2h && !derby && !injuries && !clubs) continue;
     const key = g.team_base ? `tp${g.fx.league.id}` : g.fx.league.id;
-    const a = analyze(g.fx, base.get(key), oddsOf(g.fx), banca, g.team_base, favorBy.get(key), { table: tableBy.get(g.fx.league.id), h2h, derby, injuries });
+    const a = analyze(g.fx, base.get(key), oddsOf(g.fx), banca, g.team_base, favorBy.get(key), { table: tableBy.get(g.fx.league.id), h2h, derby, injuries, clubs });
     if (!a.skip) Object.assign(g, a);
   }
   const keep = keepOf();

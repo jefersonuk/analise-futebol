@@ -216,3 +216,9 @@ dialog#entryDlg label.chk { display: flex; gap: 8px; align-items: flex-start; fo
 dialog#entryDlg label.chk input { width: auto; margin: 2px 0 0; }
 dialog#entryDlg #enLineMsg { margin: 4px 0 0; }
 dialog#entryDlg .facts[hidden] { display: none; }
+
+/* tabela atual (momento dos times) */
+table.tablenow { border-collapse: collapse; font-size: 12px; margin: 4px 0; }
+table.tablenow th, table.tablenow td { padding: 2px 8px; text-align: right; border-bottom: 1px solid var(--line); }
+table.tablenow th:nth-child(2), table.tablenow td:nth-child(2) { text-align: left; }
+table.tablenow tr.on td { color: var(--blue); font-weight: 600; }
