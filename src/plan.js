@@ -14,7 +14,9 @@
 //        contra, odd da Pinnacle na própria linha) em que o modelo não discorda dela (no máximo 3 pp abaixo); o valor
 //        está na casa pagar a mínima (até 5% acima da Pinnacle); ordem: contexto a favor, âncora, consistência;
 //   uma de cada, alternando, até 10 (de 5 a 10 quando o dia tem; não força), no máximo 3 por liga;
-// - mesmo jogo: os combos de duas pernas que são aposta, os de maior chance, nos jogos que sobraram;
+// - mesmo jogo: a vitória do favorito + mais de 1,5 gols — ou de 2,5, quando a de 1,5 paga menos de 1,60 — com chance de
+//   50%+ e odd mínima até 2,70, os de maior chance, nos jogos que sobraram (pedido do Jeferson, 09/10/2026: a dupla chance
+//   + gols acerta muito, mas a casa paga bem abaixo de 1,50; a vitória do favorito + gols sai perto de 2);
 // - múltiplas: as pernas de over de gols com linha cotada (multiple.js), nos jogos que sobraram; 2 bilhetes até a odd
 //   justa do alvo, as melhores pernas no primeiro.
 // A escolha dos jogos segue essa ordem: simples, mesmo jogo, múltiplas.
@@ -23,6 +25,7 @@ import { isBet } from './dossier.js';
 import { MAX_LEGS, TARGET, bandTickets, multiGames, ticketOf } from './multiple.js';
 
 export const SINGLES = [5, 10], SAME_GAME = 5, MULTIS = 2, PER_LEAGUE = 3, ODDS = [1.8, 2.7];
+export const COMBO_P = 0.5, COMBO_ODDS = [1.6, 2.7];   // mesmo jogo: chance mínima e faixa da odd mínima
 export const LENS = { ours: '🎯 nossa leitura', agree: '🤝 acordo com a Pinnacle' };
 const AGREE_MARKETS = ['Total de gols', 'Handicap asiático', '1X2', 'Total de escanteios', 'Total escanteios 1T'];
 const r3 = x => Math.round(x * 1000) / 1000;
@@ -41,7 +44,10 @@ const agreeOf = g => (g.hard || g.conditions?.length ? null : (g.lines || [])
   .sort((a, b) => (b.context?.verdict === 'a favor') - (a.context?.verdict === 'a favor') || (b.tier === 'âncora') - (a.tier === 'âncora')
     || b.consistency_score - a.consistency_score || b.p_blend - a.p_blend)[0] || null);
 export const needOf = l => r3(l.odd_min / l.pinnacle_odd - 1);
-const comboOf = g => (g.hard ? null : (g.combos || []).filter(isBet).sort((a, b) => b.p_blend - a.p_blend || b.odd_min - a.odd_min)[0] || null);
+// mesmo jogo: a vitória do favorito + 1,5 gols; se ela pagar pouco, + 2,5 (fav_combos vem nessa ordem). Como nas simples,
+// fica fora o jogo que depende da escalação.
+export const comboOk = c => c.p_blend >= COMBO_P && c.odd_min >= COMBO_ODDS[0] && c.odd_min <= COMBO_ODDS[1];
+const comboOf = g => (g.hard || g.conditions?.length ? null : (g.fav_combos || []).find(comboOk) || null);
 // o bilhete na odd da Pinnacle quando ela cota todas as pernas (perna asiática: sem a odd dela)
 export const multiOf = (legs, banca) => ticketOf(legs, { houseTotal: legs.every(l => l.pinnacle_odd > 1) ? legs.reduce((t, l) => t * l.pinnacle_odd, 1) : null, banca });
 
@@ -86,7 +92,7 @@ export function planFromKeys(scan, keys, { banca = 44000 } = {}) {
     const x = g(f), l = (lens === 'agree' ? x?.lines : x?.scenario)?.find(s => s.id === id);
     return l && { g: x, line: l, value: lens === 'agree' ? needOf(l) : valueOf(l), lens };
   });
-  const sameGame = keys.sameGame.map(([f, id]) => { const x = g(f), c = x?.combos?.find(s => s.id === id); return c && { g: x, combo: c }; });
+  const sameGame = keys.sameGame.map(([f, id]) => { const x = g(f), c = [...(x?.fav_combos || []), ...(x?.combos || [])].find(s => s.id === id); return c && { g: x, combo: c }; });
   const multis = keys.multis.map(ls => ls.map(([f, id]) => opts.get(`${f}:${id}`))).filter(ls => ls.every(Boolean)).map(ls => multiOf(ls, banca));
   if (singles.some(x => !x) || sameGame.some(x => !x)) return null;   // a varredura mudou: monta de novo
   return { date: keys.date, scan_at: keys.scan_at, target: keys.target, singles, sameGame, multis, stats: null };

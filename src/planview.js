@@ -151,7 +151,13 @@ export function initPlan({ api, openEntry, banca }) {
     await simPlan();
     render();
   }
-  $('#planOut').addEventListener('change', e => {
+  $('#planOut').addEventListener('change', async e => {
+    const cg = e.target.closest('[data-pcg]');
+    if (cg) {
+      const i = Number(cg.dataset.pcg), { g } = plan.sameGame[i], c = (g.fav_combos || []).find(x => x.id === cg.value);
+      if (c) { plan.sameGame[i] = { g, combo: c }; await save(`af:plan:${keyOf(sel.value)}`, planKeys(plan)); await simPlan({ replace: false }); render(); }
+      return;
+    }
     const ml = e.target.closest('[data-pml]'), ma = e.target.closest('[data-pma]');
     if (ml) {
       const [i, j] = ml.dataset.pml.split(':').map(Number), legs = [...plan.multis[i].legs], o = optionsByGame().get(legs[j].fixtureId)?.find(x => x.lineId === ml.value);
@@ -238,10 +244,14 @@ export function initPlan({ api, openEntry, banca }) {
         <button class="ghost mini" data-go="pw-m${i}">por que cada perna ↓</button></div>
       <div class="scroll"><table class="mlegs">${t.legs.map((l, j) => legRow(t, i, l, j)).join('')}</table></div>
       <div>${addSel(i)}</div></div>`).join('')}` : '';
+    // mesmo jogo: a vitória do favorito + a linha de gols (1,5 ou 2,5), que dá para trocar
+    const comboCell = (g, combo, i) => ((g.fav_combos || []).length > 1 && combo.fav
+      ? `<b>${esc(combo.legs[0].line)}</b> + <select data-pcg="${i}" title="a linha de gols do combo">${g.fav_combos.map(c => `<option value="${esc(c.id)}"${c.id === combo.id ? ' selected' : ''}>${esc(c.legs[1].line)} · ${pct(c.p_blend)} · ≥ ${n2(c.odd_min)}</option>`).join('')}</select>`
+      : `<b>${esc(combo.line)}</b>`);
     const same = plan.sameGame.length ? `<h3>No mesmo jogo (${plan.sameGame.length})</h3><div class="scroll"><table class="scanrank plantab"><tr><th></th><th>Hora</th><th>Jogo</th><th>Liga</th>
       <th>Combo</th><th>Chance</th><th>Odd mínima</th><th>R$</th></tr>${plan.sameGame.map(({ g, combo }, i) => `<tr data-go="pw-c${i}">
       <td>${reg(`c:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t)}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
-      <td class="muted">${esc(g.fx.league.name)}</td><td><b>${esc(combo.line)}</b></td><td><b>${pct(combo.p_blend)}</b> <span class="muted">· ${pct(combo.p_pinnacle)}</span></td>
+      <td class="muted">${esc(g.fx.league.name)}</td><td>${comboCell(g, combo, i)}</td><td><b>${pct(combo.p_blend)}</b> <span class="muted">· ${pct(combo.p_pinnacle)}</span></td>
       <td><b>${n2(combo.odd_min)}</b></td><td>${combo.entry_brl ? `${combo.entry_brl}` : '—'}</td></tr>`).join('')}</table></div>` : '';
     const empty = !n && !plan.multis.length && !plan.sameGame.length ? '<p class="muted">Nenhuma entrada passou nas regras do plano neste dia.</p>' : '';
     // o porquê de cada entrada (planwhy.js): o resumo, os motivos e os gráficos, na ordem do plano
@@ -269,7 +279,9 @@ export function initPlan({ api, openEntry, banca }) {
       No máximo 3 por liga. Fica fora o que depende da escalação — copa (rodízio), time de base/B, dúvida de desfalque, leitura longe da Pinnacle,
       amostra curta — e o jogo difícil de analisar. <b>Múltiplas</b>: over de gols com a linha cotada pela Pinnacle; dá para trocar a linha da perna
       (1,75, 2 e 2,25 perdem só com 0–1 gol, como o 1,5; com 2 gols o 1,75 ganha metade, o 2 devolve, o 2,25 perde metade), tirar e pôr perna.
-      <b>No mesmo jogo</b>: os combos de maior chance. Aposte só se a casa pagar a <b>odd mínima</b>; o plano entra na 🧪 simulação para medirmos
+      <b>No mesmo jogo</b>: a vitória do favorito + mais de 1,5 gols — ou de 2,5, quando a de 1,5 paga menos de 1,60 —, com chance de 50%+
+      e odd mínima até 2,70, os de maior chance; dá para trocar a linha de gols (a dupla chance + gols acerta mais, mas a casa paga bem abaixo
+      de 1,50). Aposte só se a casa pagar a <b>odd mínima</b>; o plano entra na 🧪 simulação para medirmos
       (inclusive o CLV: a odd da hora do plano contra a de fechamento) — o resultado fica no fim desta seção, em 🧪 Simulação dos planos.</p>${why}`;
     bindTooltips(out);
   }

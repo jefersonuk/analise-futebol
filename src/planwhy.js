@@ -99,7 +99,7 @@ export function agreeWhy(g, x) {
 // mesmo jogo: o combo, as pernas e o quanto ele paga a mais que a melhor perna sozinha
 export function comboWhy(g, c) {
   const hit = c.hit_rate_last10 ?? null, d = Math.round((c.corr - 1) * 100), best = Math.max(...c.legs.map(x => x.fair_odd));
-  const summary = `Combo ${c.tier}: acerta ${pct(c.p_blend)} — Pinnacle ${pct(c.p_pinnacle)}, modelo ${pct(c.p_model)}${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}. `
+  const summary = `${c.fav ? 'Vitória do favorito + gols' : `Combo ${c.tier}`}: acerta ${pct(c.p_blend)} — Pinnacle ${pct(c.p_pinnacle)}, modelo ${pct(c.p_model)}${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}. `
     + `Justo, paga ${n2(c.fair_odd_blend)}: ${Math.round((c.fair_odd_blend / best - 1) * 100)}% mais que a melhor perna sozinha (${n2(best)}). `
     + `${d >= 3 ? `As pernas andam juntas (+${d}%): a casa costuma pagar menos que o produto delas (${n2(c.odd_indep)}). ` : d <= -3 ? `Uma perna atrapalha a outra (${d}%). ` : ''}`
     + `Entre se a casa pagar ≥ ${n2(c.odd_min)}.`;
