@@ -111,7 +111,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   // escolhida em cada jogo, odds da casa por perna e a total de cada bilhete (pela primeira perna)
   const multi = { target: TARGET, band: BAND, include: new Map(), lineFor: new Map(), house: new Map(), totals: new Map(), tickets: [] };
   // as simulações das varreduras (simview.js): ver "simulação" abaixo
-  let simUI = null;
+  let simUI = null, refazendo = false;
   const simId = sc => String(Date.parse(sc?.generated_at) || '');
   $('#scanDate').innerHTML = [['Próximas 4 horas (amplia até 12 h se faltar jogo)', WINDOW], ['Hoje (dia todo)', dayStr(0)], ['Amanhã', dayStr(1)]]
     .map(([t, v]) => `<option value="${v}">${t}${v === WINDOW ? '' : ` (${v.split('-').reverse().slice(0, 2).join('/')})`}</option>`).join('');
@@ -208,10 +208,16 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         e, ao lado, a da Pinnacle; o histórico dos dois times entra no nível. Só aparecem linhas com chance ≥ 60% (piso); âncora = 70%+, o ideal.
         Contexto = mando, médias, confronto direto e tabela confirmando a linha (passe o mouse para ver). Apagados: sem aposta (especulativa, odd mínima
         mais de 5% acima da Pinnacle ou contexto contra).</p>`;
+    // simulação desta varredura feita antes da regra do pior cenário (linha derivada, combo na odd mínima do app): refaz
+    // na odd da Pinnacle da hora da varredura; os resultados voltam pela conferência
+    if (simUI?.get(simId(scan))?.bets.some(b => b.odd_src === 'mínima') && !refazendo) {
+      refazendo = true;
+      simUI.add(buildSim(scan, { banca })).catch(() => {}).finally(() => { refazendo = false; });
+    }
     out.innerHTML = `<p class="muted">Varredura de ${when}: ${span} · ${scan.fixtures} jogos por começar, ${pool},
       ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>${cornersLine(scan.corners_report)}${old}
       <div class="simbar">${simUI?.has(simId(scan)) ? '<span class="muted">🧪 esta varredura já está na simulação (abaixo)</span>'
-        : '<button class="ghost" id="simRun">🧪 Simular as propostas desta varredura</button> <span class="muted">registra tudo o que ela propôs, com a odd da Pinnacle, numa área separada das apostas reais</span>'}</div>
+        : '<button class="ghost" id="simRun">🧪 Simular as propostas desta varredura</button> <span class="muted">registra tudo o que ela propôs, na odd da Pinnacle (o pior cenário), numa área separada das apostas reais</span>'}</div>
       <div class="chips" id="scanChips">${chips}</div>
       <div class="chips" id="scanOrder"><span class="muted">Ordem:</span>${orders}</div>
       ${mult ? multiView() : ranked.length ? `${explain}<div class="scroll"><table class="scanrank${live ? ' livelist' : ''}">${head}${rows}</table></div>`
@@ -274,9 +280,10 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   // varreduras; as dos planos ficam no Plano do dia ----
   simUI = simPanel({ api, el: $('#simOut'), mine: id => !String(id).startsWith('plano-'), title: '🧪 Simulações das varreduras', onChange: () => render(),
     intro: `Como se tivéssemos entrado em tudo o que cada varredura propôs: nossa análise (aposta e, à parte, "entrar se…" sem conferir),
-      a linha de aposta de cada aba de mercado, o combo e a múltipla automática. Odd de entrada = a da Pinnacle na hora da varredura; onde ela não
-      cota (linha derivada, só do modelo, combo), a odd mínima do app ("mín."). Lucro em unidades (stake 1 em tudo) e em R$ (a entrada que o app
-      propôs). CLV = odd de entrada contra a justa de fechamento da Pinnacle. Combo com devolução numa perna conta como anulada; múltipla com
+      a linha de aposta de cada aba de mercado, o combo e a múltipla automática. Sempre no pior cenário: odd de entrada = a da Pinnacle na hora
+      da varredura ("Pin"), não a odd mínima — a casa pagando mais é bônus. Onde ela não cota a aposta (linha derivada do total, combo), a odd que
+      ela pagaria: a justa pelas chances dela, com a margem dela ("Pin est."); linha só do modelo, sem chance da Pinnacle, fica fora. Lucro em
+      unidades (stake 1 em tudo) e em R$ (a entrada que o app propôs). CLV = odd de entrada contra a justa de fechamento da Pinnacle. Combo com devolução numa perna conta como anulada; múltipla com
       devolução ou meia numa perna paga o produto do que cada perna pagou. As simulações dos planos ficam no Plano do dia. Nada daqui entra no app de apostas.` });
   async function runSim() {
     if (!scan?.games.length) return;

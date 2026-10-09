@@ -65,3 +65,11 @@ export function collect(bookmakers) {
   }
   return { odds, fair };
 }
+
+// A margem da Pinnacle num jogo: a mediana de 1 / (odd × chance sem margem) nas linhas que ela cota (≈ 1,02 a 1,06).
+// Estima a odd que ela pagaria numa aposta que não cota (linha derivada do total, combo, perna asiática): 1 / (chance × margem).
+export function pinMargin(lines = []) {
+  const ms = lines.filter(l => l.pinnacle_odd > 1 && l.p_pinnacle > 0 && !l.derived).map(l => 1 / (l.pinnacle_odd * l.p_pinnacle))
+    .filter(m => m > 0.98 && m < 1.15).sort((a, b) => a - b);
+  return ms.length ? Math.max(1, ms[Math.floor(ms.length / 2)]) : 1.03;
+}

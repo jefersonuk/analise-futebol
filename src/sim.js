@@ -8,12 +8,17 @@
 //                   chutes), a linha do jogo naquela aba quando ela é aposta
 //   combo           o combo do jogo na aba Combos, quando é aposta
 //   múltipla        os bilhetes por faixa de horário da aba Múltipla (alvo e faixa padrão), com 2 pernas ou mais
-// Odd: a da Pinnacle na própria linha; quando a Pinnacle não cota (linha derivada, só do modelo, combo), a odd mínima
-// do app (odd_src = 'mínima'). Lucro em unidades (stake fixa de 1) e em R$ (a entrada proposta pelo app).
+// Odd: sempre a da Pinnacle na hora — o pior cenário (regra do Jeferson, 09/10/2026: "nem sempre vou encontrar a odd
+// mínima; simule na odd que você puxou da Pinnacle naquele momento; o que vier além disso é bônus"). Onde ela não cota a
+// aposta exata (linha derivada do total, combo, perna asiática), a odd que ela pagaria: a justa pelas chances dela, com a
+// margem dela no jogo em cada perna (odd_src = 'pinnacle est.'). Sem nenhuma chance da Pinnacle (linha só do modelo), a
+// entrada fica fora. Simulações antigas podem ter odd_src = 'mínima' (a odd mínima do app, antes desta regra).
+// Lucro em unidades (stake fixa de 1) e em R$ (a entrada proposta pelo app).
 
 import { COMBOS, FILTER_KEYS, bestLine } from './scanner.js';
 import { isBet } from './dossier.js';
 import { TARGET, bandTickets, multiLegs, settleMulti, ticketOf } from './multiple.js';
+import { pinMargin } from './odds.js';
 
 export const CATS = ['Plano: simples (nossa leitura)', 'Plano: simples (acordo com a Pinnacle)', 'Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo', 'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T',
   'Handicap gols', '1X2', 'Escanteios', 'Escanteios 1T', 'Chutes', 'Combo', 'Múltipla'];
@@ -27,7 +32,23 @@ const base = (g, l, cat, odd, oddSrc, stake) => ({
   key: `${cat}|${g.fx.id}|${l.id}`, cat, fixtureId: g.fx.id, kickoff: g.fx.t, home: g.fx.home.name, away: g.fx.away.name, competition: g.fx.league.name,
   lineId: l.id, market: l.market, line: l.line, odd: r2(odd), odd_src: oddSrc, p: r3(l.p_nossa ?? l.p_blend), p_pinnacle: l.p_pinnacle ?? null,
   stake_brl: stake > 0 ? stake : 0, status: 'aberta', winner: null, profit_u: null, profit_brl: null, clv: null, detail: null });
-const priced = l => (l.pinnacle_odd > 1 ? [l.pinnacle_odd, 'pinnacle'] : [l.odd_min, 'mínima']);
+// [odd, origem] de uma linha: a da Pinnacle; derivada, a que ela pagaria (1 / (chance dela × margem)); sem chance dela, nada
+export function linePin(l, g) {
+  if (l.pinnacle_odd > 1) return [l.pinnacle_odd, 'pinnacle'];
+  return l.p_pinnacle > 0 ? [1 / (l.p_pinnacle * pinMargin(g?.lines)), 'pinnacle est.'] : [null, null];
+}
+// o combo como a Pinnacle pagaria: a justa pelas chances dela (empate anula com a perna de gols certa devolve, como na
+// liquidação), com a margem dela em cada perna. Combo guardado antes de push_pinnacle: a devolução na proporção da mistura.
+export function comboPin(c, g) {
+  const push = c.push_pinnacle ?? (c.p_blend > 0 ? (c.p_pinnacle * (c.push_prob || 0)) / c.p_blend : 0), win = c.p_pinnacle - push;
+  return win > 0 ? [(1 - push) / win / pinMargin(g?.lines) ** (c.legs?.length || 2), 'pinnacle est.'] : [null, null];
+}
+// o bilhete: o produto da odd da Pinnacle em cada perna (onde ela não cota a linha, a que ela pagaria: pin_est)
+const legPin = l => (l.pinnacle_odd > 1 ? l.pinnacle_odd : l.pin_est > 1 ? l.pin_est : null);
+export function ticketPin(legs) {
+  const os = legs.map(legPin);
+  return os.every(Boolean) ? [os.reduce((t, o) => t * o, 1), legs.every(l => l.pinnacle_odd > 1) ? 'pinnacle' : 'pinnacle est.'] : [null, null];
+}
 
 // As entradas de uma varredura. scan: scanDay (games com lines, scenario, combos).
 export function buildSim(scan, { banca = 44000 } = {}) {
@@ -42,40 +63,42 @@ export function buildSim(scan, { banca = 44000 } = {}) {
       const l = bestLine(g.lines || [], { market: m });
       if (!l || !isBet(l) || seen.has(l.id)) continue;
       seen.add(l.id);
-      const [odd, src] = priced(l);
-      bets.push(base(g, l, CAT_OF[l.market] || l.market, odd, src, l.entry_brl));
+      const [odd, src] = linePin(l, g);
+      if (odd) bets.push(base(g, l, CAT_OF[l.market] || l.market, odd, src, l.entry_brl));   // só do modelo: fora
     }
-    // combo: o do jogo na aba Combos (a Pinnacle não cota combo: odd mínima)
-    const cb = (g.combos || []).find(isBet);
-    if (cb) bets.push(base(g, cb, 'Combo', cb.odd_min, 'mínima', cb.entry_brl));
+    // combo: o do jogo na aba Combos (a Pinnacle não cota combo: a odd que ela pagaria)
+    const cb = (g.combos || []).find(isBet), [co, cs] = cb ? comboPin(cb, g) : [];
+    if (co) bets.push(base(g, cb, 'Combo', co, cs, cb.entry_brl));
   }
   // múltipla: os bilhetes por faixa de horário, como a aba montava na hora da varredura (só linha cotada)
-  for (const legs of bandTickets(multiLegs(scan.games, { now: at }).filter(l => l.quoted), { target: TARGET })) bets.push(multiBet(legs, banca, 'Múltipla'));
+  for (const legs of bandTickets(multiLegs(scan.games, { now: at }).filter(l => l.quoted), { target: TARGET })) { const b = multiBet(legs, banca, 'Múltipla'); if (b) bets.push(b); }
   return { id: `${at}`, scan_at: new Date(at).toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     window: scan.window ? { from: scan.window.from, to: scan.window.to } : null, date: scan.date || null, bets };
 }
 
 // Uma múltipla (pernas de multiple.js) na odd da Pinnacle: o produto das odds dela em cada perna (perna asiática, que ela
-// não cota aqui: a mínima da perna — e o bilhete fica sem CLV).
+// não cota aqui: a que ela pagaria — e o bilhete fica sem CLV). Perna sem chance da Pinnacle: o bilhete fica fora (null).
 function multiBet(legs, banca, cat) {
-  const oddOf = l => l.pinnacle_odd || l.min || l.fair, odd = legs.reduce((t, l) => t * oddOf(l), 1), t = ticketOf(legs, { houseTotal: odd, banca });
+  const [odd, src] = ticketPin(legs);
+  if (!odd) return null;
+  const t = ticketOf(legs, { houseTotal: odd, banca });
   return { key: `${cat}|${legs.map(l => l.key).join(',')}`, cat, fixtureId: null, kickoff: Math.min(...legs.map(l => l.kickoff)),
     home: `Múltipla (${legs.length})`, away: '', competition: [...new Set(legs.map(l => l.competition))].join(', '), lineId: 'multi', market: 'Múltipla',
-    line: legs.map(l => `${l.home} x ${l.away} ${l.line}`).join(' · '), odd: r2(odd), odd_src: legs.every(l => l.pinnacle_odd > 1) ? 'pinnacle' : 'mínima', p: t.p_all, p_pinnacle: t.p_pinnacle_all,
+    line: legs.map(l => `${l.home} x ${l.away} ${l.line}`).join(' · '), odd: r2(odd), odd_src: src, p: t.p_all, p_pinnacle: t.p_pinnacle_all,
     // entrada: a do bilhete na odd da Pinnacle; se ali não vale (margem), a que o app propõe na odd mínima
-    stake_brl: t.stake || t.stake_at_min || 0, legs: legs.map(l => ({ fixtureId: l.fixtureId, lineId: l.lineId, home: l.home, away: l.away, line: l.line, odd: oddOf(l) })),
+    stake_brl: t.stake || t.stake_at_min || 0, legs: legs.map(l => ({ fixtureId: l.fixtureId, lineId: l.lineId, home: l.home, away: l.away, line: l.line, odd: r2(legPin(l)) })),
     status: 'aberta', winner: null, profit_u: null, profit_brl: null, clv: null, detail: null };
 }
 
-// O Plano do dia (plan.js) na simulação: as simples na odd da Pinnacle, os combos na odd mínima (a Pinnacle não cota
-// combo), as múltiplas no produto das odds da Pinnacle. id: um por montagem (planview: plano-<hora da varredura>);
+// O Plano do dia (plan.js) na simulação, na odd da Pinnacle da hora do plano: as simples na dela, os combos e as pernas
+// asiáticas na que ela pagaria, as múltiplas no produto. id: um por montagem (planview: plano-<hora da varredura>);
 // win: a janela escolhida (h4, d1…); label: o nome do plano no painel.
 export function buildPlanSim(plan, { banca = 44000, id = `plano-${plan.date}`, win = null, label = null } = {}) {
   const bets = [
     ...plan.singles.map(({ g, line, lens }) => base(g, line, lens === 'agree' ? 'Plano: simples (acordo com a Pinnacle)' : 'Plano: simples (nossa leitura)',
       line.pinnacle_odd, 'pinnacle', line.entry_brl)),
-    ...plan.multis.map(t => multiBet(t.legs, banca, 'Plano: múltipla')),
-    ...plan.sameGame.map(({ g, combo }) => base(g, combo, 'Plano: mesmo jogo', combo.odd_min, 'mínima', combo.entry_brl)),
+    ...plan.multis.map(t => multiBet(t.legs, banca, 'Plano: múltipla')).filter(Boolean),
+    ...plan.sameGame.flatMap(({ g, combo }) => { const [odd, src] = comboPin(combo, g); return odd ? [base(g, combo, 'Plano: mesmo jogo', odd, src, combo.entry_brl)] : []; }),
   ];
   const now = new Date().toISOString();
   return { id, plan: true, win, label, date: plan.date, scan_at: plan.scan_at, created_at: now, updated_at: now, window: null, bets };

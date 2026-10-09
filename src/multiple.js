@@ -14,6 +14,8 @@
 // Na múltipla, cada perna multiplica o bilhete pelo que ela paga: ganha = a odd, meia vitória = (1 + odd)/2, devolve = 1,
 // meia derrota = 1/2, perde = 0.
 
+import { pinMargin } from './odds.js';
+
 export const MULTI = 'multipla';            // a aba da varredura
 // chance mínima de cada perna por linha: o over 2,5 é a linha seguinte, para o jogo em que a casa não tem o 1,5
 export const LEG_P = { 'gO1.5': 0.72, 'gO2.5': 0.6 };
@@ -48,12 +50,13 @@ export function multiGames(games, { now = Date.now() } = {}) {
     if (g.hard || g.fx.t <= now + 10 * 60e3) continue;
     const ours = new Map((g.scenario || []).map(l => [l.id, l.p_nossa]));
     const base = { fixtureId: g.fx.id, kickoff: g.fx.t, home: g.fx.home.name, away: g.fx.away.name, competition: g.fx.league.name, market: 'Total de gols' };
-    const pOf = l => Math.min(l.p_blend, ours.get(l.id) ?? 1);
+    const pOf = l => Math.min(l.p_blend, ours.get(l.id) ?? 1), m = pinMargin(g.lines || []);
     const options = (g.lines || []).filter(l => LEG_P[l.id] && l.p_pinnacle != null && l.context?.verdict !== 'contra').map(l => {
       const p = pOf(l);
       return { ...base, key: `${g.fx.id}:${l.id}`, lineId: l.id, market: l.market, line: l.line, p: r3(p), p_pinnacle: l.p_pinnacle, p_nossa: ours.get(l.id) ?? null,
         fair: r2(1 / p), out: binary(r3(p)), outPin: binary(l.p_pinnacle), pinnacle_odd: l.pinnacle_odd ?? null, quoted: !l.derived && l.pinnacle_odd != null,
-        context: l.context?.verdict || null };
+        // a odd que a Pinnacle pagaria onde não cota a linha (simulação no pior cenário): pela chance e pela margem dela
+        pin_est: l.pinnacle_odd > 1 || !(l.p_pinnacle > 0) ? null : r2(1 / (l.p_pinnacle * m)), context: l.context?.verdict || null };
     }).filter(l => l.p >= LEG_P[l.lineId] && l.p >= l.p_pinnacle - 0.02);
     // as asiáticas do jogo (perdem só com 0 ou 1 gol, como o 1,5): quando o 1,5 passa e há o 2,5 para medir os 2 gols
     const o15 = options.find(o => o.lineId === 'gO1.5'), l25 = (g.lines || []).find(l => l.id === 'gO2.5' && l.p_pinnacle != null);
@@ -62,7 +65,7 @@ export function multiGames(games, { now = Date.now() } = {}) {
       for (const [id, label, f] of ASIAN) {
         const x = f(o15.p, p25), xp = f(o15.p_pinnacle, q25);
         options.push({ ...base, key: `${g.fx.id}:${id}`, lineId: id, line: label, p: o15.p, p_pinnacle: o15.p_pinnacle, p_nossa: null, p_win: r3(p25),
-          fair: r2(fairOf(x)), out: x, outPin: xp, pinnacle_odd: null, quoted: false, asian: true, context: o15.context });
+          fair: r2(fairOf(x)), out: x, outPin: xp, pinnacle_odd: null, pin_est: r2(fairOf(xp) / m), quoted: false, asian: true, context: o15.context });
       }
     }
     options.sort((a, b) => b.quoted - a.quoted || !!a.asian - !!b.asian || b.p - a.p);

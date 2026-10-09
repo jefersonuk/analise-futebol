@@ -117,7 +117,7 @@ export function comboLines({ res, fair, teams, names, banca = 44000, hard = null
         id: `cb:${rid}+gO${L}`, market: COMBO, combo: true, line: `${c.result.label} + ${c.goals.label}`,
         legs: [{ id: rid, line: c.result.label, p: r(rb.w), push: r(1 - rb.w - rb.l), fair_odd: r(fairR, 2) },
           { id: c.goals.id, line: c.goals.label, p: r(gb.w), fair_odd: r(fairG, 2) }],
-        p_blend: r(p), p_full: r(b.win), push_prob: r(b.push), p_pinnacle: r(m.win + m.push), p_model: r(mo.win + mo.push),
+        p_blend: r(p), p_full: r(b.win), push_prob: r(b.push), p_pinnacle: r(m.win + m.push), push_pinnacle: r(m.push), p_model: r(mo.win + mo.push),
         p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
         // quanto as pernas andam juntas: chance das duas ganharem ÷ produto das chances de cada uma
         corr: r(b.win / (rb.w * gb.w)), odd_indep: r(fairR * fairG, 2),
