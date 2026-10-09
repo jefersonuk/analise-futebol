@@ -113,7 +113,7 @@ const pair = p => (p ? `${p[0]}–${p[1]}` : '—');
 export const ROLE_MARK = { favorito: '▲', equilibrado: '•', zebra: '▼' };
 const supTxt = s => `${s >= 0 ? '+' : '−'}${Math.abs(s).toFixed(1).replace('.', ',')} gol`;
 
-function tipHtml(b, h, teamName, roleNow) {
+export function tipHtml(b, h, teamName, roleNow) {
   const g = b.g, d = new Date(g.t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const role = roleOf(g.sup);
   // tudo na ordem do placar (mandante, visitante); os pares guardados são a favor–contra do time do gráfico
@@ -126,7 +126,7 @@ function tipHtml(b, h, teamName, roleNow) {
     <div class="tip-score">${esc(home)} <b>${hg}–${ag}</b> ${esc(away)}</div>
     ${role ? `<div class="tip-role">${esc(teamName)} era <b>${role}</b> (${supTxt(g.sup)} de superioridade esperada antes do jogo)${roleNow ? (role === roleNow ? ' · mesmo papel de hoje' : ` · hoje: ${roleNow}`) : ''}</div>` : ''}
     <div class="tip-metric ${RES[b.res].cls}"><span>${esc(h.what)}: ${calc ? `${esc(calc)} = ` : ''}<b>${b.v}</b> · a aposta vence ${esc(h.rule)}</span>
-      <span>→ ${RES[b.res].label}</span></div>
+      <span>→ ${b.note || RES[b.res].label}</span></div>
     <table><tr><th></th><th>${esc(home)}</th><th>${esc(away)}</th></tr>
       ${row('Gols 1º tempo', ord(g.g1))}${row('Escanteios', ord(g.corners))}${row('Escanteios 1T', ord(g.c1))}${row('Chutes', ord(g.shots))}${row('No gol', ord(g.sot))}
       ${row('xG-proxy', g.xf != null ? ord([g.xf, g.xa]) : null, n1)}</table>
@@ -263,22 +263,50 @@ function byRole(h, roleNow) {
   return parts.length ? `<small class="byrole">${parts.join(' · ')}</small>` : '';
 }
 
-// lines: linhas do dossiê (pickDashboard); teams: [{ name, role, games, roleNow }]
-export function renderDashboard(lines, teams) {
-  if (!lines.length) return '<p class="muted">Nenhuma linha passou nos filtros para este jogo.</p>';
-  const legend = `<div class="legend"><span><i class="good"></i>venceria</span><span><i class="push"></i>devolveria</span>
+// Legenda dos gráficos dos últimos jogos (a mesma no painel, na varredura e no plano).
+export const chartLegend = () => `<div class="legend"><span><i class="good"></i>venceria</span><span><i class="push"></i>devolveria</span>
     <span><i class="critical"></i>perderia</span><span><i class="mean"></i>média dos 10 jogos</span>
     <span class="muted">C/F embaixo da barra = onde o time jogou naquele jogo passado (não é o lado da aposta) · ▲ favorito · • equilibrado · ▼ zebra naquele jogo
       (superioridade esperada antes do jogo); barras apagadas: papel diferente do de hoje, pesam menos no acerto · passe o mouse (ou toque) numa barra para ver o jogo</span></div>`;
-  return legend + lines.map(l => {
-    const charts = teams.map(t => {
-      const h = history(l.id, t.role, t.name, t.games);
-      if (!h || !h.bars.length) return `<div class="histbox"><b>${esc(t.name)}</b><p class="muted">sem dados para esta linha</p></div>`;
-      return `<div class="histbox"><div class="histhead"><b>${esc(t.name)}${t.roleNow ? ` <span class="role-now">${ROLE_MARK[t.roleNow]} ${t.roleNow} hoje</span>` : ''}</b>
-        <span>${numBR(h.wins)}/${h.bars.length} ${h.bars.length > 1 ? 'venceriam' : 'venceria'}</span></div>
-        <small class="muted">${esc(h.what)} · <b class="rule">a aposta vence ${esc(h.rule)}</b> · média ${n1(h.bars.reduce((t, b) => t + b.v, 0) / h.bars.length)}</small>
-        ${byRole(h, t.roleNow)}${chart(h, t.name, t.roleNow)}</div>`;
-    }).join('');
+
+// Os gráficos de uma linha, um por time: como a linha teria se saído nos últimos jogos de cada um.
+export function teamCharts(l, teams) {
+  return teams.map(t => {
+    const h = history(l.id, t.role, t.name, t.games);
+    if (!h || !h.bars.length) return `<div class="histbox"><b>${esc(t.name)}</b><p class="muted">sem dados para esta linha</p></div>`;
+    return `<div class="histbox"><div class="histhead"><b>${esc(t.name)}${t.roleNow ? ` <span class="role-now">${ROLE_MARK[t.roleNow]} ${t.roleNow} hoje</span>` : ''}</b>
+      <span>${numBR(h.wins)}/${h.bars.length} ${h.bars.length > 1 ? 'venceriam' : 'venceria'}</span></div>
+      <small class="muted">${esc(h.what)} · <b class="rule">a aposta vence ${esc(h.rule)}</b> · média ${n1(h.bars.reduce((t, b) => t + b.v, 0) / h.bars.length)}</small>
+      ${byRole(h, t.roleNow)}${chart(h, t.name, t.roleNow)}</div>`;
+  }).join('');
+}
+
+// Faixa compacta dos últimos jogos de um time (o mais antigo à esquerda), para quando o gráfico inteiro não cabe (pernas
+// da múltipla, combos do plano): um quadrado por jogo na cor do resultado que a aposta teria (meia cor: meia vitória ou
+// meia derrota), o valor embaixo e onde o time jogou (C/F); o jogo inteiro ao passar o mouse ou tocar (bindTooltips).
+// cells: [{ res: win|hw|push|hl|lose, label, home, tip }]
+export function chipStrip(cells, label = 'últimos jogos') {
+  const slot = 30, W = Math.max(cells.length, 5) * slot, H = 40, w = 18, r = 3;
+  return `<svg viewBox="0 0 ${W} ${H}" class="hist strip" role="img" aria-label="${esc(label)}">${cells.map((c, i) => {
+    const x = i * slot + (slot - w) / 2, cx = x + w / 2;
+    return `<g class="bar" tabindex="0" data-tip="${esc(c.tip)}"><rect x="${i * slot}" y="0" width="${slot}" height="${H}" class="hit"/>
+      <path d="M${x + r},2h${w - 2 * r}q${r},0 ${r},${r}v${14 - 2 * r}q0,${r} ${-r},${r}h${-(w - 2 * r)}q${-r},0 ${-r},${-r}v${-(14 - 2 * r)}q0,${-r} ${r},${-r}z" class="${RES[c.res].cls}"/>
+      <text x="${cx}" y="28" class="val">${esc(c.label)}</text><text x="${cx}" y="38" class="ax small">${c.home ? 'C' : 'F'}</text></g>`;
+  }).join('')}</svg>`;
+}
+// A faixa de uma linha nos últimos jogos de um time ({ role, name, games, roleNow }): { html, wins, n } ou null.
+export function lineStrip(id, t) {
+  const h = history(id, t.role, t.name, t.games || []);
+  if (!h?.bars.length) return null;
+  return { wins: h.wins, n: h.bars.length, what: h.what, rule: h.rule,
+    html: chipStrip(h.bars.map(b => ({ res: b.res, label: b.v, home: b.g.home, tip: tipHtml(b, h, t.name, t.roleNow) })), `${t.name}: ${h.what} nos últimos jogos`) };
+}
+
+// lines: linhas do dossiê (pickDashboard); teams: [{ name, role, games, roleNow }]
+export function renderDashboard(lines, teams) {
+  if (!lines.length) return '<p class="muted">Nenhuma linha passou nos filtros para este jogo.</p>';
+  return chartLegend() + lines.map(l => {
+    const charts = teamCharts(l, teams);
     const tierCls = l.tier === 'âncora' ? 'ok' : l.tier === 'sólida' ? 'mid' : 'no';
     return `<article class="dash">
       <header><div><small class="muted">${esc(l.market)}</small><h3>${esc(l.line)}</h3></div>

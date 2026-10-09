@@ -243,3 +243,28 @@ textarea.plantext { width: 100%; min-height: 220px; font: 13px/1.5 ui-monospace,
 table.mlegs { border-collapse: collapse; font-size: 13px; margin: 4px 0; }
 table.mlegs td { padding: 3px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .multisum select { max-width: 320px; }
+
+/* o porquê de cada entrada do plano (planwhy.js) */
+.whycard .facts { margin: 2px 0 6px; font-size: 14px; }
+.whysum { margin: 4px 0 8px; font-size: 14px; line-height: 1.45; }
+.whygrid { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 6px 18px; align-items: start; margin-bottom: 8px; }
+ul.why { margin: 0; padding: 0; list-style: none; font-size: 13px; }
+ul.why li { margin: 3px 0; padding-left: 18px; position: relative; line-height: 1.4; }
+ul.why li > b:first-child { position: absolute; left: 0; width: 16px; text-align: center; }
+svg.chance { width: 100%; max-width: 420px; height: auto; display: block; }
+svg.chance .grid { stroke: var(--grid); stroke-width: 1; opacity: .45; }
+svg.chance .de { fill: #6b7785; }
+svg.chance .em { fill: #388bfd; }
+svg.chance text { font-size: 10px; fill: var(--muted); }
+svg.chance text.lbl { text-anchor: end; font-size: 11px; }
+svg.chance text.v { font-size: 11px; fill: var(--text); }
+svg.chance text.on { fill: var(--text); font-weight: 600; }
+svg.chance text.tick { text-anchor: middle; }
+svg.chance .ref { stroke: var(--text); stroke-width: 1.5; }
+svg.chance text.reflabel { fill: var(--text); font-weight: 600; text-anchor: middle; }
+.strips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; margin: 4px 0 2px; }
+.stripbox small { display: block; font-size: 12px; color: var(--muted); }
+.stripbox small b { color: var(--text); font-weight: 600; }
+svg.hist.strip { max-width: 300px; margin-top: 2px; }
+.legwhy { border-top: 1px solid var(--line); padding: 8px 0 4px; font-size: 13px; }
+@media (max-width: 640px) { .whygrid, .strips { grid-template-columns: minmax(0, 1fr); } }

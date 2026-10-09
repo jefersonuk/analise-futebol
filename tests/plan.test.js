@@ -148,3 +148,14 @@ test('múltipla editável no plano: perna asiática no bilhete (sem a odd da Pin
   const sim = buildPlanSim(plan);
   assert.equal(sim.bets[0].odd_src, 'mínima', 'perna asiática: odd mínima, sem CLV');
 });
+
+test('🤝 acordo com a Pinnacle: o jogo que depende da escalação fica fora, como na 🎯', () => {
+  id = 0;
+  const agree = { id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', tier: 'âncora', consistency_score: 0.8, p_model: 0.72, p_blend: 0.71, p_pinnacle: 0.7,
+    pinnacle_odd: 1.46, odd_min: 1.52, odd_min_vs_pinnacle_pct: 4.1, politica_e: 'cheia', context: { verdict: 'a favor', signals: [] } };
+  const games = [G({ lg: 1 }), G({ lg: 2 })];
+  games.forEach(g => { g.lines = [agree]; });
+  games[1].conditions = ['copa: risco de rodízio — confirmar a escalação'];
+  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
+  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]), [[1, 'agree']]);
+});
