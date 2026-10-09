@@ -1,15 +1,17 @@
 // Plano do dia (plan.js) na tela: um botão, na noite anterior, analisa o dia seguinte inteiro (a varredura da data,
 // guardada como a da seção de varredura) e mostra só o plano — 5 a 10 simples, 2 múltiplas e 5 no mesmo jogo —, cada
 // entrada com a odd mínima, a da Pinnacle, a chance e a entrada em R$, e o ➕ para registrar. "Copiar o plano" leva a
-// lista para apostar nas casas; o plano entra na 🧪 simulação para medirmos; o especialista recebe o plano. Embaixo do
-// resumo, o porquê de cada entrada (planwhy.js): texto e gráficos, como na varredura.
+// lista para apostar nas casas; o plano entra sozinho na 🧪 simulação para medirmos (o painel dos planos fica no fim
+// desta seção; plano fora dela tem o botão de simular); o especialista recebe o plano. Embaixo do resumo, o porquê de
+// cada entrada (planwhy.js): texto e gráficos, como na varredura.
 
 import { scanDay } from './scanner.js';
 import { load, save } from './store.js';
 import { exposedGames } from './entry.js';
 import { multiGames, multiLine } from './multiple.js';
 import { LENS, SINGLES, buildPlan, multiOf, planFromKeys, planKeys, planText } from './plan.js';
-import { buildPlanSim } from './sim.js';
+import { buildPlanSim, simReport } from './sim.js';
+import { simPanel } from './simview.js';
 import { bindSpecialist, briefPlan } from './brief.js';
 import { bindTooltips, chartLegend } from './dashboard.js';
 import { comboBody, legsBody, singleBody } from './planwhy.js';
@@ -62,19 +64,31 @@ export function initPlan({ api, openEntry, banca }) {
   }
   // o plano entra na simulação (separada das apostas reais), um por montagem; montou de novo a mesma janela antes de
   // qualquer jogo começar: substitui o anterior
+  const simIdOf = () => `plano-${Date.parse(scan.generated_at)}`;
   async function simPlan() {
-    const sim = buildPlanSim(plan, { banca, id: `plano-${Date.parse(scan.generated_at)}`, win: sel.value, label: labelOf(scan) });
-    if (!sim.bets.length) return;
-    const idx = (await api.loadDoc('af:simidx').catch(() => null)) || [], keep = [];
-    for (const id of idx) {
-      const old = id.startsWith('plano-') && id !== sim.id ? await api.loadDoc(`af:sim:${id}`).catch(() => null) : null;
-      if (old?.win === sim.win && old.bets.every(b => b.status === 'aberta' && b.kickoff > Date.now())) await api.removeDoc(`af:sim:${id}`).catch(() => {});
-      else if (id !== sim.id) keep.push(id);
-    }
-    await api.saveDoc('af:simidx', [sim.id, ...keep]);
-    await api.saveDoc(`af:sim:${sim.id}`, sim);
-    window.dispatchEvent(new CustomEvent('sims-changed'));
+    const sim = buildPlanSim(plan, { banca, id: simIdOf(), win: sel.value, label: labelOf(scan) });
+    if (!sim.bets.length) return false;
+    await simUI.add(sim, old => old.win === sim.win && old.bets.every(b => b.status === 'aberta' && b.kickoff > Date.now()));
+    return true;
   }
+  // as simulações dos planos (simview.js): todos os planos montados, o mais novo primeiro
+  const simUI = simPanel({ api, el: $('#planSimOut'), mine: id => String(id).startsWith('plano-'), title: '🧪 Simulação dos planos',
+    cat: c => c.replace(/^Plano: /, ''), onChange: () => render(),
+    intro: `Cada plano montado entra aqui sozinho, como se tivéssemos feito todas as entradas dele: as simples na odd da Pinnacle da hora do
+      plano, os combos e as pernas asiáticas na odd mínima do app ("mín."), as múltiplas no produto das odds da Pinnacle. Montar de novo a mesma
+      janela antes de qualquer jogo começar substitui o plano anterior. O resultado sai por frente (🎯 nossa leitura, 🤝 acordo com a Pinnacle),
+      múltipla e mesmo jogo, em unidades (stake 1 em tudo) e em R$ (a entrada proposta); CLV = a odd de entrada contra a justa de fechamento
+      da Pinnacle. Os resultados entram com 🔄 Conferir resultados depois dos jogos (e sozinhos com a página aberta). Nada daqui entra no app de apostas.` });
+  $('#planOut').addEventListener('click', async e => {
+    if (e.target.closest('#planSimRun') && plan) {
+      const ok = await simPlan();
+      simUI.say(ok ? 'Plano registrado na simulação: os resultados entram depois dos jogos.' : 'Este plano não tem entrada para simular.');
+      $('#planSimOut').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const go = e.target.closest('[data-simgo]');
+    if (go) document.getElementById(`sim-${go.dataset.simgo}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 
   $('#planRun').onclick = async () => {
     if (busy) return;
@@ -185,6 +199,12 @@ export function initPlan({ api, openEntry, banca }) {
     const valueCell = x => (x.lens === 'agree'
       ? `<span class="muted" title="a casa precisa pagar a mínima: ${x.value > 0 ? `${(x.value * 100).toFixed(1).replace('.', ',')}% acima` : 'até'} da odd da Pinnacle">casa ≥ mínima${x.value > 0 ? ` (+${(x.value * 100).toFixed(1).replace('.', ',')}% Pin)` : ''}</span>`
       : `<span class="pos">+${(x.value * 100).toFixed(1).replace('.', ',')}%</span>`);
+    const inSim = simUI.get(simIdOf()), sum = inSim && simReport(inSim).total, sg = x => `${x > 0 ? '+' : ''}${x.toFixed(2).replace('.', ',')}`;
+    const simLine = inSim ? `<p class="simbar"><span class="muted">🧪 Este plano está na simulação: ${sum.n} entradas${sum.done
+      ? ` · ${sum.done} encerrada${sum.done > 1 ? 's' : ''}${sum.open ? `, ${sum.open} em aberto` : ''} · <b class="${sum.profit_u > 0 ? 'pos' : sum.profit_u < 0 ? 'neg' : ''}">${sg(sum.profit_u)} u</b> · ${sum.profit_brl < 0 ? '−' : '+'}${brl(Math.abs(sum.profit_brl))}`
+      : ' · nenhuma encerrada ainda'}</span> <button class="ghost mini" data-simgo="${esc(inSim.id)}">ver o resultado ↓</button></p>`
+      : `<p class="simbar"><button class="ghost" id="planSimRun">🧪 Simular as propostas deste plano</button> <span class="muted">registra todas as entradas do plano,
+        com a odd da Pinnacle da hora do plano, numa área separada das apostas reais</span></p>`;
     const singles = n ? `<h3>Simples (${n})</h3><div class="scroll"><table class="scanrank plantab"><tr><th></th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Frente</th><th>Entrada</th>
       <th>Odd mínima</th><th>Pinnacle</th><th>Nossa · Pinnacle</th><th>Valor</th><th>R$</th></tr>${plan.singles.map((x, i) => { const { g, line } = x; return `<tr data-go="pw-s${i}">
       <td>${reg(`s:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t)}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
@@ -230,7 +250,7 @@ export function initPlan({ api, openEntry, banca }) {
         últimos jogos dos dois times.</p>${legsBody(scan.games, t)}`, reg(`m:${i}`, t.legs.every(l => has(l.fixtureId, l.home, l.away)), t.first_kickoff))).join('')}
       ${plan.sameGame.map(({ g, combo }, i) => card(`pw-c${i}`, `Mesmo jogo ${i + 1}`, g, `Combo: <b>${esc(combo.line)}</b> · odd mínima <b>${n2(combo.odd_min)}</b>${combo.entry_brl ? ` · R$ ${combo.entry_brl}` : ''}`,
         comboBody(g, combo), reg(`c:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t))).join('')}`;
-    out.innerHTML = `${head}${singles}${multis}${same}${empty}
+    out.innerHTML = `${head}${empty ? '' : simLine}${singles}${multis}${same}${empty}
       <p class="muted small">Como o plano é montado: um jogo entra uma vez só; jogo que já tem entrada fica fora. <b>Simples em duas frentes</b>, alternando:
       <b>🎯 nossa leitura</b> — a nossa chance (modelo corrigido + cenário) acima da Pinnacle, com ela pagando de 1,80 a 2,70 e acima da nossa mínima,
       pelo valor conservador (a nossa chance encolhida pela metade na direção da dela); e <b>🤝 acordo com a Pinnacle</b> — linhas consistentes (âncora
@@ -239,7 +259,7 @@ export function initPlan({ api, openEntry, banca }) {
       amostra curta — e o jogo difícil de analisar. <b>Múltiplas</b>: over de gols com a linha cotada pela Pinnacle; dá para trocar a linha da perna
       (1,75, 2 e 2,25 perdem só com 0–1 gol, como o 1,5; com 2 gols o 1,75 ganha metade, o 2 devolve, o 2,25 perde metade), tirar e pôr perna.
       <b>No mesmo jogo</b>: os combos de maior chance. Aposte só se a casa pagar a <b>odd mínima</b>; o plano entra na 🧪 simulação para medirmos
-      (inclusive o CLV: a odd da hora do plano contra a de fechamento).</p>${why}`;
+      (inclusive o CLV: a odd da hora do plano contra a de fechamento) — o resultado fica no fim desta seção, em 🧪 Simulação dos planos.</p>${why}`;
     bindTooltips(out);
   }
 
