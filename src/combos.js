@@ -12,7 +12,12 @@
 // justa conta isso com a odd da perna de gols numa casa soft (justa ÷ 1,05); na liquidação, esse caso fica para
 // marcar à mão.
 // Entram combos com chance ≥ 60%, odd mínima 1,50–3,00 (Política E) e que pagam pelo menos 10% mais que a
-// melhor perna sozinha — senão a segunda perna não acrescenta nada.
+// melhor perna sozinha — senão a segunda perna não acrescenta nada. A odd mínima é a justa × 1,05, sem piso: combo de
+// justa abaixo de 1,43 (a dupla chance do favorito + mais de 1,5, ~1,25) não aparece — "impossível achar a 1,50"
+// (Jeferson, 09/10/2026); antes o piso de 1,50 o mostrava como aposta.
+//
+// Para o Plano do dia (favWinCombos): a vitória do favorito + mais de 1,5 ou de 2,5 gols, com a chance que tiver (fica
+// perto de 2, onde a casa paga).
 
 import { SCENARIOS, impliedTotal, marketSupremacy, politicaE, roleOf, scoreGrid, stakeFor } from './model.js';
 import { HIT_MIN, ODD_FLOOR, consistency } from './consistency.js';
@@ -85,51 +90,72 @@ function comboHistory(c, teams) {
   return { home: one(teams.find(t => t.role === 'home')), away: one(teams.find(t => t.role === 'away')) };
 }
 
+// As grades de placares do jogo (mercado, modelo, mistura e os cenários do modelo), ou null sem o 1X2 e o total da Pinnacle.
+function gridsOf({ res, fair, hard }) {
+  const gp = res?.pred?.goals;
+  if (hard || !gp || !fair?.size || !fair.has('1') || !fair.has('2')) return null;
+  const T = impliedTotal(fair, 'g', 1)?.implied_total, s = T ? marketSupremacy(fair, T) : null;
+  if (!T || s == null) return null;
+  const mk = scoreGrid((T + s) / 2, (T - s) / 2), md = scoreGrid(gp.h, gp.a);
+  return { mk, md, bl: pool(mk, md), sc: SCENARIOS.map(([x, y]) => scoreGrid(gp.h * Math.exp(x * (gp.seH || 0)), gp.a * Math.exp(y * (gp.seA || 0)))) };
+}
+
+// Um combo (resultado rid + mais de L gols) pelas grades, ou null quando não sai (sem chance, justa ≤ 1, Política E fora).
+function comboAt({ mk, md, bl, sc }, rid, L, { teams, names, banca }) {
+  const c = parseCombo(`cb:${rid}+gO${L}`, names), b = probs(bl, c);
+  if (b.win <= 0.01) return null;
+  const rb = legP(bl, c.result.f), gb = legP(bl, c.goals.f);
+  const fairR = 1 + rb.l / rb.w, fairG = 1 / gb.w;
+  // odd justa do combo: EV 0 com o empate anula pagando a perna de gols numa casa soft
+  const oddG = fairG / SOFT, fair0 = (1 - b.push * oddG) / b.win, p = b.win + b.push;
+  const oddMin = fair0 * MARGIN;
+  if (!(fair0 > 1) || politicaE(oddMin).factor === 0) return null;
+  const m = probs(mk, c), mo = probs(md, c), range = sc.map(g => { const x = probs(g, c); return x.win + x.push; });
+  const hi = comboHistory(c, teams), hits = [hi.home, hi.away].filter(Boolean);
+  const cons = consistency({ p, pLow: Math.min(...range), hits });
+  const raw = hits.reduce((a, h) => ({ w: a.w + h.raw.wins, n: a.n + h.raw.n }), { w: 0, n: 0 });
+  // EV na odd mínima com o caso "vale só a perna de gols"
+  const pEff = (b.win * oddMin + b.push * oddG) / oddMin;
+  return {
+    id: `cb:${rid}+gO${L}`, market: COMBO, combo: true, line: `${c.result.label} + ${c.goals.label}`,
+    legs: [{ id: rid, line: c.result.label, p: r(rb.w), push: r(1 - rb.w - rb.l), fair_odd: r(fairR, 2) },
+      { id: c.goals.id, line: c.goals.label, p: r(gb.w), fair_odd: r(fairG, 2) }],
+    p_blend: r(p), p_full: r(b.win), push_prob: r(b.push), p_pinnacle: r(m.win + m.push), push_pinnacle: r(m.push), p_model: r(mo.win + mo.push),
+    p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
+    // quanto as pernas andam juntas: chance das duas ganharem ÷ produto das chances de cada uma
+    corr: r(b.win / (rb.w * gb.w)), odd_indep: r(fairR * fairG, 2), best_leg: r(Math.max(fairR, fairG), 2),
+    fair_odd_blend: r(fair0, 2), odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null, pinnacle_odd: null, fragile: true,
+    priced_by: 'combo: placares da Pinnacle (1X2 e total de gols) + 10% do modelo',
+    tier: cons.tier, consistency_score: r(cons.score), hit_rate_last10: raw.n ? r(raw.w / raw.n, 2) : null, hit_rate_role: r(cons.hit_rate, 2),
+    ...stakeFor(pEff, oddMin, banca), history: hi,
+  };
+}
+
 // Combos de um jogo, do mais consistente ao menos (até KEEP). res: analyzeMatch; fair: Pinnacle sem margem;
 // teams: [{ role, name, games, roleNow }]; hard: jogo difícil (sem combos).
 export function comboLines({ res, fair, teams, names, banca = 44000, hard = null }) {
-  const gp = res?.pred?.goals;
-  if (hard || !gp || !fair?.size || !fair.has('1') || !fair.has('2')) return [];
-  const T = impliedTotal(fair, 'g', 1)?.implied_total, s = T ? marketSupremacy(fair, T) : null;
-  if (!T || s == null) return [];
-  const mk = scoreGrid((T + s) / 2, (T - s) / 2), md = scoreGrid(gp.h, gp.a), bl = pool(mk, md);
-  const sc = SCENARIOS.map(([x, y]) => scoreGrid(gp.h * Math.exp(x * (gp.seH || 0)), gp.a * Math.exp(y * (gp.seA || 0))));
+  const grids = gridsOf({ res, fair, hard });
+  if (!grids) return [];
   const out = [];
   for (const rid of Object.keys(RESULT)) {
     if (inviableReason(rid, res.favor, names)) continue;   // "favorito +1,5" não sai a preço jogável
     for (const L of GOALS) {
-      const c = parseCombo(`cb:${rid}+gO${L}`, names), b = probs(bl, c);
-      if (b.win <= 0.01) continue;
-      const rb = legP(bl, c.result.f), gb = legP(bl, c.goals.f);
-      const fairR = 1 + rb.l / rb.w, fairG = 1 / gb.w;
-      // odd justa do combo: EV 0 com o empate anula pagando a perna de gols numa casa soft
-      const oddG = fairG / SOFT, fair0 = (1 - b.push * oddG) / b.win, p = b.win + b.push;
-      if (!(fair0 > 1) || p < HIT_MIN || fair0 < LIFT * Math.max(fairR, fairG)) continue;
-      const oddMin = Math.max(ODD_FLOOR, fair0 * MARGIN), pe = politicaE(oddMin);
-      if (pe.factor === 0) continue;
-      const m = probs(mk, c), mo = probs(md, c), range = sc.map(g => { const x = probs(g, c); return x.win + x.push; });
-      const hi = comboHistory(c, teams), hits = [hi.home, hi.away].filter(Boolean);
-      const cons = consistency({ p, pLow: Math.min(...range), hits });
-      const raw = hits.reduce((a, h) => ({ w: a.w + h.raw.wins, n: a.n + h.raw.n }), { w: 0, n: 0 });
-      // EV na odd mínima com o caso "vale só a perna de gols"
-      const pEff = (b.win * oddMin + b.push * oddG) / oddMin;
-      out.push({
-        id: `cb:${rid}+gO${L}`, market: COMBO, combo: true, line: `${c.result.label} + ${c.goals.label}`,
-        legs: [{ id: rid, line: c.result.label, p: r(rb.w), push: r(1 - rb.w - rb.l), fair_odd: r(fairR, 2) },
-          { id: c.goals.id, line: c.goals.label, p: r(gb.w), fair_odd: r(fairG, 2) }],
-        p_blend: r(p), p_full: r(b.win), push_prob: r(b.push), p_pinnacle: r(m.win + m.push), push_pinnacle: r(m.push), p_model: r(mo.win + mo.push),
-        p_model_range: [r(Math.min(...range)), r(Math.max(...range))],
-        // quanto as pernas andam juntas: chance das duas ganharem ÷ produto das chances de cada uma
-        corr: r(b.win / (rb.w * gb.w)), odd_indep: r(fairR * fairG, 2),
-        fair_odd_blend: r(fair0, 2), odd_min: r(oddMin, 2), odd_min_vs_pinnacle_pct: null, pinnacle_odd: null, fragile: true,
-        priced_by: 'combo: placares da Pinnacle (1X2 e total de gols) + 10% do modelo',
-        tier: cons.tier, consistency_score: r(cons.score), hit_rate_last10: raw.n ? r(raw.w / raw.n, 2) : null, hit_rate_role: r(cons.hit_rate, 2),
-        ...stakeFor(pEff, oddMin, banca), history: hi,
-      });
+      const c = comboAt(grids, rid, L, { teams, names, banca });
+      // chance ≥ 60%, a odd mínima de verdade (sem piso) ≥ 1,50 e pagando 10%+ acima da melhor perna sozinha
+      if (c && c.p_blend >= HIT_MIN && c.odd_min >= ODD_FLOOR && c.fair_odd_blend >= LIFT * c.best_leg) out.push(c);
     }
   }
   const TIER = { 'âncora': 0, 'sólida': 1, 'especulativa': 2 };
   return out.sort((a, b) => TIER[a.tier] - TIER[b.tier] || b.consistency_score - a.consistency_score || b.odd_min - a.odd_min).slice(0, KEEP);
+}
+
+// A vitória do favorito (pelo 1X2 da Pinnacle) + mais de 1,5 e + mais de 2,5 gols, com a chance que tiverem: o "mesmo
+// jogo" do Plano do dia escolhe entre eles (plan.js). fav: true.
+export function favWinCombos({ res, fair, teams, names, banca = 44000, hard = null }) {
+  const grids = gridsOf({ res, fair, hard });
+  if (!grids) return [];
+  const fav = fair.get('1') >= fair.get('2') ? '1' : '2';
+  return [1.5, 2.5].map(L => comboAt(grids, fav, L, { teams, names, banca })).filter(Boolean).map(c => ({ ...c, fav: true }));
 }
 
 // Liquidação no placar final: 'A' (as duas ganharam), 'RED', ou manual quando o empate anula volta e a de gols ganha.

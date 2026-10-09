@@ -105,10 +105,10 @@ test('condições do jogo, motivação e clássico', () => {
   assert.equal(derbyOf({ city: 'Rio de Janeiro' }, { city: 'São Paulo' }), null);
 });
 
-test('varredura: aba Nossa análise com aposta e "entrar se", aposta primeiro; v 10', async () => {
+test('varredura: aba Nossa análise com aposta e "entrar se", aposta primeiro; v 11', async () => {
   let n = 0;
   const scan = await scanDay({ ...demo, stats: () => ({ api: n, cache: 0 }) }, { date: '2026-10-01', top: 10, budget: 5000 });
-  assert.equal(scan.v, 10);
+  assert.equal(scan.v, 11);
   const r = rankGames(scan.games, { market: CENARIO });
   assert.ok(r.every(x => x.line.ours && (x.line.bet || x.line.conditional) && x.g.scenario.includes(x.line)));
   for (let i = 1; i < r.length; i++) assert.ok(r[i - 1].line.bet >= r[i].line.bet, 'aposta antes de "entrar se"');

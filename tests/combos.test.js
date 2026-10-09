@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
 import { scoreGrid, scoreMatrix, marketSupremacy, impliedTotal } from '../src/model.js';
-import { comboLines, comboOutcome, isCombo, liveCombo, parseCombo, settleCombo } from '../src/combos.js';
+import { comboLines, comboOutcome, favWinCombos, isCombo, liveCombo, parseCombo, settleCombo } from '../src/combos.js';
 import { COMBOS, pickGames, rankGames, scanDay } from '../src/scanner.js';
 import { isBet } from '../src/dossier.js';
 import { liveLine, settleLine } from '../src/settlement.js';
@@ -84,16 +84,42 @@ test('combos de um jogo: chance da matriz da Pinnacle, correlação e as regras 
   assert.deepEqual(comboLines({ res, fair: new Map(), teams, names: nm }), []);
 });
 
-test('varredura: filtro Combos com os melhores combos, aposta primeiro; v 10', async () => {
+test('varredura: filtro Combos com os melhores combos, aposta primeiro; v 11', async () => {
   let n = 0;
   const api = { ...demo, stats: () => ({ api: n, cache: 0 }) };
   const scan = await scanDay(api, { date: '2026-10-01', top: 10, budget: 5000 });
-  assert.equal(scan.v, 10);
+  assert.equal(scan.v, 11);
   const r = rankGames(scan.games, { market: COMBOS });
   assert.ok(r.every(x => x.line.combo && x.g.combos.includes(x.line)));
   for (let i = 1; i < r.length; i++) assert.ok(isBet(r[i - 1].line) >= isBet(r[i].line), 'apostas primeiro');
   assert.ok(pickGames(scan.games, { market: COMBOS, top: 3 }).length <= 3);
   assert.ok(scan.games.filter(g => g.hard).every(g => !g.combos.length), 'jogo difícil sem combos');
+  // a vitória do favorito + gols (para o plano): 1,5 e 2,5, do mandante ou do visitante, guardados com o jogo
+  const fc = scan.games.filter(g => g.fav_combos?.length);
+  assert.ok(fc.length, 'algum jogo com a vitória do favorito + gols');
+  for (const g of fc) assert.ok(g.fav_combos.every(c => c.fav && /^cb:[12]\+gO(1\.5|2\.5)$/.test(c.id)), g.fav_combos.map(c => c.id).join());
+});
+
+test('vitória do favorito + gols: 1,5 e 2,5 do favorito do 1X2; a dupla chance + 1,5 de justa ~1,25 não aparece mais a 1,50', async () => {
+  const { analyzeMatch } = await import('../src/model.js');
+  const { recentGames } = await import('../src/insights.js');
+  const { rolesNow } = await import('../src/dossier.js');
+  const { matches, f: fx, fair } = demoGame((a, b) => b.fair.get('1') - a.fair.get('1'));   // o mandante mais favorito
+  const res = analyzeMatch(matches, fx.home.id, fx.away.id, fx.t, { fair });
+  const now = rolesNow(res.favor);
+  const teams = [['home', fx.home], ['away', fx.away]].map(([role, t]) => ({ role, name: t.name, games: recentGames(res.prep, t.id), roleNow: now[role] }));
+  const nm = { home: fx.home.name, away: fx.away.name };
+  const fav = favWinCombos({ res, fair, teams, names: nm });
+  assert.equal(fav[0].id, 'cb:1+gO1.5', 'o mandante é o favorito');
+  // o 2,5 acerta menos e paga mais; sai da lista quando a mínima passa de 3,00 (Política E: não entrar)
+  if (fav[1]) assert.ok(fav[1].id === 'cb:1+gO2.5' && fav[0].p_blend > fav[1].p_blend && fav[0].odd_min < fav[1].odd_min);
+  assert.ok(fav.every(c => c.odd_min <= 3), 'até 3,00');
+  assert.ok(fav.every(c => Math.abs(c.odd_min - c.fair_odd_blend * 1.05) < 0.02), 'mínima = justa × 1,05, sem piso');
+  assert.ok(fav[0].p_blend < fair.get('1') + 1e-9, 'nunca acima da chance da vitória sozinha');
+  // a dupla chance do favorito + 1,5 (justa bem abaixo de 1,43) não entra na lista com a mínima falsa de 1,50
+  const dc = comboLines({ res, fair, teams, names: nm }).find(c => c.id === 'cb:1X+gO1.5');
+  assert.ok(!dc || dc.fair_odd_blend * 1.05 >= 1.5, dc ? `${dc.fair_odd_blend}` : 'fora');
+  assert.deepEqual(favWinCombos({ res, fair, teams, names: nm, hard: { reasons: ['base'] } }), [], 'jogo difícil: nada');
 });
 
 test('conferência e ao vivo de um combo', () => {

@@ -33,7 +33,7 @@ import { GOAL_HANDICAP, HIT_MIN, MAIN_LINES, SHOTS, floorOutOfReach, isMain, isM
 import { buildContext } from './context.js';
 import { livePlanOf } from './live.js';
 import { hardGame } from './hard.js';
-import { comboLines } from './combos.js';
+import { comboLines, favWinCombos } from './combos.js';
 import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
 import { loadClubs } from './clubs.js';
 import { multiLegs } from './multiple.js';
@@ -129,6 +129,8 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
   const best = Object.fromEntries(SCAN_MARKETS.map(m => [m, bestLine(lines, { market: m })]));
   // combos de duas pernas (resultado + over de gols), pela matriz de placares da Pinnacle + modelo
   const combos = comboLines({ res, fair, teams, names, banca, hard });
+  // e a vitória do favorito + gols, para o "mesmo jogo" do Plano do dia
+  const favCombos = favWinCombos({ res, fair, teams, names, banca, hard });
   // nossa análise: as linhas de gols da Pinnacle (1X2, handicap, over) pela nossa leitura, com as condições do jogo
   // (entrar se…: escalação de time de base, copa, dúvida); a Pinnacle como segunda opinião
   const conditions = conditionsOf({ fx, hard, injuries: extra.injuries || [], clubs: extra.clubs || null });
@@ -136,7 +138,7 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
     { banca, hard, conditions }).slice(0, 6);
   const a = res.anchors, h1 = !noCorners;
   return {
-    fx, teams, lines, best, combos, scenario, conditions, injuries: extra.injuries || null, alerts, odds_age_min: ageMin, team_base: teamBase, no_corners: noCorners,
+    fx, teams, lines, best, combos, fav_combos: favCombos, scenario, conditions, injuries: extra.injuries || null, alerts, odds_age_min: ageMin, team_base: teamBase, no_corners: noCorners,
     favor: res.favor && Object.fromEntries(Object.entries(res.favor).map(([k, v]) => [k, typeof v === 'number' ? r2(v) : v])),
     favor_text: favorSummary(res.favor, names),
     c1_known: teams.map(t => t.games.filter(g => g.c1).length),
@@ -312,9 +314,11 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   const keepOf = () => {
     const keep = new Set();
     for (const market of [CENARIO, null, ...FILTER_KEYS, LIVE_1H]) for (const { g } of rankGames(games, { market }).slice(0, top)) keep.add(g);
-    // e os jogos com as melhores pernas de múltipla (over de gols cotado)
+    // e os jogos com as melhores pernas de múltipla (over de gols cotado) e com a vitória do favorito + gols mais provável
     const ids = new Set(multiLegs(games, { now }).filter(l => l.quoted).slice(0, top).map(l => l.fixtureId));
     for (const g of games) if (ids.has(g.fx.id)) keep.add(g);
+    const fp = g => Math.max(0, ...(g.fav_combos || []).map(c => c.p_blend));
+    for (const g of games.filter(g => g.fav_combos?.length).sort((a, b) => fp(b) - fp(a)).slice(0, top)) keep.add(g);
     return keep;
   };
   // 3ª passada: confronto direto em todas as competições (API) dos jogos guardados e clássico (cidade dos dois times,
@@ -345,12 +349,12 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   // resumo dos escanteios: por que um jogo tem ou não tem linha de escanteios na lista
   const cornersReport = games.reduce((o, g) => { const k = g.corners?.status || 'sem linha'; o[k] = (o[k] || 0) + 1; return o; }, {});
   for (const g of games) if (g.corners?.source && g.corners.status !== 'sem linha') cornersReport[`preço ${g.corners.source}`] = (cornersReport[`preço ${g.corners.source}`] || 0) + 1;
-  // v 10: nossa análise primeiro (modelo corrigido + cenário por nível do adversário; Pinnacle como segunda opinião) e
+  // v 11: combos sem o piso de 1,50 na odd mínima e a vitória do favorito + gols (fav_combos); v 10: nossa análise primeiro (modelo corrigido + cenário por nível do adversário; Pinnacle como segunda opinião) e
   // condições do jogo; v 9: leitura de cenário (aba padrão), motivação e clássico; v 8: combos de duas pernas; v 7: só over, chutes e 1X2, "Melhor do jogo" sem escanteios; v 6: jogo difícil de analisar (base/reservas,
   // ligas diferentes); v 5: piso de 60% de acerto e odd mínima com
   // piso de 1,50; v 4: janela de horas, contexto e plano ao vivo do 1º tempo. A tela avisa quando a varredura
   // guardada é de antes
-  return { v: 10, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
+  return { v: 11, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
     generated_at: new Date(now).toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }

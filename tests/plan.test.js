@@ -13,8 +13,10 @@ const G = ({ h = 14, lg = 1, single = null, cond = false, combo = null, over = n
   return { fx: { id: f, t: NOW + h * H, home: { id: f * 10, name: `C${f}` }, away: { id: f * 10 + 1, name: `F${f}` }, league: { id: lg, name: `Liga ${lg}` } }, hard,
     scenario: single ? [{ id: 'ahA0.5', market: 'Handicap asiático', line: `F${f} +0,5`, bet: !cond, conditional: cond, p_nossa: single[0], p_pinnacle: single[1],
       pinnacle_odd: single[2], odd_min: 1.05 / single[0], entry_brl: 150, why: 'modelo +3 · cenário +2' }] : [],
-    combos: combo ? [{ id: 'cb:dcH|gO1.5', market: 'Combo', line: `C${f} ou empate + Mais de 1,5`, tier: 'sólida', consistency_score: 0.7, p_blend: combo, p_pinnacle: combo,
-      odd_min: 1.55, fragile: false, odd_min_vs_pinnacle_pct: 0, politica_e: 'cheia', entry_brl: 100, context: { verdict: 'neutro', signals: [] } }] : [],
+    // mesmo jogo: a vitória do favorito + 1,5 (chance combo) e + 2,5 (18 pp a menos), mínima = justa × 1,05
+    fav_combos: combo ? [1.5, 2.5].map((L, k) => { const p = combo - k * 0.18; return { id: `cb:1+gO${L}`, market: 'Combo', combo: true, fav: true, line: `C${f} vence + Mais de ${L} gols`,
+      legs: [{ id: '1', line: `C${f} vence`, p: 0.7, push: 0, fair_odd: 1.43 }, { id: `gO${L}`, line: `Mais de ${L} gols`, p: 0.8 - k * 0.25, fair_odd: 1.25 }],
+      tier: 'especulativa', p_blend: p, p_pinnacle: p, push_pinnacle: 0, fair_odd_blend: +(1 / p).toFixed(2), odd_min: +(1.05 / p).toFixed(2), entry_brl: 100 }; }) : [],
     lines: over ? [{ id: 'gO1.5', market: 'Total de gols', line: 'Mais de 1,5', p_blend: over, p_pinnacle: over, pinnacle_odd: +(1 / over / 1.025).toFixed(2), context: { verdict: 'neutro', signals: [] } }] : [] };
 };
 
@@ -36,8 +38,8 @@ test('simples: as apostas da nossa análise pelo valor conservador; fora "entrar
 test('um jogo uma vez só; mesmo jogo e múltiplas nos jogos que sobraram; jogo com entrada fica fora', () => {
   id = 0;
   const games = [
-    G({ single: [0.6, 0.5, 2.0], combo: 0.75, over: 0.8 }),           // vira simples: o combo e a perna dele não entram
-    ...Array.from({ length: 7 }, (_, i) => G({ lg: 3, combo: 0.65 + i * 0.02, over: 0.78 })),
+    G({ single: [0.6, 0.5, 2.0], combo: 0.6, over: 0.8 }),            // vira simples: o combo e a perna dele não entram
+    ...Array.from({ length: 7 }, (_, i) => G({ lg: 3, combo: 0.52 + i * 0.015, over: 0.78 })),
     ...Array.from({ length: 12 }, (_, i) => G({ lg: 4 + i, over: 0.75 + (i % 3) * 0.03 })),
     G({ lg: 30, single: [0.62, 0.5, 2.1] }),                            // já tem entrada
   ];
@@ -48,7 +50,8 @@ test('um jogo uma vez só; mesmo jogo e múltiplas nos jogos que sobraram; jogo 
   assert.deepEqual(plan.singles.map(x => x.g.fx.id), [1]);
   assert.equal(plan.sameGame.length, SAME_GAME);
   assert.ok(plan.sameGame.every(x => x.g.fx.id !== 1));
-  assert.ok(plan.sameGame.map(x => x.combo.p_blend).every(p => p >= 0.69), 'os 5 combos de maior chance');
+  assert.ok(plan.sameGame.map(x => x.combo.p_blend).every(p => p >= 0.549), 'os 5 combos de maior chance');
+  assert.ok(plan.sameGame.every(x => x.combo.id === 'cb:1+gO1.5'), 'a vitória do favorito + 1,5 (paga 1,60+)');
   assert.equal(plan.multis.length, 2);
   assert.ok(plan.multis.every(t => t.n >= 2 && t.fair >= 3.9 || t.n === 6));
   assert.ok(!ids.includes(21), 'jogo que já tem entrada fica fora');
@@ -57,6 +60,7 @@ test('um jogo uma vez só; mesmo jogo e múltiplas nos jogos que sobraram; jogo 
   const again = planFromKeys({ games }, planKeys(plan));
   assert.deepEqual(again.singles.map(x => x.line.id), plan.singles.map(x => x.line.id));
   assert.deepEqual(again.multis.map(t => t.legs.map(l => l.key)), plan.multis.map(t => t.legs.map(l => l.key)));
+  assert.deepEqual(again.sameGame.map(x => x.combo.id), plan.sameGame.map(x => x.combo.id));
   // texto para copiar e a simulação do plano
   const txt = planText(plan, { dateLabel: 'sexta, 09/10' });
   assert.match(txt, /^PLANO sexta, 09\/10\n\nSIMPLES \(1\)\n1\. .* — F1 \+0,5 · odd ≥ [\d,]+ \(Pinnacle 2,00\) · R\$ 150/);
@@ -162,3 +166,31 @@ test('🤝 acordo com a Pinnacle: o jogo que depende da escalação fica fora, c
   const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
   assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]), [[1, 'agree']]);
 });
+
+test('mesmo jogo: vitória do favorito + 1,5; se a de 1,5 paga menos de 1,60, a de 2,5; abaixo de 50% ou com escalação a conferir, fora', async () => {
+  const { COMBO_ODDS, COMBO_P } = await import('../src/plan.js');
+  id = 0;
+  const games = [
+    G({ lg: 1, combo: 0.58 }),                       // 1,5 a 1,81: entra a de 1,5
+    G({ lg: 2, combo: 0.72 }),                       // 1,5 a 1,46 (pouco): entra a de 2,5 (54% a 1,94)
+    G({ lg: 3, combo: 0.45 }),                       // 1,5 a 45%: fora (2,5 a 27% também)
+    G({ lg: 4, combo: 0.6 }),                        // com condição (copa): fora
+  ];
+  games[3].conditions = ['copa: risco de rodízio — confirmar a escalação'];
+  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
+  assert.deepEqual(plan.sameGame.map(x => [x.g.fx.id, x.combo.id]).sort(), [[1, 'cb:1+gO1.5'], [2, 'cb:1+gO2.5']]);
+  assert.ok(plan.sameGame.every(x => x.combo.p_blend >= COMBO_P && x.combo.odd_min >= COMBO_ODDS[0] && x.combo.odd_min <= COMBO_ODDS[1]));
+  // trocou a linha de gols na tela: as chaves guardam a escolhida
+  const i = plan.sameGame.findIndex(x => x.g.fx.id === 1);
+  plan.sameGame[i] = { g: plan.sameGame[i].g, combo: plan.sameGame[i].g.fav_combos[1] };
+  assert.equal(planFromKeys({ games }, planKeys(plan)).sameGame[i].combo.id, 'cb:1+gO2.5');
+  // na simulação, na odd que a Pinnacle pagaria (a justa pelas chances dela com a margem dela)
+  const sim = buildPlanSim(plan).bets.filter(x => x.cat === 'Plano: mesmo jogo');
+  assert.equal(sim.length, 2);
+  for (const b of sim) {
+    const c = plan.sameGame.find(x => x.g.fx.id === b.fixtureId).combo;
+    assert.equal(b.odd_src, 'pinnacle est.');
+    assert.ok(b.odd < c.odd_min && b.odd < c.fair_odd_blend, `${b.odd} abaixo da justa ${c.fair_odd_blend} e da mínima ${c.odd_min}: o pior cenário`);
+  }
+});
+
