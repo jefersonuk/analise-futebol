@@ -81,3 +81,17 @@ test('múltipla: o bilhete automático da hora da varredura; uma perna perdida p
   await settleSim(sim, io);
   assert.equal(m.winner, 'RED'); assert.equal(m.profit_u, -1);
 });
+
+test('múltipla com perna asiática: devolução e meia pagam pelo produto do que cada perna pagou', async () => {
+  const sim = { id: 't', bets: [{ key: 'Múltipla|x', cat: 'Plano: múltipla', fixtureId: null, kickoff: T0, legs: [
+    { fixtureId: 1, lineId: 'gO2', home: 'A', away: 'B', line: 'Mais de 2', odd: 1.5 },
+    { fixtureId: 2, lineId: 'gO1.75', home: 'C', away: 'D', line: 'Mais de 1,75', odd: 1.4 },
+    { fixtureId: 3, lineId: 'gO1.5', home: 'E', away: 'F', line: 'Mais de 1,5', odd: 1.3 }], odd: 2.73, stake_brl: 100, status: 'aberta' }] };
+  const RES = { 1: 'VOID', 2: 'HW', 3: 'A' };
+  const io = { fixtures: async () => new Map([1, 2, 3].map(i => [i, { finished: true, score: `jogo ${i}`, id: i }])), settle: (lineId, f) => ({ winner: RES[f.id] }),
+    halfCorners: async () => null, closing: null };
+  await settleSim(sim, io);
+  const b = sim.bets[0];
+  // 1 (devolve) × 1,2 (meia de 1,4) × 1,3 = 1,56 → lucro +0,56 u
+  assert.equal(b.mult, 1.56); assert.equal(b.profit_u, 0.56); assert.equal(b.winner, 'A'); assert.equal(b.profit_brl, 56);
+});

@@ -6,8 +6,8 @@
 import { scanDay } from './scanner.js';
 import { load, save } from './store.js';
 import { exposedGames } from './entry.js';
-import { multiLine } from './multiple.js';
-import { SINGLES, buildPlan, planFromKeys, planKeys, planText } from './plan.js';
+import { multiGames, multiLine } from './multiple.js';
+import { LENS, SINGLES, buildPlan, multiOf, planFromKeys, planKeys, planText } from './plan.js';
 import { buildPlanSim } from './sim.js';
 import { bindSpecialist, briefPlan } from './brief.js';
 
@@ -115,6 +115,34 @@ export function initPlan({ api, openEntry, banca }) {
   // registrou: a entrada aparece marcada
   $('#entryDlg')?.addEventListener('close', () => { if (plan) render(); });
 
+  // as linhas possíveis de cada jogo para as pernas (as da aba Múltipla, com as asiáticas) e os jogos já no plano
+  const optionsByGame = () => new Map(multiGames(scan.games, { now: 0 }).map(m => [m.fixtureId, m.options]));
+  const usedGames = () => new Set([...plan.singles.map(x => x.g.fx.id), ...plan.sameGame.map(x => x.g.fx.id), ...plan.multis.flatMap(t => t.legs.map(l => l.fixtureId))]);
+  // editou uma múltipla: refaz a conta, guarda o plano e a simulação dele
+  async function editMulti(i, legs) {
+    plan.multis[i] = multiOf(legs, banca);
+    await save(`af:plan:${keyOf(sel.value)}`, planKeys(plan));
+    await simPlan();
+    render();
+  }
+  $('#planOut').addEventListener('change', e => {
+    const ml = e.target.closest('[data-pml]'), ma = e.target.closest('[data-pma]');
+    if (ml) {
+      const [i, j] = ml.dataset.pml.split(':').map(Number), legs = [...plan.multis[i].legs], o = optionsByGame().get(legs[j].fixtureId)?.find(x => x.lineId === ml.value);
+      if (o) { legs[j] = o; editMulti(i, legs); }
+    }
+    if (ma && ma.value) {
+      const i = Number(ma.dataset.pma), o = optionsByGame().get(Number(ma.value))?.[0];
+      if (o) editMulti(i, [...plan.multis[i].legs, o].sort((a, b) => a.kickoff - b.kickoff));
+    }
+  });
+  $('#planOut').addEventListener('click', e => {
+    const x = e.target.closest('[data-pmx]');
+    if (!x) return;
+    const [i, j] = x.dataset.pmx.split(':').map(Number);
+    if (plan.multis[i].legs.length > 2) editMulti(i, plan.multis[i].legs.filter((_, k) => k !== j));
+  });
+
   function render() {
     const out = $('#planOut');
     $('#planCopy').hidden = $('#planSpec').hidden = !plan;
@@ -135,21 +163,39 @@ export function initPlan({ api, openEntry, banca }) {
     const total = stake.reduce((s, [v]) => s + v, 0), pot = stake.reduce((s, [v, o]) => s + v * (o - 1), 0);
     const n = plan.singles.length, st = plan.stats, budgetOut = (scan.skipped || []).filter(s => /orçamento/.test(s.why || '')).length;
     const head = `<p class="muted"><b>${esc(labelOf(scan))}</b> · análise de ${when}: ${scan.analyzed} jogos analisados de ${scan.fixtures} ${scan.window ? 'na janela' : 'do dia'} · ${scan.requests} requisições.
-      <b>${n} simples · ${plan.multis.length} múltipla${plan.multis.length === 1 ? '' : 's'} · ${plan.sameGame.length} no mesmo jogo</b> · entradas ${brl(total)}
+      <b>${n} simples (${plan.singles.filter(x => x.lens !== 'agree').length} 🎯 nossa leitura · ${plan.singles.filter(x => x.lens === 'agree').length} 🤝 acordo com a Pinnacle)
+      · ${plan.multis.length} múltipla${plan.multis.length === 1 ? '' : 's'} · ${plan.sameGame.length} no mesmo jogo</b> · entradas ${brl(total)}
       · <span class="pos">+${brl(pot)} se tudo green</span>${st ? ` · fora do plano: ${st.exposed ? `${st.exposed} jogo${st.exposed > 1 ? 's' : ''} que já têm entrada, ` : ''}${st.waiting} que dependem da escalação ("entrar se…")` : ''}.</p>
       ${budgetOut ? `<p class="neg">${budgetOut} jogos com odds ficaram fora da análise pelo limite de requisições (${scan.budget}): aumente o limite na seção de varredura e monte de novo.</p>` : ''}
-      ${n < SINGLES[0] ? `<p class="muted">${scan.window ? 'A janela' : 'O dia'} rendeu ${n} simples pela nossa análise — menos que 5: melhor poucas do que forçar entrada sem valor.</p>` : ''}`;
-    const singles = n ? `<h3>Simples (${n})</h3><div class="scroll"><table class="scanrank plantab"><tr><th></th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Entrada</th>
-      <th>Odd mínima</th><th>Pinnacle</th><th>Nossa · Pinnacle</th><th>Valor</th><th>R$</th></tr>${plan.singles.map(({ g, line, value }, i) => `<tr>
+      ${n < SINGLES[0] ? `<p class="muted">${scan.window ? 'A janela' : 'O dia'} rendeu ${n} simples — menos que 5: melhor poucas do que forçar entrada sem valor.</p>` : ''}`;
+    // simples: as duas frentes; na 🎯 o valor é o nosso (conservador) na odd da Pinnacle; na 🤝 o valor está na casa pagar a mínima
+    const lensTag = x => (x.lens === 'agree'
+      ? '<span class="tag ok" title="o modelo e a Pinnacle concordam; linha consistente (histórico e contexto); o valor está na casa pagar a mínima">🤝 acordo</span>'
+      : `<span class="tag mid" title="a nossa chance (modelo corrigido + cenário) acima da Pinnacle: valor contra ela">🎯 nossa leitura${x.line.contra ? ' · contra a Pinnacle' : ''}</span>`);
+    const valueCell = x => (x.lens === 'agree'
+      ? `<span class="muted" title="a casa precisa pagar a mínima: ${x.value > 0 ? `${(x.value * 100).toFixed(1).replace('.', ',')}% acima` : 'até'} da odd da Pinnacle">casa ≥ mínima${x.value > 0 ? ` (+${(x.value * 100).toFixed(1).replace('.', ',')}% Pin)` : ''}</span>`
+      : `<span class="pos">+${(x.value * 100).toFixed(1).replace('.', ',')}%</span>`);
+    const singles = n ? `<h3>Simples (${n})</h3><div class="scroll"><table class="scanrank plantab"><tr><th></th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Frente</th><th>Entrada</th>
+      <th>Odd mínima</th><th>Pinnacle</th><th>Nossa · Pinnacle</th><th>Valor</th><th>R$</th></tr>${plan.singles.map((x, i) => { const { g, line } = x; return `<tr>
       <td>${reg(`s:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t)}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
-      <td class="muted">${esc(g.fx.league.name)}</td><td title="${esc(line.why || '')}"><span class="muted">${esc(SHORT[line.market] || line.market)}:</span> <b>${esc(line.line)}</b>${line.contra ? ' <span class="tag mid" title="a nossa chance 5 pp ou mais acima da Pinnacle">contra a Pinnacle</span>' : ''}</td>
-      <td><b>${n2(line.odd_min)}</b></td><td>${n2(line.pinnacle_odd)}</td><td><b>${pct(line.p_nossa)}</b> <span class="muted">· ${pct(line.p_pinnacle)}</span></td>
-      <td class="pos">+${(value * 100).toFixed(1).replace('.', ',')}%</td><td>${line.entry_brl ? `${line.entry_brl}` : '—'}</td></tr>`).join('')}</table></div>` : '';
+      <td class="muted">${esc(g.fx.league.name)}</td><td>${lensTag(x)}</td><td title="${esc(line.why || (line.context ? `contexto ${line.context.verdict}; nível ${line.tier}` : ''))}"><span class="muted">${esc(SHORT[line.market] || line.market)}:</span> <b>${esc(line.line)}</b></td>
+      <td><b>${n2(line.odd_min)}</b></td><td>${n2(line.pinnacle_odd)}</td><td><b>${pct(line.p_nossa ?? line.p_blend)}</b> <span class="muted">· ${pct(line.p_pinnacle)}</span></td>
+      <td>${valueCell(x)}</td><td>${line.entry_brl ? `${line.entry_brl}` : '—'}</td></tr>`; }).join('')}</table></div>` : '';
+    // múltiplas editáveis: trocar a linha da perna (1,5 · 1,75 · 2 · 2,25 · 2,5), tirar perna, pôr perna de outro jogo
+    const opts = optionsByGame(), inPlan = usedGames();
+    const legInfo = l => (l.asian ? `não perde ${pct(l.p)} (0–1 gol perde) · cheia ${pct(l.p_win)} (3+ gols)` : `acerta ${pct(l.p)}`);
+    const legRow = (t, i, l, j) => `<tr><td>${hour(l.kickoff)}</td><td>${esc(l.home)} x ${esc(l.away)}</td>
+      <td><select data-pml="${i}:${j}" title="2 gols: o 1,75 ganha metade, o 2 devolve, o 2,25 perde metade">${(opts.get(l.fixtureId) || [l]).map(o => `<option value="${esc(o.lineId)}"${o.lineId === l.lineId ? ' selected' : ''}>${esc(o.line)}${o.asian ? ' (asiática)' : o.quoted ? '' : ' (não cotada)'}</option>`).join('')}</select></td>
+      <td class="muted">${legInfo(l)}</td><td>justa ${n2(l.fair)}</td><td><b>≥ ${n2(l.min)}</b></td>
+      <td>${t.n > 2 ? `<button class="ghost mini" data-pmx="${i}:${j}" title="Tirar a perna">✕</button>` : ''}</td></tr>`;
+    const addSel = i => { const free = [...opts.entries()].filter(([f]) => !inPlan.has(f)).map(([, os]) => os[0]).sort((a, b) => a.kickoff - b.kickoff);
+      return free.length ? `<select data-pma="${i}"><option value="">➕ pôr uma perna…</option>${free.map(o => `<option value="${o.fixtureId}">${hour(o.kickoff)} ${esc(o.home)} x ${esc(o.away)} — ${esc(o.line)} · ${pct(o.p)}</option>`).join('')}</select>` : ''; };
     const multis = plan.multis.length ? `<h3>Múltiplas (${plan.multis.length})</h3>${plan.multis.map((t, i) => `<div class="multisum">
-      <div>${reg(`m:${i}`, t.legs.every(l => has(l.fixtureId, l.home, l.away)), t.first_kickoff)} <b>Múltipla ${i + 1}</b> · ${t.n} pernas · acerta todas em <b>${pct(t.p_all)}</b>
-        <span class="muted">(Pinnacle ${pct(t.p_pinnacle_all)})</span> · odd total mínima <b>${n2(t.min)}</b> <span class="muted">(justa ${n2(t.fair)}; na Pinnacle ${n2(t.odd)})</span>
-        · ${brl(t.stake || t.stake_at_min || 0)}</div>
-      <div class="muted">${t.legs.map(l => `${hour(l.kickoff)} ${esc(l.home)} x ${esc(l.away)} — ${esc(l.line)} (≥ ${n2(l.min)})`).join(' · ')}</div></div>`).join('')}` : '';
+      <div>${reg(`m:${i}`, t.legs.every(l => has(l.fixtureId, l.home, l.away)), t.first_kickoff)} <b>Múltipla ${i + 1}</b> · ${t.n} pernas · ${t.asian ? 'não perde' : 'acerta todas'} em <b>${pct(t.p_all)}</b>
+        ${t.asian ? `<span class="muted">(todas cheias ${pct(t.p_win_all)})</span> ` : ''}<span class="muted">(Pinnacle ${pct(t.p_pinnacle_all)})</span> · odd total mínima <b>${n2(t.min)}</b>
+        <span class="muted">(justa ${n2(t.fair)}${t.odd ? `; na Pinnacle ${n2(t.odd)}` : ''})</span> · ${brl(t.stake || t.stake_at_min || 0)}</div>
+      <div class="scroll"><table class="mlegs">${t.legs.map((l, j) => legRow(t, i, l, j)).join('')}</table></div>
+      <div>${addSel(i)}</div></div>`).join('')}` : '';
     const same = plan.sameGame.length ? `<h3>No mesmo jogo (${plan.sameGame.length})</h3><div class="scroll"><table class="scanrank plantab"><tr><th></th><th>Hora</th><th>Jogo</th><th>Liga</th>
       <th>Combo</th><th>Chance</th><th>Odd mínima</th><th>R$</th></tr>${plan.sameGame.map(({ g, combo }, i) => `<tr>
       <td>${reg(`c:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t)}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
@@ -157,12 +203,15 @@ export function initPlan({ api, openEntry, banca }) {
       <td><b>${n2(combo.odd_min)}</b></td><td>${combo.entry_brl ? `${combo.entry_brl}` : '—'}</td></tr>`).join('')}</table></div>` : '';
     const empty = !n && !plan.multis.length && !plan.sameGame.length ? '<p class="muted">Nenhuma entrada passou nas regras do plano neste dia.</p>' : '';
     out.innerHTML = `${head}${singles}${multis}${same}${empty}
-      <p class="muted small">Como o plano é montado: um jogo entra uma vez só; jogo que já tem entrada fica fora. Simples: as apostas da nossa análise com a
-      Pinnacle pagando de 1,80 a 2,70 e acima da nossa mínima, pelo valor conservador (a nossa chance encolhida pela metade na direção da Pinnacle, na odd
-      dela), no máximo 3 por liga. Fica fora o que depende da escalação — o plano não espera por ela: copa (rodízio), time de base/B, dúvida de desfalque,
-      leitura longe da Pinnacle, amostra curta — e o jogo difícil de analisar. Múltiplas: over de gols com a linha cotada pela Pinnacle, as melhores pernas
-      no primeiro bilhete. No mesmo jogo: os combos de maior chance. Aposte só se a casa pagar a <b>odd mínima</b>; o plano entra na 🧪 simulação para
-      medirmos (inclusive o CLV: a odd da hora do plano contra a de fechamento).</p>`;
+      <p class="muted small">Como o plano é montado: um jogo entra uma vez só; jogo que já tem entrada fica fora. <b>Simples em duas frentes</b>, alternando:
+      <b>🎯 nossa leitura</b> — a nossa chance (modelo corrigido + cenário) acima da Pinnacle, com ela pagando de 1,80 a 2,70 e acima da nossa mínima,
+      pelo valor conservador (a nossa chance encolhida pela metade na direção da dela); e <b>🤝 acordo com a Pinnacle</b> — linhas consistentes (âncora
+      ou sólida, 60%+, histórico dos times e contexto que não é contra) em que o modelo não discorda dela: aí o valor está na casa pagar a mínima.
+      No máximo 3 por liga. Fica fora o que depende da escalação — copa (rodízio), time de base/B, dúvida de desfalque, leitura longe da Pinnacle,
+      amostra curta — e o jogo difícil de analisar. <b>Múltiplas</b>: over de gols com a linha cotada pela Pinnacle; dá para trocar a linha da perna
+      (1,75, 2 e 2,25 perdem só com 0–1 gol, como o 1,5; com 2 gols o 1,75 ganha metade, o 2 devolve, o 2,25 perde metade), tirar e pôr perna.
+      <b>No mesmo jogo</b>: os combos de maior chance. Aposte só se a casa pagar a <b>odd mínima</b>; o plano entra na 🧪 simulação para medirmos
+      (inclusive o CLV: a odd da hora do plano contra a de fechamento).</p>`;
   }
 
   show();

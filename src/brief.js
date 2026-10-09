@@ -143,11 +143,14 @@ export function briefPlan(scan, plan) {
   const jogo = g => `${g.fx.home.name} x ${g.fx.away.name}`, iso = t => new Date(t).toISOString();
   return { ...base, filter: 'plano do dia (5 a 10 simples, 2 múltiplas, 5 no mesmo jogo; para apostar na noite anterior)',
     plan: {
-      simples: plan.singles.map(({ g, line, value }) => ({ jogo: jogo(g), kickoff: iso(g.fx.t), competicao: g.fx.league.name, linha: line.line, mercado: line.market,
-        p_nossa: line.p_nossa, p_pinnacle: line.p_pinnacle, odd_pinnacle: line.pinnacle_odd, odd_minima: line.odd_min, valor_conservador: value, de_onde_vem: line.why,
+      simples: plan.singles.map(({ g, line, value, lens }) => ({ jogo: jogo(g), kickoff: iso(g.fx.t), competicao: g.fx.league.name, linha: line.line, mercado: line.market,
+        frente: lens === 'agree' ? 'acordo com a Pinnacle (linha consistente; valor se a casa pagar a mínima)' : 'nossa leitura (a nossa chance acima da Pinnacle)',
+        p_nossa: line.p_nossa ?? null, p_modelo: line.p_model ?? null, p_final: line.p_blend ?? null, p_pinnacle: line.p_pinnacle, odd_pinnacle: line.pinnacle_odd,
+        odd_minima: line.odd_min, ...(lens === 'agree' ? { casa_acima_da_pinnacle: value, nivel: line.tier, contexto: line.context?.verdict } : { valor_conservador: value, de_onde_vem: line.why }),
         entrada_brl: line.entry_brl })),
       multiplas: plan.multis.map((t, i) => ({ bilhete: i + 1, pernas: t.n, p_acertar_todas: t.p_all, p_pinnacle_todas: t.p_pinnacle_all, odd_justa: t.fair,
-        odd_minima: t.min, odd_pinnacle: t.odd, legs: t.legs.map(l => ({ jogo: `${l.home} x ${l.away}`, kickoff: iso(l.kickoff), linha: l.line, p: l.p, minima: l.min })) })),
+        odd_minima: t.min, odd_pinnacle: t.odd, legs: t.legs.map(l => ({ jogo: `${l.home} x ${l.away}`, kickoff: iso(l.kickoff), linha: l.line, p: l.p,
+          ...(l.asian ? { asiatica: true, p_cheia: l.p_win } : {}), minima: l.min })) })),
       mesmo_jogo: plan.sameGame.map(({ g, combo }) => ({ jogo: jogo(g), kickoff: iso(g.fx.t), competicao: g.fx.league.name, combo: combo.line, p: combo.p_blend,
         p_pinnacle: combo.p_pinnacle, odd_minima: combo.odd_min, entrada_brl: combo.entry_brl })),
     } };
