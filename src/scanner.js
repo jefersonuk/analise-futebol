@@ -36,7 +36,7 @@ import { hardGame } from './hard.js';
 import { comboLines, favWinCombos } from './combos.js';
 import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
 import { loadClubs } from './clubs.js';
-import { multiLegs } from './multiple.js';
+import { MULTI, multiLegs } from './multiple.js';
 
 export { GOAL_HANDICAP, SHOTS };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
@@ -51,6 +51,14 @@ export const LIVE_1H = 'live1h';   // filtro da tela: jogos para a entrada ao vi
 export const COMBOS = 'combos';    // filtro da tela: combos de duas pernas no mesmo jogo (combos.js)
 export const CENARIO = 'cenario';  // filtro da tela: apostas de cenário com odd perto de 2 (scenario.js)
 export const FILTER_KEYS = [...MAIN_MARKETS, GOAL_HANDICAP, SHOTS_FILTER, '1X2', COMBOS];
+export const BEST = 'melhor';      // "Melhor do jogo" (handicap de gols, gols e 1X2) na escolha das linhas
+// As linhas que a varredura busca e traz no relatório (escolha do operador na tela; null = todas): as abas da tela.
+export const SCAN_OPTIONS = [CENARIO, BEST, ...FILTER_KEYS, MULTI, LIVE_1H];
+// Os mercados de linha que uma escolha cobre (para a tabela de linhas, o gráfico e o especialista)
+export function lineMarkets(markets) {
+  const want = k => !markets || markets.includes(k);
+  return [...new Set([...(want(BEST) ? BEST_MARKETS : []), ...[...MAIN_MARKETS, GOAL_HANDICAP, '1X2'].filter(want), ...(want(SHOTS_FILTER) ? SHOTS : [])])];
+}
 const GOALS_ONLY = ['Total de gols 1T', 'Total de gols', GOAL_HANDICAP, '1X2'];
 const TZ = 'America/Sao_Paulo';
 export const brDate = t => new Date(t).toLocaleDateString('sv-SE', { timeZone: TZ });   // AAAA-MM-DD em Brasília
@@ -90,8 +98,8 @@ const r2 = x => Math.round(x * 100) / 100;
 const playable = l => l.p_blend >= HIT_MIN && l.odd_min >= 1.5 && !floorOutOfReach(l) && politicaE(l.odd_min).factor > 0 && !l.inviable && underOk(l);
 // Melhor linha de um jogo: maior chance de ganho — aposta (candidata âncora/sólida, preço que a casa paga, sem
 // contexto contra) primeiro; senão a mais consistente jogável. market: um mercado ou null (todos os da varredura).
-export function bestLine(lines, { market = null } = {}) {
-  const ms = market == null ? BEST_MARKETS : GROUPS[market] || [market];
+export function bestLine(lines, { market = null, markets = null } = {}) {
+  const ms = markets || (market == null ? BEST_MARKETS : GROUPS[market] || [market]);
   const pool = lines.filter(l => ms.includes(l.market) && playable(l)).sort(byConsistency);
   return pool.find(isBet) || pool[0] || null;
 }
@@ -190,7 +198,10 @@ export function pickGames(games, { market = null, top = 20, order = 'time' } = {
 // headToHead, stats). Janela: hours (as próximas N horas a partir de now) ou date (o dia inteiro, AAAA-MM-DD).
 // half: false pula a 2ª passada (histórico dos escanteios do 1º tempo) — o Plano do dia não usa escanteio do 1º tempo.
 // expand: false mantém a janela de horas pedida, mesmo com poucos jogos (o Plano do dia: a janela é a do operador).
-export async function scanDay(api, { date = null, hours = null, now = Date.now(), top = 20, budget = 1500, banca = 44000, half = true, expand = true, onProgress = () => {} }) {
+// markets: as linhas pedidas (SCAN_OPTIONS; null = todas): os jogos guardados são os melhores nelas — e só eles levam o
+// contexto da API (confronto, desfalques, clubes) —; o histórico do 1º tempo só com escanteios 1T ou o ao vivo.
+export async function scanDay(api, { date = null, hours = null, now = Date.now(), top = 20, budget = 1500, banca = 44000, half = true, expand = true, markets = null, onProgress = () => {} }) {
+  const want = k => !markets || markets.includes(k);
   const used = (() => { const s0 = api.stats().api; return () => api.stats().api - s0; })();
   const skipped = [];
   const from = now + 10 * 60e3;
@@ -289,7 +300,7 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   }
 
   // 2ª passada: histórico do 1º tempo dos dois times nos jogos mais promissores nos escanteios do 1º tempo
-  const short = half ? rankGames(games, { market: 'Total escanteios 1T' }).slice(0, Math.ceil(top * 1.5)) : [];
+  const short = half && (want('Total escanteios 1T') || want(LIVE_1H)) ? rankGames(games, { market: 'Total escanteios 1T' }).slice(0, Math.ceil(top * 1.5)) : [];
   let gi = 0;
   for (const { g } of short) {
     gi++;
@@ -313,12 +324,14 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   // Guardados: os N melhores de cada filtro da tela (todos os mercados, cada um e o ao vivo do 1º tempo).
   const keepOf = () => {
     const keep = new Set();
-    for (const market of [CENARIO, null, ...FILTER_KEYS, LIVE_1H]) for (const { g } of rankGames(games, { market }).slice(0, top)) keep.add(g);
+    for (const market of [CENARIO, null, ...FILTER_KEYS, LIVE_1H].filter(m => want(m ?? BEST))) for (const { g } of rankGames(games, { market }).slice(0, top)) keep.add(g);
     // e os jogos com as melhores pernas de múltipla (over de gols cotado) e com a vitória do favorito + gols mais provável
-    const ids = new Set(multiLegs(games, { now }).filter(l => l.quoted).slice(0, top).map(l => l.fixtureId));
-    for (const g of games) if (ids.has(g.fx.id)) keep.add(g);
+    if (want(MULTI)) {
+      const ids = new Set(multiLegs(games, { now }).filter(l => l.quoted).slice(0, top).map(l => l.fixtureId));
+      for (const g of games) if (ids.has(g.fx.id)) keep.add(g);
+    }
     const fp = g => Math.max(0, ...(g.fav_combos || []).map(c => c.p_blend));
-    for (const g of games.filter(g => g.fav_combos?.length).sort((a, b) => fp(b) - fp(a)).slice(0, top)) keep.add(g);
+    if (want(COMBOS)) for (const g of games.filter(g => g.fav_combos?.length).sort((a, b) => fp(b) - fp(a)).slice(0, top)) keep.add(g);
     return keep;
   };
   // 3ª passada: confronto direto em todas as competições (API) dos jogos guardados e clássico (cidade dos dois times,
@@ -354,7 +367,7 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   // ligas diferentes); v 5: piso de 60% de acerto e odd mínima com
   // piso de 1,50; v 4: janela de horas, contexto e plano ao vivo do 1º tempo. A tela avisa quando a varredura
   // guardada é de antes
-  return { v: 11, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
+  return { v: 11, markets: markets?.length ? markets : null, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
     generated_at: new Date(now).toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }

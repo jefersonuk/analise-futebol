@@ -207,3 +207,29 @@ test('Pinnacle sem escanteios no jogo: as linhas de escanteios saem do modelo (a
   assert.ok(scan.corners_report['preço modelo'] > 0);
   assert.ok(rankGames(scan.games, { market: 'Total de escanteios' }).length > 0);
 });
+
+test('linhas marcadas: só escanteios 1T e do jogo — guarda os melhores nelas e o resto não vai para o relatório', async () => {
+  const { BEST, CENARIO, COMBOS, SCAN_OPTIONS, lineMarkets } = await import('../src/scanner.js');
+  const { buildSim } = await import('../src/sim.js');
+  const { briefScan } = await import('../src/brief.js');
+  const corners = ['Total escanteios 1T', 'Total de escanteios'];
+  const all = await scanDay(demoApi(), { date: '2026-10-01', top: 3, budget: 5000 });
+  const api = demoApi(), scan = await scanDay(api, { date: '2026-10-01', top: 3, budget: 5000, markets: corners });
+  assert.deepEqual(scan.markets, corners);
+  assert.equal(all.markets, null, 'sem marcação: todas');
+  // os jogos guardados: os 3 melhores em cada uma das duas linhas, e só eles
+  const best = new Set(corners.flatMap(m => rankGames(scan.games, { market: m }).slice(0, 3).map(x => x.g)));
+  assert.ok(scan.games.every(g => best.has(g)) && scan.games.length <= all.games.length);
+  // a tabela de linhas e o especialista: só escanteios; a simulação: só as abas marcadas
+  assert.deepEqual(lineMarkets(scan.markets), corners);
+  assert.deepEqual(lineMarkets(null).sort(), [...new Set([...MAIN_MARKETS, GOAL_HANDICAP, '1X2', ...SHOTS])].sort());
+  assert.ok(buildSim({ ...scan, generated_at: new Date(0).toISOString() }).bets.every(b => ['Escanteios', 'Escanteios 1T'].includes(b.cat)));
+  const br = briefScan(scan, pickGames(scan.games, { market: corners[1], top: 3 }), { market: corners[1] });
+  assert.deepEqual(br.markets, corners);
+  assert.ok(br.games.every(x => Object.keys(x.best_by_market).every(m => corners.includes(m)) && !x.combos.length && !x.scenario && !x.live_1h));
+  assert.ok(SCAN_OPTIONS.includes(BEST) && SCAN_OPTIONS.includes(CENARIO) && SCAN_OPTIONS.includes(COMBOS));
+  // só gols: sem o histórico do 1º tempo (pula a 2ª passada)
+  const api2 = demoApi();
+  await scanDay(api2, { date: '2026-10-01', top: 3, budget: 5000, markets: ['Total de gols'] });
+  assert.equal(api2.halfAsked.length, 0, 'sem escanteios do 1º tempo: nenhuma requisição do 1º tempo');
+});

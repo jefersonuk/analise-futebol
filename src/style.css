@@ -268,3 +268,8 @@ svg.chance text.reflabel { fill: var(--text); font-weight: 600; text-anchor: mid
 svg.hist.strip { max-width: 300px; margin-top: 2px; }
 .legwhy { border-top: 1px solid var(--line); padding: 8px 0 4px; font-size: 13px; }
 @media (max-width: 640px) { .whygrid, .strips { grid-template-columns: minmax(0, 1fr); } }
+
+/* linhas da varredura (o que buscar e trazer) */
+.row.markets { gap: 6px 12px; font-size: 13px; }
+.row.markets label.mk { display: inline-flex; align-items: center; gap: 5px; color: var(--text); cursor: pointer; }
+.row.markets label.mk input { width: auto; margin: 0; }
