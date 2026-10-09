@@ -4,7 +4,7 @@
 // o plano de entrada ao vivo nos escanteios do 1º tempo, os gráficos dos últimos 10 jogos de cada time na
 // melhor linha e o atalho para a análise completa do jogo.
 
-import { CENARIO, COMBOS, FILTER_KEYS, GOAL_HANDICAP, LIVE_1H, MAIN_MARKETS, SHOTS, SHOTS_FILTER, bestLine, pickGames, scanDay } from './scanner.js';
+import { BEST, CENARIO, COMBOS, FILTER_KEYS, GOAL_HANDICAP, LIVE_1H, MAIN_MARKETS, SCAN_OPTIONS, SHOTS, SHOTS_FILTER, bestLine, lineMarkets, pickGames, scanDay } from './scanner.js';
 import { bindTooltips, renderDashboard } from './dashboard.js';
 import { load, save } from './store.js';
 import { bindSpecialist, briefMulti, briefScan } from './brief.js';
@@ -28,7 +28,7 @@ const n2 = x => (x == null ? '—' : x.toFixed(2).replace('.', ','));
 const nb = x => String(x).replace('.', ',');
 const hour = t => new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const dayStr = off => new Date(Date.now() + off * 864e5).toLocaleDateString('sv-SE');   // AAAA-MM-DD no fuso local
-const BUDGET_KEY = 'afScanBudget';
+const BUDGET_KEY = 'afScanBudget', MARKETS_KEY = 'afScanMarkets';
 const WINDOW = '4h';   // padrão: as próximas 4 horas
 // Linha consistente que não é aposta pelo preço: a odd mínima passa de 5% acima da Pinnacle (casa soft
 // raramente paga isso). Sem candidata no jogo, a tela mostra a linha mais consistente, mas apagada.
@@ -116,6 +116,27 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   $('#scanDate').innerHTML = [['Próximas 4 horas (amplia até 12 h se faltar jogo)', WINDOW], ['Hoje (dia todo)', dayStr(0)], ['Amanhã', dayStr(1)]]
     .map(([t, v]) => `<option value="${v}">${t}${v === WINDOW ? '' : ` (${v.split('-').reverse().slice(0, 2).join('/')})`}</option>`).join('');
   $('#scanBudget').value = localStorage.getItem(BUDGET_KEY) || 1500;
+  // Linhas da varredura (pedido do Jeferson, 09/10/2026): o operador marca o que buscar e trazer no relatório — só
+  // escanteios do 1º tempo e do jogo, por exemplo. Os jogos guardados são os melhores nessas linhas (e só eles levam o
+  // contexto da API), e o relatório mostra só elas. Fica guardada neste aparelho; padrão: todas.
+  const OPT_LABEL = new Map(FILTERS.map(([t, m]) => [m ?? BEST, t]));
+  const chosen = () => {
+    try { const v = JSON.parse(localStorage.getItem(MARKETS_KEY)); if (Array.isArray(v)) return SCAN_OPTIONS.filter(k => v.includes(k)); } catch { /* padrão */ }
+    return [...SCAN_OPTIONS];
+  };
+  const sameSet = (a, b) => a.length === b.length && a.every(k => b.includes(k));
+  function renderMarkets() {
+    const sel = chosen(), had = scan ? scan.markets || SCAN_OPTIONS : null;
+    $('#scanMarkets').innerHTML = `<span class="muted">Linhas:</span>${SCAN_OPTIONS.map(k => `<label class="mk"><input type="checkbox" value="${esc(k)}"${sel.includes(k) ? ' checked' : ''}>${esc(OPT_LABEL.get(k) || k)}</label>`).join('')}
+      ${sel.length < SCAN_OPTIONS.length ? '<button class="ghost mini" data-mk="all">marcar todas</button>' : ''}
+      ${had && !sameSet(sel, had) ? `<span class="muted small">· a varredura na tela foi feita com ${had.length === SCAN_OPTIONS.length ? 'todas as linhas' : had.map(k => OPT_LABEL.get(k) || k).join(', ')}: a nova marcação vale ao tocar em Varrer jogos</span>` : ''}`;
+  }
+  $('#scanMarkets').addEventListener('change', e => {
+    if (!e.target.matches('input[type=checkbox]')) return;
+    localStorage.setItem(MARKETS_KEY, JSON.stringify([...$('#scanMarkets').querySelectorAll('input:checked')].map(x => x.value)));
+    renderMarkets();
+  });
+  $('#scanMarkets').addEventListener('click', e => { if (e.target.closest('[data-mk="all"]')) { localStorage.removeItem(MARKETS_KEY); renderMarkets(); } });
   const msg = (text, err = false) => { const el = $('#scanMsg'); el.hidden = !text; el.textContent = text || ''; el.classList.toggle('err', err); };
 
   async function showSaved() {
@@ -129,10 +150,11 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     if (!api.getKey()) return msg('Informe a chave da API em ⚙️ Chave.', true);
     const budget = Math.max(50, Number($('#scanBudget').value) || 1500);
     localStorage.setItem(BUDGET_KEY, budget);
-    const v = $('#scanDate').value, win = /^\d+h$/.test(v) ? { hours: parseInt(v, 10) } : { date: v };
+    const v = $('#scanDate').value, win = /^\d+h$/.test(v) ? { hours: parseInt(v, 10) } : { date: v }, sel = chosen();
+    if (!sel.length) return msg('Marque pelo menos uma linha para a varredura.', true);
     $('#scanRun').disabled = true;
     try {
-      scan = await scanDay(api.dossierApi, { ...win, budget, banca, onProgress: t => msg(t) });
+      scan = await scanDay(api.dossierApi, { ...win, budget, banca, markets: sel.length === SCAN_OPTIONS.length ? null : sel, onProgress: t => msg(t) });
       Object.assign(multi, { include: new Map(), lineFor: new Map(), house: new Map(), totals: new Map() });
       await save(`af:scan:${v}`, scan);
       msg(scan.games.length ? '' : scan.hours ? `Nenhum jogo com odds da Pinnacle nas próximas ${scan.hours} horas.` : 'Nenhum jogo com odds da Pinnacle nesta data.');
@@ -145,11 +167,15 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const out = $('#scanOut');
     $('#scanSpec').hidden = !scan?.games.length;
     if (!scan) { out.innerHTML = ''; return; }
+    renderMarkets();
+    // as abas: só as das linhas que a varredura buscou; a aba aberta fora delas passa para a primeira
+    const avail = scan.markets || SCAN_OPTIONS, tabs = FILTERS.filter(([, m]) => avail.includes(m ?? BEST));
+    if (!avail.includes(market ?? BEST)) market = tabs[0]?.[1] ?? null;
     const top = scan.top || 20, live = market === LIVE_1H, combos = market === COMBOS, cen = market === CENARIO, mult = market === MULTI;
     const ok = scan.v >= (cen ? 10 : combos ? 8 : 7);
     ranked = ok && !mult ? pickGames(scan.games, { market, top, order }) : [];
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const chips = FILTERS.map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
+    const chips = tabs.map(([t, m]) => `<button class="${market === m ? 'on' : ''}" data-m="${esc(m ?? '')}">${esc(t)}</button>`).join('');
     const orders = [['Horário', 'time'], ['Chance de ganho', 'chance']].map(([t, o]) => `<button class="${order === o ? 'on' : ''}" data-o="${o}">${t}</button>`).join('');
     // varredura guardada pela versão anterior (só jogos com o 1º tempo na Pinnacle) não tem with_1h
     const pool = scan.with_1h == null ? `${scan.with_odds} com escanteios do 1º tempo na Pinnacle`
@@ -215,7 +241,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
       simUI.add(buildSim(scan, { banca })).catch(() => {}).finally(() => { refazendo = false; });
     }
     out.innerHTML = `<p class="muted">Varredura de ${when}: ${span} · ${scan.fixtures} jogos por começar, ${pool},
-      ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>${cornersLine(scan.corners_report)}${old}
+      ${scan.analyzed} analisados · ${scan.requests} requisições (limite ${scan.budget}).</p>${avail.some(k => /escanteios|live1h/i.test(k)) ? cornersLine(scan.corners_report) : ''}${old}
       <div class="simbar">${simUI?.has(simId(scan)) ? '<span class="muted">🧪 esta varredura já está na simulação (abaixo)</span>'
         : '<button class="ghost" id="simRun">🧪 Simular as propostas desta varredura</button> <span class="muted">registra tudo o que ela propôs, na odd da Pinnacle (o pior cenário), numa área separada das apostas reais</span>'}</div>
       <div class="chips" id="scanChips">${chips}</div>
@@ -229,7 +255,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   }
 
   function card(g, line, i) {
-    const top = (line && !line.combo && !line.scenario ? line : null) || bestLine(g.lines), p = g.pinnacle_1h, e = g.expected_1h;
+    const avail = scan.markets || SCAN_OPTIONS, lm = lineMarkets(scan.markets), c1on = avail.includes('Total escanteios 1T') || avail.includes(LIVE_1H);
+    const top = (line && !line.combo && !line.scenario ? line : null) || bestLine(g.lines, { markets: lm }), e = g.expected_1h, p = c1on ? g.pinnacle_1h : null;
     const sb = market === CENARIO && (g.scenario?.find(l => l.bet) || g.scenario?.find(l => l.conditional));
     const facts = [
       sb ? `<b>${sb.bet ? 'aposta' : 'entrar se…'} (nossa análise)</b>: ${esc(SHORT[sb.market])} ${esc(sb.line)} — nossa ${pct(sb.p_nossa)}, Pinnacle ${n2(sb.pinnacle_odd)} (${pct(sb.p_pinnacle)}), procure odd ≥ ${n2(sb.odd_min)}`
@@ -242,7 +269,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
             : priceGap(top) ? `<b>sem aposta pelo preço</b>: odd mínima ${n2(top.odd_min)} contra ${n2(top.pinnacle_odd)} da Pinnacle (${gapTxt(top)})`
               : '<b>sem aposta</b>: nenhuma linha principal passa de especulativa',
       g.favor_text ? `<b>${esc(g.favor_text)}</b>` : '',
-      g.no_corners ? `<b>${esc(g.no_corners)}</b>` : p ? '' : 'sem escanteios do 1º tempo na Pinnacle neste jogo',
+      g.no_corners ? `<b>${esc(g.no_corners)}</b>` : p || !c1on ? '' : 'sem escanteios do 1º tempo na Pinnacle neste jogo',
       p ? `Pinnacle 1T: linha ${nb(p.line)} → total ${n2(p.total)} (modelo ${n2(p.model)})` : '',
       p && e ? `esperado no 1T: ${esc(g.fx.home.name)} ${n2(e.home)} · ${esc(g.fx.away.name)} ${n2(e.away)}` : '',
       p && g.share_1h ? `1º tempo = ${pct(g.share_1h)} dos escanteios do jogo` : '',
@@ -251,9 +278,9 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     ].filter(Boolean);
     // as linhas principais do jogo: os overs de escanteios e gols da lista e a melhor de handicap de gols e do 1X2;
     // chutes só na aba Chutes (difícil achar a linha nas casas)
-    const totals = g.lines.filter(x => isMain(x.id) && MAIN_MARKETS.includes(x.market))
+    const totals = g.lines.filter(x => isMain(x.id) && MAIN_MARKETS.includes(x.market) && lm.includes(x.market))
       .sort((a, b) => MAIN_MARKETS.indexOf(a.market) - MAIN_MARKETS.indexOf(b.market) || thr(a) - thr(b));
-    const all = totals.concat([GOAL_HANDICAP, ...(market === SHOTS_FILTER ? SHOTS : []), '1X2'].map(m => bestLine(g.lines, { market: m })).filter(Boolean));
+    const all = totals.concat([GOAL_HANDICAP, ...(market === SHOTS_FILTER ? SHOTS : []), '1X2'].filter(m => lm.includes(m)).map(m => bestLine(g.lines, { market: m })).filter(Boolean));
     const table = all.length ? `<div class="scroll"><table class="mainlines"><tr><th></th><th>Linha</th><th>Nível</th><th>Contexto</th><th>Chance · Pinnacle</th>
       <th>Últ. 10</th><th>Justa</th><th>Mínima</th><th>Pinnacle</th><th>Valor</th></tr>${all.map(l => `<tr class="${top && l.id === top.id ? 'on' : ''}${isBet(l) ? '' : ' weak'}">
         <td>${enterBtn(l, isBet(l))}</td><td>${esc(SHORT[l.market])}: <b>${esc(l.line)}</b></td><td>${tierTag(l)}</td><td>${ctxTag(l)}</td><td>${probs(l)}</td><td class="muted">${hits(l)}</td>
@@ -267,10 +294,10 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
         <button class="ghost" data-full="${i}">Análise completa ↗</button></div>
       <p class="muted facts">${facts.join(' · ')}</p>
       ${ctx}
-      ${scenarioBlock(g)}
+      ${avail.includes(CENARIO) ? scenarioBlock(g) : ''}
       ${table}
-      ${comboBlock(g)}
-      ${renderLive(g.live1h)}
+      ${avail.includes(COMBOS) ? comboBlock(g) : ''}
+      ${avail.includes(LIVE_1H) ? renderLive(g.live1h) : ''}
       ${top ? renderDashboard([top], g.teams) : ''}
     </article>`;
   }
@@ -497,5 +524,6 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   // registrou um bilhete: o jogo passa a ter entrada e sai dos próximos bilhetes
   $('#entryDlg')?.addEventListener('close', () => { if (market === MULTI && scan) render(); });
   bindSpecialist($('#scanSpec'), () => scan && (market === MULTI ? briefMulti(scan, multi.tickets) : briefScan(scan, ranked, { market, order })));
+  renderMarkets();
   showSaved();
 }

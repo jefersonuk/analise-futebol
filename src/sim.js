@@ -15,9 +15,9 @@
 // entrada fica fora. Simulações antigas podem ter odd_src = 'mínima' (a odd mínima do app, antes desta regra).
 // Lucro em unidades (stake fixa de 1) e em R$ (a entrada proposta pelo app).
 
-import { COMBOS, FILTER_KEYS, bestLine } from './scanner.js';
+import { CENARIO, COMBOS, FILTER_KEYS, bestLine } from './scanner.js';
 import { isBet } from './dossier.js';
-import { TARGET, bandTickets, multiLegs, settleMulti, ticketOf } from './multiple.js';
+import { MULTI, TARGET, bandTickets, multiLegs, settleMulti, ticketOf } from './multiple.js';
 import { pinMargin } from './odds.js';
 
 export const CATS = ['Plano: simples (nossa leitura)', 'Plano: simples (acordo com a Pinnacle)', 'Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo', 'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T',
@@ -50,16 +50,17 @@ export function ticketPin(legs) {
   return os.every(Boolean) ? [os.reduce((t, o) => t * o, 1), legs.every(l => l.pinnacle_odd > 1) ? 'pinnacle' : 'pinnacle est.'] : [null, null];
 }
 
-// As entradas de uma varredura. scan: scanDay (games com lines, scenario, combos).
+// As entradas de uma varredura. scan: scanDay (games com lines, scenario, combos); só as das linhas que ela buscou
+// (scan.markets; null = todas).
 export function buildSim(scan, { banca = 44000 } = {}) {
-  const at = Date.parse(scan.generated_at) || Date.now(), bets = [];
+  const at = Date.parse(scan.generated_at) || Date.now(), bets = [], want = k => !scan.markets || scan.markets.includes(k);
   for (const g of scan.games) {
     // nossa análise: a aposta do jogo; sem ela, a "entrar se…"
-    const sc = (g.scenario || []).find(l => l.bet) || (g.scenario || []).find(l => l.conditional);
+    const sc = want(CENARIO) && ((g.scenario || []).find(l => l.bet) || (g.scenario || []).find(l => l.conditional));
     if (sc?.pinnacle_odd > 1) bets.push(base(g, sc, sc.bet ? 'nossa análise: aposta' : 'nossa análise: entrar se…', sc.pinnacle_odd, 'pinnacle', sc.entry_brl));
     // linhas principais: a linha do jogo em cada aba de mercado, quando é aposta
     const seen = new Set();
-    for (const m of FILTER_KEYS.filter(k => k !== COMBOS)) {
+    for (const m of FILTER_KEYS.filter(k => k !== COMBOS && want(k))) {
       const l = bestLine(g.lines || [], { market: m });
       if (!l || !isBet(l) || seen.has(l.id)) continue;
       seen.add(l.id);
@@ -67,11 +68,11 @@ export function buildSim(scan, { banca = 44000 } = {}) {
       if (odd) bets.push(base(g, l, CAT_OF[l.market] || l.market, odd, src, l.entry_brl));   // só do modelo: fora
     }
     // combo: o do jogo na aba Combos (a Pinnacle não cota combo: a odd que ela pagaria)
-    const cb = (g.combos || []).find(isBet), [co, cs] = cb ? comboPin(cb, g) : [];
+    const cb = want(COMBOS) && (g.combos || []).find(isBet), [co, cs] = cb ? comboPin(cb, g) : [];
     if (co) bets.push(base(g, cb, 'Combo', co, cs, cb.entry_brl));
   }
   // múltipla: os bilhetes por faixa de horário, como a aba montava na hora da varredura (só linha cotada)
-  for (const legs of bandTickets(multiLegs(scan.games, { now: at }).filter(l => l.quoted), { target: TARGET })) { const b = multiBet(legs, banca, 'Múltipla'); if (b) bets.push(b); }
+  if (want(MULTI)) for (const legs of bandTickets(multiLegs(scan.games, { now: at }).filter(l => l.quoted), { target: TARGET })) { const b = multiBet(legs, banca, 'Múltipla'); if (b) bets.push(b); }
   return { id: `${at}`, scan_at: new Date(at).toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     window: scan.window ? { from: scan.window.from, to: scan.window.to } : null, date: scan.date || null, bets };
 }

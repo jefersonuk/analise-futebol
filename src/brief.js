@@ -2,7 +2,7 @@
 // (mercados de foco, candidatas e as melhores linhas de cada mercado), para caber numa conversa sem
 // gastar o plano à toa. O texto começa com uma marca que a página do especialista reconhece.
 
-import { CENARIO, COMBOS, LIVE_1H, SHOTS, SHOTS_FILTER, bestLine } from './scanner.js';
+import { BEST, CENARIO, COMBOS, LIVE_1H, SHOTS, SHOTS_FILTER, bestLine, lineMarkets } from './scanner.js';
 
 export const SPECIALIST_URL = 'https://claude.ai/artifact/T2QWDJ4U4zzFJSnQumKSBr';
 export const MARK = '#ESPECIALISTA-FUTEBOL v1';
@@ -93,15 +93,19 @@ const leanCtx = c => c && { text: c.text, h2h_games: c.h2h.n, ...(c.clubs?.table
 // mercado (escanteios 1T, escanteios, gols 1T, gols, handicaps de escanteios e de gols), as outras linhas
 // principais, o contexto do jogo e o plano ao vivo dos escanteios do 1º tempo.
 export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) {
+  // as linhas que a varredura buscou (escolha do operador): o especialista fala só delas
+  const want = k => !scan.markets || scan.markets.includes(k), lm = lineMarkets(scan.markets);
+  const NAMES = { [CENARIO]: 'nossa análise', [BEST]: 'melhor do jogo', [COMBOS]: 'combos', [LIVE_1H]: 'ao vivo 1º tempo', multipla: 'múltipla' };
   return {
     kind: 'varredura',
+    markets: scan.markets ? scan.markets.map(k => NAMES[k] || k) : null,
     date: scan.date, window: scan.window ? { hours: scan.hours, from: new Date(scan.window.from).toISOString(), to: new Date(scan.window.to).toISOString() } : null,
     order: order === 'time' ? 'horário (o mais próximo primeiro)' : 'chance de ganho',
     filter: market === LIVE_1H ? 'ao vivo 1º tempo' : market === COMBOS ? 'combos de duas pernas' : market === CENARIO ? 'nossa análise (odd perto de 2)' : market || 'melhor do jogo',
     generated_at: scan.generated_at, fixtures: scan.fixtures, with_odds: scan.with_odds, with_1h: scan.with_1h ?? null,
     asked_hours: scan.asked_hours ?? null, corners_report: scan.corners_report ?? null,
     games: ranked.map(({ g, line }, i) => {
-      const top = (line && !line.combo && !line.scenario ? line : null) || bestLine(g.lines);
+      const top = (line && !line.combo && !line.scenario ? line : null) || bestLine(g.lines, { markets: lm });
       return {
         n: i + 1,
         kickoff: new Date(g.fx.t).toISOString(), competition: g.fx.league.name, home: g.fx.home.name, away: g.fx.away.name,
@@ -111,12 +115,12 @@ export function briefScan(scan, ranked, { market = null, order = 'time' } = {}) 
         context: leanCtx(g.context),
         top_line: lean(top, true),
         // chutes só no filtro Chutes (difícil achar a linha nas casas)
-        best_by_market: Object.fromEntries(Object.entries(g.best || {}).filter(([m, l]) => l && l.id !== top?.id && (market === SHOTS_FILTER || !SHOTS.includes(m)))
+        best_by_market: Object.fromEntries(Object.entries(g.best || {}).filter(([m, l]) => l && l.id !== top?.id && lm.includes(m) && (market === SHOTS_FILTER || !SHOTS.includes(m)))
           .map(([m, l]) => [m, lean(l)])),
-        live_1h: leanLive(g.live1h),
-        combos: (g.combos || []).slice(0, market === COMBOS ? 4 : 2).map(leanCombo),
-        scenario: leanScenario(g.context?.scenario, market === CENARIO),
-        scenario_lines: (g.scenario || []).filter((l, k) => l.bet || l.conditional || k < (market === CENARIO ? 3 : 1)).slice(0, 4).map(leanScenLine),
+        live_1h: want(LIVE_1H) ? leanLive(g.live1h) : null,
+        combos: want(COMBOS) ? (g.combos || []).slice(0, market === COMBOS ? 4 : 2).map(leanCombo) : [],
+        scenario: want(CENARIO) ? leanScenario(g.context?.scenario, market === CENARIO) : null,
+        scenario_lines: want(CENARIO) ? (g.scenario || []).filter((l, k) => l.bet || l.conditional || k < (market === CENARIO ? 3 : 1)).slice(0, 4).map(leanScenLine) : [],
         injuries: g.injuries?.length ? g.injuries.slice(0, 10).map(i => `${i.player} (${i.team === g.fx.home.id ? 'mandante' : 'visitante'}: ${i.type === 'Questionable' ? 'dúvida' : i.reason})`) : undefined,
       };
     }),
