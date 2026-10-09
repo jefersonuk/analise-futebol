@@ -33,8 +33,9 @@ export const valueOf = l => r3(((l.p_nossa + l.p_pinnacle) / 2) * l.pinnacle_odd
 const singleOf = g => (g.hard ? null : (g.scenario || [])
   .filter(l => l.bet && !l.conditional && l.p_pinnacle != null && l.pinnacle_odd >= ODDS[0] && l.pinnacle_odd <= ODDS[1])
   .map(l => ({ l, v: valueOf(l) })).filter(x => x.v > 0).sort((a, b) => b.v - a.v || b.l.p_nossa - a.l.p_nossa)[0] || null);
-// 🤝 a linha consistente do jogo que concorda com a Pinnacle; need: quanto a casa precisa pagar acima da Pinnacle
-const agreeOf = g => (g.hard ? null : (g.lines || [])
+// 🤝 a linha consistente do jogo que concorda com a Pinnacle; need: quanto a casa precisa pagar acima da Pinnacle.
+// Como na 🎯, fica fora o jogo que depende da escalação (copa, base/B, dúvida, começo de temporada com mudança grande).
+const agreeOf = g => (g.hard || g.conditions?.length ? null : (g.lines || [])
   .filter(l => AGREE_MARKETS.includes(l.market) && isBet(l) && !l.model_only && !l.derived && l.pinnacle_odd > 1 && l.p_pinnacle != null
     && l.p_model != null && l.p_model >= l.p_pinnacle - 0.03)
   .sort((a, b) => (b.context?.verdict === 'a favor') - (a.context?.verdict === 'a favor') || (b.tier === 'âncora') - (a.tier === 'âncora')

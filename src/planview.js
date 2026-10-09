@@ -1,7 +1,8 @@
 // Plano do dia (plan.js) na tela: um botão, na noite anterior, analisa o dia seguinte inteiro (a varredura da data,
 // guardada como a da seção de varredura) e mostra só o plano — 5 a 10 simples, 2 múltiplas e 5 no mesmo jogo —, cada
 // entrada com a odd mínima, a da Pinnacle, a chance e a entrada em R$, e o ➕ para registrar. "Copiar o plano" leva a
-// lista para apostar nas casas; o plano entra na 🧪 simulação para medirmos; o especialista recebe o plano.
+// lista para apostar nas casas; o plano entra na 🧪 simulação para medirmos; o especialista recebe o plano. Embaixo do
+// resumo, o porquê de cada entrada (planwhy.js): texto e gráficos, como na varredura.
 
 import { scanDay } from './scanner.js';
 import { load, save } from './store.js';
@@ -10,6 +11,8 @@ import { multiGames, multiLine } from './multiple.js';
 import { LENS, SINGLES, buildPlan, multiOf, planFromKeys, planKeys, planText } from './plan.js';
 import { buildPlanSim } from './sim.js';
 import { bindSpecialist, briefPlan } from './brief.js';
+import { bindTooltips, chartLegend } from './dashboard.js';
+import { comboBody, legsBody, singleBody } from './planwhy.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -136,6 +139,12 @@ export function initPlan({ api, openEntry, banca }) {
       if (o) editMulti(i, [...plan.multis[i].legs, o].sort((a, b) => a.kickoff - b.kickoff));
     }
   });
+  // toque numa entrada do resumo: vai ao porquê dela; ↑ volta ao resumo
+  $('#planOut').addEventListener('click', e => {
+    if (e.target.closest('[data-top]')) { $('#planOut').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    const go = e.target.closest('[data-go]');
+    if (go && !e.target.closest('button:not([data-go]), select, input')) document.getElementById(go.dataset.go)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
   $('#planOut').addEventListener('click', e => {
     const x = e.target.closest('[data-pmx]');
     if (!x) return;
@@ -165,7 +174,8 @@ export function initPlan({ api, openEntry, banca }) {
     const head = `<p class="muted"><b>${esc(labelOf(scan))}</b> · análise de ${when}: ${scan.analyzed} jogos analisados de ${scan.fixtures} ${scan.window ? 'na janela' : 'do dia'} · ${scan.requests} requisições.
       <b>${n} simples (${plan.singles.filter(x => x.lens !== 'agree').length} 🎯 nossa leitura · ${plan.singles.filter(x => x.lens === 'agree').length} 🤝 acordo com a Pinnacle)
       · ${plan.multis.length} múltipla${plan.multis.length === 1 ? '' : 's'} · ${plan.sameGame.length} no mesmo jogo</b> · entradas ${brl(total)}
-      · <span class="pos">+${brl(pot)} se tudo green</span>${st ? ` · fora do plano: ${st.exposed ? `${st.exposed} jogo${st.exposed > 1 ? 's' : ''} que já têm entrada, ` : ''}${st.waiting} que dependem da escalação ("entrar se…")` : ''}.</p>
+      · <span class="pos">+${brl(pot)} se tudo green</span>${st ? ` · fora do plano: ${st.exposed ? `${st.exposed} jogo${st.exposed > 1 ? 's' : ''} que já têm entrada, ` : ''}${st.waiting} que dependem da escalação ("entrar se…")` : ''}.
+      Toque numa entrada para ver o porquê dela.</p>
       ${budgetOut ? `<p class="neg">${budgetOut} jogos com odds ficaram fora da análise pelo limite de requisições (${scan.budget}): aumente o limite na seção de varredura e monte de novo.</p>` : ''}
       ${n < SINGLES[0] ? `<p class="muted">${scan.window ? 'A janela' : 'O dia'} rendeu ${n} simples — menos que 5: melhor poucas do que forçar entrada sem valor.</p>` : ''}`;
     // simples: as duas frentes; na 🎯 o valor é o nosso (conservador) na odd da Pinnacle; na 🤝 o valor está na casa pagar a mínima
@@ -176,7 +186,7 @@ export function initPlan({ api, openEntry, banca }) {
       ? `<span class="muted" title="a casa precisa pagar a mínima: ${x.value > 0 ? `${(x.value * 100).toFixed(1).replace('.', ',')}% acima` : 'até'} da odd da Pinnacle">casa ≥ mínima${x.value > 0 ? ` (+${(x.value * 100).toFixed(1).replace('.', ',')}% Pin)` : ''}</span>`
       : `<span class="pos">+${(x.value * 100).toFixed(1).replace('.', ',')}%</span>`);
     const singles = n ? `<h3>Simples (${n})</h3><div class="scroll"><table class="scanrank plantab"><tr><th></th><th>Hora</th><th>Jogo</th><th>Liga</th><th>Frente</th><th>Entrada</th>
-      <th>Odd mínima</th><th>Pinnacle</th><th>Nossa · Pinnacle</th><th>Valor</th><th>R$</th></tr>${plan.singles.map((x, i) => { const { g, line } = x; return `<tr>
+      <th>Odd mínima</th><th>Pinnacle</th><th>Nossa · Pinnacle</th><th>Valor</th><th>R$</th></tr>${plan.singles.map((x, i) => { const { g, line } = x; return `<tr data-go="pw-s${i}">
       <td>${reg(`s:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t)}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
       <td class="muted">${esc(g.fx.league.name)}</td><td>${lensTag(x)}</td><td title="${esc(line.why || (line.context ? `contexto ${line.context.verdict}; nível ${line.tier}` : ''))}"><span class="muted">${esc(SHORT[line.market] || line.market)}:</span> <b>${esc(line.line)}</b></td>
       <td><b>${n2(line.odd_min)}</b></td><td>${n2(line.pinnacle_odd)}</td><td><b>${pct(line.p_nossa ?? line.p_blend)}</b> <span class="muted">· ${pct(line.p_pinnacle)}</span></td>
@@ -193,15 +203,33 @@ export function initPlan({ api, openEntry, banca }) {
     const multis = plan.multis.length ? `<h3>Múltiplas (${plan.multis.length})</h3>${plan.multis.map((t, i) => `<div class="multisum">
       <div>${reg(`m:${i}`, t.legs.every(l => has(l.fixtureId, l.home, l.away)), t.first_kickoff)} <b>Múltipla ${i + 1}</b> · ${t.n} pernas · ${t.asian ? 'não perde' : 'acerta todas'} em <b>${pct(t.p_all)}</b>
         ${t.asian ? `<span class="muted">(todas cheias ${pct(t.p_win_all)})</span> ` : ''}<span class="muted">(Pinnacle ${pct(t.p_pinnacle_all)})</span> · odd total mínima <b>${n2(t.min)}</b>
-        <span class="muted">(justa ${n2(t.fair)}${t.odd ? `; na Pinnacle ${n2(t.odd)}` : ''})</span> · ${brl(t.stake || t.stake_at_min || 0)}</div>
+        <span class="muted">(justa ${n2(t.fair)}${t.odd ? `; na Pinnacle ${n2(t.odd)}` : ''})</span> · ${brl(t.stake || t.stake_at_min || 0)}
+        <button class="ghost mini" data-go="pw-m${i}">por que cada perna ↓</button></div>
       <div class="scroll"><table class="mlegs">${t.legs.map((l, j) => legRow(t, i, l, j)).join('')}</table></div>
       <div>${addSel(i)}</div></div>`).join('')}` : '';
     const same = plan.sameGame.length ? `<h3>No mesmo jogo (${plan.sameGame.length})</h3><div class="scroll"><table class="scanrank plantab"><tr><th></th><th>Hora</th><th>Jogo</th><th>Liga</th>
-      <th>Combo</th><th>Chance</th><th>Odd mínima</th><th>R$</th></tr>${plan.sameGame.map(({ g, combo }, i) => `<tr>
+      <th>Combo</th><th>Chance</th><th>Odd mínima</th><th>R$</th></tr>${plan.sameGame.map(({ g, combo }, i) => `<tr data-go="pw-c${i}">
       <td>${reg(`c:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t)}</td><td>${hour(g.fx.t)}</td><td>${esc(g.fx.home.name)} x ${esc(g.fx.away.name)}</td>
       <td class="muted">${esc(g.fx.league.name)}</td><td><b>${esc(combo.line)}</b></td><td><b>${pct(combo.p_blend)}</b> <span class="muted">· ${pct(combo.p_pinnacle)}</span></td>
       <td><b>${n2(combo.odd_min)}</b></td><td>${combo.entry_brl ? `${combo.entry_brl}` : '—'}</td></tr>`).join('')}</table></div>` : '';
     const empty = !n && !plan.multis.length && !plan.sameGame.length ? '<p class="muted">Nenhuma entrada passou nas regras do plano neste dia.</p>' : '';
+    // o porquê de cada entrada (planwhy.js): o resumo, os motivos e os gráficos, na ordem do plano
+    const card = (id, title, g, what, body, btn) => `<article class="scancard whycard" id="${id}">
+      <div class="row head"><h3>${title}${g ? ` · ${hour(g.fx.t)} · ${esc(g.fx.home.name)} x ${esc(g.fx.away.name)} <span class="muted">${esc(g.fx.league.name)}</span>` : ''}</h3>
+        <span>${btn} <button class="ghost mini" data-top title="Voltar ao resumo do plano">↑ plano</button></span></div>
+      <p class="facts">${what}</p>${body}</article>`;
+    const why = empty ? '' : `<h3>Por que cada entrada</h3>
+      <p class="muted">O que pôs cada entrada no plano: o resumo, os motivos (<b class="pos">＋</b> a favor, <b class="neg">－</b> contra, · fato do jogo) e os
+      gráficos — a chance por fonte contra a que a odd exige (a linha clara) e os últimos jogos de cada time na linha, como na varredura.</p>${chartLegend()}
+      ${plan.singles.map((x, i) => card(`pw-s${i}`, `Simples ${i + 1}`, x.g, `${esc(SHORT[x.line.market] || x.line.market)}: <b>${esc(x.line.line)}</b> ${lensTag(x)}
+        · odd mínima <b>${n2(x.line.odd_min)}</b> (Pinnacle ${n2(x.line.pinnacle_odd)})${x.line.entry_brl ? ` · R$ ${x.line.entry_brl}` : ''}`,
+        singleBody(x.g, x), reg(`s:${i}`, has(x.g.fx.id, x.g.fx.home.name, x.g.fx.away.name), x.g.fx.t))).join('')}
+      ${plan.multis.map((t, i) => card(`pw-m${i}`, `Múltipla ${i + 1}`, null, `${t.n} pernas · ${t.asian ? 'não perde' : 'acerta todas'} em <b>${pct(t.p_all)}</b>
+        · odd total mínima <b>${n2(t.min)}</b> · ${brl(t.stake || t.stake_at_min || 0)}`,
+        `<p class="muted small">Cada perna: a chance (a menor entre a nossa e a da mistura com a Pinnacle), o esperado de gols, o contexto e a linha nos
+        últimos jogos dos dois times.</p>${legsBody(scan.games, t)}`, reg(`m:${i}`, t.legs.every(l => has(l.fixtureId, l.home, l.away)), t.first_kickoff))).join('')}
+      ${plan.sameGame.map(({ g, combo }, i) => card(`pw-c${i}`, `Mesmo jogo ${i + 1}`, g, `Combo: <b>${esc(combo.line)}</b> · odd mínima <b>${n2(combo.odd_min)}</b>${combo.entry_brl ? ` · R$ ${combo.entry_brl}` : ''}`,
+        comboBody(g, combo), reg(`c:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t))).join('')}`;
     out.innerHTML = `${head}${singles}${multis}${same}${empty}
       <p class="muted small">Como o plano é montado: um jogo entra uma vez só; jogo que já tem entrada fica fora. <b>Simples em duas frentes</b>, alternando:
       <b>🎯 nossa leitura</b> — a nossa chance (modelo corrigido + cenário) acima da Pinnacle, com ela pagando de 1,80 a 2,70 e acima da nossa mínima,
@@ -211,7 +239,8 @@ export function initPlan({ api, openEntry, banca }) {
       amostra curta — e o jogo difícil de analisar. <b>Múltiplas</b>: over de gols com a linha cotada pela Pinnacle; dá para trocar a linha da perna
       (1,75, 2 e 2,25 perdem só com 0–1 gol, como o 1,5; com 2 gols o 1,75 ganha metade, o 2 devolve, o 2,25 perde metade), tirar e pôr perna.
       <b>No mesmo jogo</b>: os combos de maior chance. Aposte só se a casa pagar a <b>odd mínima</b>; o plano entra na 🧪 simulação para medirmos
-      (inclusive o CLV: a odd da hora do plano contra a de fechamento).</p>`;
+      (inclusive o CLV: a odd da hora do plano contra a de fechamento).</p>${why}`;
+    bindTooltips(out);
   }
 
   show();
