@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
-import { CATS, UNIT, buildSim, settleSim, simReport, summarize } from '../src/sim.js';
+import { CATS, UNIT, buildSim, comboPin, linePin, settleSim, simReport, summarize, ticketPin } from '../src/sim.js';
 import { scanDay } from '../src/scanner.js';
 
 const T0 = Date.UTC(2026, 9, 8, 14), H = 3600e3;
@@ -10,19 +10,25 @@ const L = (id, market, extra = {}) => ({ id, market, line: id, tier: 'âncora', 
 const G = (id, extra = {}) => ({ fx: { id, t: T0 + H, home: { id: id * 10, name: `C${id}` }, away: { id: id * 10 + 1, name: `F${id}` }, league: { name: 'Liga' } }, lines: [], ...extra });
 const scan = { generated_at: new Date(T0).toISOString(), games: [
   G(1, { scenario: [{ id: 'ahA0.5', market: 'Handicap asiático', line: 'F1 +0,5', bet: true, p_nossa: 0.55, p_blend: 0.55, p_pinnacle: 0.48, pinnacle_odd: 2.05, entry_brl: 150 }],
-    lines: [L('gO2.5', 'Total de gols', { pinnacle_odd: 1.7 }), L('cornersO9.5', 'Total de escanteios', { model_only: true })] }),
+    // gols: a Pinnacle cota (1,42 a 68%: margem de 3,6%); escanteios: derivada do total dela; chutes: só do modelo
+    lines: [L('gO2.5', 'Total de gols', { pinnacle_odd: 1.42 }), L('cornersO9.5', 'Total de escanteios', { derived: true, pinnacle_odd: null, p_pinnacle: 0.6 }),
+      L('shotsO24.5', 'Total de chutes', { model_only: true, p_pinnacle: null })] }),
   G(2, { scenario: [{ id: '1', market: '1X2', line: 'C2 vence', conditional: true, p_nossa: 0.5, p_blend: 0.5, p_pinnacle: 0.44, pinnacle_odd: 2.2, entry_brl: 100 }],
     combos: [L('cb:dcH|gO1.5', 'Combo', { odd_min: 1.55, combo: true })] }),
   G(3, { lines: [L('gO2.5', 'Total de gols', { tier: 'especulativa', p_blend: 0.5, p_pinnacle: 0.5, pinnacle_odd: 1.9 })] }),   // não é aposta: fora
 ] };
 
-test('entradas: o que cada aba propôs, com a odd da Pinnacle (ou a mínima quando ela não cota)', () => {
+test('entradas: o que cada aba propôs, na odd da Pinnacle (onde ela não cota, a que pagaria; só do modelo fica fora)', () => {
   const sim = buildSim(scan);
   const by = k => sim.bets.find(b => b.key.startsWith(k));
   assert.deepEqual(sim.bets.map(b => b.cat).sort(), ['Combo', 'Escanteios', 'Gols', 'nossa análise: aposta', 'nossa análise: entrar se…'].sort());
   assert.equal(by('nossa análise: aposta|1').odd, 2.05); assert.equal(by('nossa análise: aposta|1').odd_src, 'pinnacle');
-  assert.equal(by('Gols|1').odd, 1.7); assert.equal(by('Escanteios|1').odd_src, 'mínima'); assert.equal(by('Escanteios|1').odd, 1.6);
-  assert.equal(by('Combo|2').odd, 1.55); assert.equal(by('nossa análise: entrar se…|2').stake_brl, 100);
+  assert.equal(by('Gols|1').odd, 1.42); assert.equal(by('Gols|1').odd_src, 'pinnacle');
+  // derivada: 1 / (60% × a margem da Pinnacle no jogo, 1 / (1,42 × 0,68)) — não a odd mínima do app (1,60)
+  assert.equal(by('Escanteios|1').odd_src, 'pinnacle est.'); assert.equal(by('Escanteios|1').odd, 1.61);
+  assert.ok(!sim.bets.some(b => b.lineId === 'shotsO24.5'), 'só do modelo, sem chance da Pinnacle: fora');
+  // combo: a justa pela chance da Pinnacle (68%) com a margem dela nas duas pernas (sem linha cotada no jogo: 3%)
+  assert.equal(by('Combo|2').odd, 1.39); assert.equal(by('Combo|2').odd_src, 'pinnacle est.'); assert.equal(by('nossa análise: entrar se…|2').stake_brl, 100);
   assert.ok(!sim.bets.some(b => b.fixtureId === 3), 'especulativa não é proposta');
   assert.equal(sim.id, String(T0));
 });
@@ -38,14 +44,14 @@ test('liquidação: resultados, unidades, R$, CLV; aberto até o jogo acabar; ca
   const b = k => sim.bets.find(x => x.key.startsWith(k));
   assert.equal(b('nossa análise: aposta|1').profit_u, 1.05); assert.equal(b('nossa análise: aposta|1').profit_brl, 157.5);
   assert.equal(b('nossa análise: aposta|1').clv, 0.066, '2,05 contra a justa 1/0,52');
-  assert.equal(b('Gols|1').profit_u, -1); assert.equal(b('Escanteios|1').clv, null, 'odd mínima: sem CLV');
+  assert.equal(b('Gols|1').profit_u, -1); assert.equal(b('Escanteios|1').clv, null, 'odd estimada: sem CLV');
   assert.equal(b('Combo|2').status, 'aberta'); assert.equal(b('Combo|2').detail, 'Second Half');
   fixtures.set(2, { cancelled: true, finished: false });
   await settleSim(sim, io);
   assert.equal(b('Combo|2').winner, 'VOID'); assert.equal(b('Combo|2').profit_u, 0);
   const rep = simReport(sim);
   assert.equal(rep.total.n, 5); assert.equal(rep.total.done, 5);
-  assert.equal(rep.total.profit_u, 1.05 - 1 + 0.6, 'aposta 1,05 − gols 1 + escanteios 0,6; anuladas 0');
+  assert.equal(rep.total.profit_u, 0.66, 'aposta 1,05 − gols 1 + escanteios 0,61; anuladas 0');
   assert.equal(rep.confirmed.n, 4, 'sem a "entrar se…"');
   assert.deepEqual(rep.cats.map(([c]) => c), CATS.filter(c => sim.bets.some(x => x.cat === c)));
 });
@@ -95,3 +101,19 @@ test('múltipla com perna asiática: devolução e meia pagam pelo produto do qu
   // 1 (devolve) × 1,2 (meia de 1,4) × 1,3 = 1,56 → lucro +0,56 u
   assert.equal(b.mult, 1.56); assert.equal(b.profit_u, 0.56); assert.equal(b.winner, 'A'); assert.equal(b.profit_brl, 56);
 });
+
+test('pior cenário: combo com empate anula, perna asiática e bilhete na odd que a Pinnacle pagaria', () => {
+  const g = { lines: [{ id: 'gO2.5', pinnacle_odd: 1.95, p_pinnacle: 0.5 }, { id: '1', pinnacle_odd: 2.5, p_pinnacle: 0.39 }, { id: 'gO1.5', derived: true, pinnacle_odd: null, p_pinnacle: 0.8 }] };
+  // margem: mediana de 1/(1,95×0,5) = 1,026 e 1/(2,5×0,39) = 1,026 (a derivada não conta)
+  const [o, src] = linePin({ id: 'gO1.5', p_pinnacle: 0.8 }, g);
+  assert.equal(src, 'pinnacle est.'); assert.ok(Math.abs(o - 1 / (0.8 * 1 / (1.95 * 0.5))) < 0.01);
+  assert.deepEqual(linePin({ id: 'x', p_pinnacle: null }, g), [null, null]);
+  // combo "empate anula + gols": 60% ganha e 10% devolve pela Pinnacle → justa (1 − 0,1)/0,6 = 1,5, com a margem nas duas pernas
+  const [c] = comboPin({ p_pinnacle: 0.7, push_pinnacle: 0.1, legs: [{}, {}] }, g);
+  assert.ok(Math.abs(c - 1.5 / (1 / (1.95 * 0.5)) ** 2) < 0.005);
+  // bilhete: produto da Pinnacle em cada perna; perna asiática pela que ela pagaria; perna sem nada: fora
+  assert.deepEqual(ticketPin([{ pinnacle_odd: 1.3 }, { pinnacle_odd: 1.2 }]).map(x => (typeof x === 'number' ? Math.round(x * 100) / 100 : x)), [1.56, 'pinnacle']);
+  assert.equal(ticketPin([{ pinnacle_odd: 1.3 }, { pinnacle_odd: null, pin_est: 1.35 }])[1], 'pinnacle est.');
+  assert.deepEqual(ticketPin([{ pinnacle_odd: 1.3 }, { pinnacle_odd: null, pin_est: null }]), [null, null]);
+});
+

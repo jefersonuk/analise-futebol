@@ -13,6 +13,10 @@ const sg = (x, d = 2) => (x == null ? '—' : `${x > 0 ? '+' : ''}${x.toFixed(d)
 const pc = x => (x == null ? '—' : `${x > 0 ? '+' : ''}${(x * 100).toFixed(1).replace('.', ',')}%`);
 const cls = x => (x > 0 ? 'pos' : x < 0 ? 'neg' : 'muted');
 const RES = { A: '✅', HW: '½✅', VOID: '↩', HL: '½❌', RED: '❌' };
+// de onde veio a odd de entrada: a da Pinnacle, a que ela pagaria (onde não cota a aposta) ou, nas simulações de antes
+// da regra do pior cenário, a odd mínima do app
+const SRC = { pinnacle: ['Pin', 'a odd da Pinnacle na hora'], 'pinnacle est.': ['Pin est.', 'a odd que a Pinnacle pagaria: a justa pelas chances dela, com a margem dela'],
+  'mínima': ['mín.', 'a odd mínima do app (simulada antes da regra: na odd da Pinnacle)'] };
 const IDX = 'af:simidx', DOC = id => `af:sim:${id}`;
 // algum jogo da simulação já deve ter terminado e ela ainda tem entrada aberta
 const due = sim => sim.bets.some(b => b.status === 'aberta' && Date.now() > b.kickoff + 110 * 60e3);
@@ -42,6 +46,7 @@ export function simPanel({ api, el, mine, title, intro, cat = c => c, onChange =
     st.list.set(sim.id, sim);
     st.ids = [sim.id, ...keep].filter(mine);
     render(); onChange(); changed(me);
+    if (due(sim)) check(sim.id, true);   // refeita depois dos jogos: confere já
   }
   async function remove(id) {
     await api.saveDoc(IDX, (await readIdx()).filter(x => x !== id));
@@ -69,10 +74,11 @@ export function simPanel({ api, el, mine, title, intro, cat = c => c, onChange =
       <td class="${cls(s.profit_brl)}">${s.done ? `R$ ${sg(s.profit_brl, 0)}` : '—'}</td><td class="${cls(s.clv)}">${pc(s.clv)}${s.clv_n ? ` <span class="muted">(${s.clv_n})</span>` : ''}</td></tr>`;
     const cards = list.slice(0, 10).map(sim => {
       const rep = simReport(sim), t = rep.total, cond = sim.bets.some(b => b.cat === 'nossa análise: entrar se…');
+      const old = sim.bets.filter(b => b.odd_src === 'mínima').length;
       const when = new Date(sim.scan_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
       const bets = [...sim.bets].sort((a, b) => a.kickoff - b.kickoff).map(b => `<tr class="${b.status === 'aberta' ? 'weak' : ''}"><td>${hour(b.kickoff)}</td>
         <td>${esc(b.home)}${b.away ? ` x ${esc(b.away)}` : ''}</td><td class="muted">${esc(cat(b.cat))}</td><td>${esc(b.line)}</td>
-        <td>${n2(b.odd)} <span class="muted">${b.odd_src === 'pinnacle' ? 'Pin' : 'mín.'}</span></td><td>${pct(b.p)}</td>
+        <td>${n2(b.odd)} <span class="muted" title="${esc((SRC[b.odd_src] || SRC['mínima'])[1])}">${(SRC[b.odd_src] || SRC['mínima'])[0]}</span></td><td>${pct(b.p)}</td>
         <td title="${esc(b.detail || '')}">${b.status === 'aberta' ? `<span class="muted">${esc(b.detail || 'aberta')}</span>` : `${RES[b.winner]} <span class="muted">${esc(b.detail || '')}</span>`}</td>
         <td class="${cls(b.profit_u)}">${b.profit_u == null ? '' : sg(b.profit_u)}</td><td class="${cls(b.profit_brl)}">${b.profit_brl == null ? '' : sg(b.profit_brl, 0)}</td></tr>`).join('');
       return `<div class="simcard" id="sim-${esc(sim.id)}"><div><b>${sim.plan ? `📋 Plano ${esc(sim.label || sim.date.split('-').reverse().slice(0, 2).join('/'))}` : `Varredura de ${when}`}</b> · ${t.n} entradas · ${t.done} encerradas${t.open ? `, ${t.open} em aberto` : ''} ·
@@ -80,7 +86,8 @@ export function simPanel({ api, el, mine, title, intro, cat = c => c, onChange =
         ${t.clv != null ? ` · CLV médio ${pc(t.clv)}` : ''}
         <button class="ghost mini" data-simcheck="${esc(sim.id)}"${st.busy ? ' disabled' : ''}>🔄 Conferir resultados</button>
         <button class="ghost mini" data-simdel="${esc(sim.id)}">apagar</button>
-        ${sim.checked_at ? `<span class="muted"> · conferida às ${hour(Date.parse(sim.checked_at))}</span>` : ''}</div>
+        ${sim.checked_at ? `<span class="muted"> · conferida às ${hour(Date.parse(sim.checked_at))}</span>` : ''}
+        ${old ? `<div class="neg small">⚠️ ${old} entrada${old > 1 ? 's' : ''} na odd mínima do app (simulada${old > 1 ? 's' : ''} antes da regra do pior cenário): o resultado delas é otimista</div>` : ''}</div>
         <div class="scroll"><table class="scanrank simtab"><tr><th>Lente</th><th>Entradas</th><th>✓ · ↩ · ✗</th><th>Abertas</th><th>Lucro (u)</th><th>Yield</th><th>Lucro R$</th><th>CLV</th></tr>
           ${rep.cats.map(([c, s]) => row(cat(c), s)).join('')}${row(sim.plan ? 'Total' : 'Total (sem repetir a mesma linha)', t, true)}${cond ? row('Total sem as "entrar se…"', rep.confirmed, true) : ''}</table></div>
         <details><summary>As ${sim.bets.length} entradas</summary><div class="scroll"><table class="scanrank simtab"><tr><th>Hora</th><th>Jogo</th><th>Lente</th><th>Linha</th><th>Odd</th><th>Chance</th><th>Resultado</th><th>u</th><th>R$</th></tr>${bets}</table></div></details></div>`;

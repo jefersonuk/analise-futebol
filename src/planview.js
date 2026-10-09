@@ -10,7 +10,7 @@ import { load, save } from './store.js';
 import { exposedGames } from './entry.js';
 import { multiGames, multiLine } from './multiple.js';
 import { LENS, SINGLES, buildPlan, multiOf, planFromKeys, planKeys, planText } from './plan.js';
-import { buildPlanSim, simReport } from './sim.js';
+import { buildPlanSim, comboPin, simReport, ticketPin } from './sim.js';
 import { simPanel } from './simview.js';
 import { bindSpecialist, briefPlan } from './brief.js';
 import { bindTooltips, chartLegend } from './dashboard.js';
@@ -65,17 +65,26 @@ export function initPlan({ api, openEntry, banca }) {
   // o plano entra na simulação (separada das apostas reais), um por montagem; montou de novo a mesma janela antes de
   // qualquer jogo começar: substitui o anterior
   const simIdOf = () => `plano-${Date.parse(scan.generated_at)}`;
-  async function simPlan() {
+  async function simPlan({ replace = true } = {}) {
     const sim = buildPlanSim(plan, { banca, id: simIdOf(), win: sel.value, label: labelOf(scan) });
     if (!sim.bets.length) return false;
-    await simUI.add(sim, old => old.win === sim.win && old.bets.every(b => b.status === 'aberta' && b.kickoff > Date.now()));
+    await simUI.add(sim, replace ? old => old.win === sim.win && old.bets.every(b => b.status === 'aberta' && b.kickoff > Date.now()) : null);
     return true;
+  }
+  // simulação deste plano feita antes da regra do pior cenário (combo ou perna asiática na odd mínima do app): refaz na
+  // odd da Pinnacle da hora do plano; os resultados voltam pela conferência
+  let refazendo = false;
+  async function repriceSim() {
+    refazendo = true;
+    try { await simPlan({ replace: false }); } catch { /* fica a antiga; tenta de novo na próxima vez */ }
+    refazendo = false;
   }
   // as simulações dos planos (simview.js): todos os planos montados, o mais novo primeiro
   const simUI = simPanel({ api, el: $('#planSimOut'), mine: id => String(id).startsWith('plano-'), title: '🧪 Simulação dos planos',
     cat: c => c.replace(/^Plano: /, ''), onChange: () => render(),
-    intro: `Cada plano montado entra aqui sozinho, como se tivéssemos feito todas as entradas dele: as simples na odd da Pinnacle da hora do
-      plano, os combos e as pernas asiáticas na odd mínima do app ("mín."), as múltiplas no produto das odds da Pinnacle. Montar de novo a mesma
+    intro: `Cada plano montado entra aqui sozinho, como se tivéssemos feito todas as entradas dele, sempre no pior cenário: na odd da Pinnacle
+      da hora do plano ("Pin"), não na odd mínima — a casa pagando mais é bônus. Combo e perna asiática, que ela não cota, na odd que ela pagaria:
+      a justa pelas chances dela, com a margem dela em cada perna ("Pin est."); a múltipla no produto das pernas. Montar de novo a mesma
       janela antes de qualquer jogo começar substitui o plano anterior. O resultado sai por frente (🎯 nossa leitura, 🤝 acordo com a Pinnacle),
       múltipla e mesmo jogo, em unidades (stake 1 em tudo) e em R$ (a entrada proposta); CLV = a odd de entrada contra a justa de fechamento
       da Pinnacle. Os resultados entram com 🔄 Conferir resultados depois dos jogos (e sozinhos com a página aberta). Nada daqui entra no app de apostas.` });
@@ -181,14 +190,15 @@ export function initPlan({ api, openEntry, banca }) {
     const reg = (key, ok, t) => (ok ? '<span class="tag ok">✓ registrada</span>' : t <= Date.now() ? '<span class="tag mid">começou</span>'
       : `<button class="enter mini" data-pe="${key}" title="Registrar">➕</button>`);
     const when = new Date(scan.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const stake = [...plan.singles.map(x => [x.line.entry_brl || 0, x.line.pinnacle_odd]), ...plan.multis.map(t => [t.stake || t.stake_at_min || 0, t.odd]),
-      ...plan.sameGame.map(x => [x.combo.entry_brl || 0, x.combo.odd_min])];
-    const total = stake.reduce((s, [v]) => s + v, 0), pot = stake.reduce((s, [v, o]) => s + v * (o - 1), 0);
+    // o que o plano rende se tudo der green: na odd da Pinnacle (o pior cenário; a casa pagando mais é bônus)
+    const stake = [...plan.singles.map(x => [x.line.entry_brl || 0, x.line.pinnacle_odd]), ...plan.multis.map(t => [t.stake || t.stake_at_min || 0, ticketPin(t.legs)[0]]),
+      ...plan.sameGame.map(x => [x.combo.entry_brl || 0, comboPin(x.combo, x.g)[0]])];
+    const total = stake.reduce((s, [v]) => s + v, 0), pot = stake.reduce((s, [v, o]) => s + (o > 1 ? v * (o - 1) : 0), 0);
     const n = plan.singles.length, st = plan.stats, budgetOut = (scan.skipped || []).filter(s => /orçamento/.test(s.why || '')).length;
     const head = `<p class="muted"><b>${esc(labelOf(scan))}</b> · análise de ${when}: ${scan.analyzed} jogos analisados de ${scan.fixtures} ${scan.window ? 'na janela' : 'do dia'} · ${scan.requests} requisições.
       <b>${n} simples (${plan.singles.filter(x => x.lens !== 'agree').length} 🎯 nossa leitura · ${plan.singles.filter(x => x.lens === 'agree').length} 🤝 acordo com a Pinnacle)
       · ${plan.multis.length} múltipla${plan.multis.length === 1 ? '' : 's'} · ${plan.sameGame.length} no mesmo jogo</b> · entradas ${brl(total)}
-      · <span class="pos">+${brl(pot)} se tudo green</span>${st ? ` · fora do plano: ${st.exposed ? `${st.exposed} jogo${st.exposed > 1 ? 's' : ''} que já têm entrada, ` : ''}${st.waiting} que dependem da escalação ("entrar se…")` : ''}.
+      · <span class="pos">+${brl(pot)} se tudo green</span> <span class="muted">(na odd da Pinnacle)</span>${st ? ` · fora do plano: ${st.exposed ? `${st.exposed} jogo${st.exposed > 1 ? 's' : ''} que já têm entrada, ` : ''}${st.waiting} que dependem da escalação ("entrar se…")` : ''}.
       Toque numa entrada para ver o porquê dela.</p>
       ${budgetOut ? `<p class="neg">${budgetOut} jogos com odds ficaram fora da análise pelo limite de requisições (${scan.budget}): aumente o limite na seção de varredura e monte de novo.</p>` : ''}
       ${n < SINGLES[0] ? `<p class="muted">${scan.window ? 'A janela' : 'O dia'} rendeu ${n} simples — menos que 5: melhor poucas do que forçar entrada sem valor.</p>` : ''}`;
@@ -200,6 +210,7 @@ export function initPlan({ api, openEntry, banca }) {
       ? `<span class="muted" title="a casa precisa pagar a mínima: ${x.value > 0 ? `${(x.value * 100).toFixed(1).replace('.', ',')}% acima` : 'até'} da odd da Pinnacle">casa ≥ mínima${x.value > 0 ? ` (+${(x.value * 100).toFixed(1).replace('.', ',')}% Pin)` : ''}</span>`
       : `<span class="pos">+${(x.value * 100).toFixed(1).replace('.', ',')}%</span>`);
     const inSim = simUI.get(simIdOf()), sum = inSim && simReport(inSim).total, sg = x => `${x > 0 ? '+' : ''}${x.toFixed(2).replace('.', ',')}`;
+    if (inSim?.bets.some(b => b.odd_src === 'mínima') && !refazendo) repriceSim();
     const simLine = inSim ? `<p class="simbar"><span class="muted">🧪 Este plano está na simulação: ${sum.n} entradas${sum.done
       ? ` · ${sum.done} encerrada${sum.done > 1 ? 's' : ''}${sum.open ? `, ${sum.open} em aberto` : ''} · <b class="${sum.profit_u > 0 ? 'pos' : sum.profit_u < 0 ? 'neg' : ''}">${sg(sum.profit_u)} u</b> · ${sum.profit_brl < 0 ? '−' : '+'}${brl(Math.abs(sum.profit_brl))}`
       : ' · nenhuma encerrada ainda'}</span> <button class="ghost mini" data-simgo="${esc(inSim.id)}">ver o resultado ↓</button></p>`

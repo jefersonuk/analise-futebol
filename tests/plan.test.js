@@ -146,7 +146,10 @@ test('múltipla editável no plano: perna asiática no bilhete (sem a odd da Pin
   assert.equal(back.multis[0].legs[0].lineId, 'gO2');
   assert.equal(back.multis[0].min, t.min);
   const sim = buildPlanSim(plan);
-  assert.equal(sim.bets[0].odd_src, 'mínima', 'perna asiática: odd mínima, sem CLV');
+  // perna asiática: a odd que a Pinnacle pagaria (a justa pelas chances dela, com a margem dela no jogo), nunca a mínima do app
+  assert.equal(sim.bets[0].odd_src, 'pinnacle est.');
+  assert.ok(Math.abs(sim.bets[0].odd - t.legs[0].pin_est * t.legs[1].pinnacle_odd * t.legs[2].pinnacle_odd) < 0.01);
+  assert.ok(t.legs[0].pin_est < t.legs[0].min, 'abaixo da mínima do app: o pior cenário');
 });
 
 test('🤝 acordo com a Pinnacle: o jogo que depende da escalação fica fora, como na 🎯', () => {
