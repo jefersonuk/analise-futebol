@@ -90,7 +90,7 @@ export function initEntry({ getLine, getFixture }) {
           : 'Sem jogo da API ou sem linha reconhecida: o resultado é marcado à mão no app de apostas.') + '</span>');
     } else if (belowFloor(line)) out.push(`<span class="neg"><b>Acerta ${pct(line.p_blend)}: abaixo do piso de 60%.</b> Esta linha não entra (marque "Minha análise" para registrar mesmo assim).</span>`);
     else if (line.blocked) out.push('<span class="neg">Jogo difícil de analisar (base/reservas ou ligas diferentes): aqui só over de gols com a odd da Pinnacle.</span>');
-    else if (line.multi) out.push(`<span class="muted"><b>Múltipla de ${line.legs.length} perna${line.legs.length > 1 ? 's' : ''}</b>: acerta todas em ${pct(line.p_blend)} (Pinnacle ${pct(line.p_pinnacle)}). Uma perna perdida perde tudo; entrada pequena (até 0,5% da banca).</span>`);
+    else if (line.multi) out.push(`<span class="muted"><b>Múltipla de ${line.legs.length} perna${line.legs.length > 1 ? 's' : ''}</b>: ${line.asian ? 'não perde nenhuma' : 'acerta todas'} em ${pct(line.p_blend)} (Pinnacle ${pct(line.p_pinnacle)})${line.asian ? '; perna asiática com 2 gols devolve ou paga meia' : ''}. Uma perna perdida perde tudo; entrada pequena (até 0,5% da banca).</span>`);
     else if (line.scenario) out.push(`<span class="muted"><b>Nossa análise</b>: nossa ${pct(line.p_nossa)}${line.p_pinnacle != null ? ` · Pinnacle ${pct(line.p_pinnacle)} (${line.diff_pp >= 0 ? '+' : ''}${Math.round(line.diff_pp)} pp: ${esc(line.why)})` : ''}`
       + `${line.contra ? ' · <b>contra a Pinnacle</b>' : ''}${line.conditional ? ` — <span class="neg">entrar se: ${esc(line.conditions.join('; '))}</span>`
         : line.status === 'sem aposta' ? ` — <span class="neg">sem aposta: ${esc(line.why_not.join('; '))}</span>` : ''}.</span>`);
@@ -156,7 +156,7 @@ export function initEntry({ getLine, getFixture }) {
     $('#enGame').textContent = `${fx.home.name} x ${fx.away.name} · ${fx.league.name} · ${hour(fx.t)}`;
     $('#enFacts').hidden = false;
     $('#enFacts').innerHTML = [
-      line.multi ? ['Múltipla', `${line.legs.length} perna${line.legs.length > 1 ? 's' : ''} · acerta todas em ${pct(line.p_blend)} <span class="muted">(Pinnacle ${pct(line.p_pinnacle)})</span>`]
+      line.multi ? ['Múltipla', `${line.legs.length} perna${line.legs.length > 1 ? 's' : ''} · ${line.asian ? 'não perde nenhuma' : 'acerta todas'} em ${pct(line.p_blend)} <span class="muted">(Pinnacle ${pct(line.p_pinnacle)})</span>`]
         : line.scenario ? ['Nossa análise', `${line.status === 'entrar se' ? 'entrar se…' : line.status} · nossa ${pct(line.p_nossa)} <span class="muted">(Pinnacle ${line.p_pinnacle != null ? pct(line.p_pinnacle) : '—'}; ${esc(line.why)})</span>${line.contra ? ' · <b>contra a Pinnacle</b>' : ''}`]
         : ['Consistência', `${line.tier} · acerta ${pct(line.p_blend)} <span class="muted">(piso 60%, ideal 70%)</span>`],
       ['Preço justo', num(line.fair_odd_blend)],

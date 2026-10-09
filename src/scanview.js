@@ -374,7 +374,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     const expTxt = exposed.length ? `<p class="muted">Fora das múltiplas por já terem entrada: ${exposed.map(gm => `${esc(gm.best.home)} x ${esc(gm.best.away)} (${hour(gm.best.kickoff)})`).join(' · ')}.</p>` : '';
     if (!legs.length) return `${intro}${expTxt}<p class="muted">Nenhuma perna possível nesta varredura (over 1,5 com chance ≥ 72% ou over 2,5 com ≥ 60%, com a Pinnacle, em jogo que não é difícil, ainda não começou e não tem entrada).</p>`;
     // o que pode entrar: as cotadas, menos as desmarcadas, mais as não cotadas marcadas à mão
-    const inPool = l => multi.include.get(l.fixtureId) ?? l.quoted;
+    // a linha escolhida à mão no jogo (asiática ou não cotada) entra: foi o operador quem viu a linha na casa
+    const inPool = l => multi.include.get(l.fixtureId) ?? (l.quoted || multi.lineFor.has(l.fixtureId));
     const tickets = bandTickets(legs.filter(inPool), { target: multi.target, band: multi.band })
       .map(ls => ticketOf(ls, { house: multi.house, houseTotal: multi.totals.get(ls[0].key) ?? null, banca }));
     multi.tickets = tickets;
@@ -397,8 +398,8 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
     // a linha do jogo: escolha entre as que passam (over 1,5 / 2,5); a não cotada pela Pinnacle pode faltar na casa
     const noQuote = '<span class="tag mid" title="a Pinnacle não cota esta linha neste jogo (a chance sai do total dela): a casa costuma não ter — troque para a linha seguinte">pode faltar na casa</span>';
     const pernaCell = (gm, l) => (gm.options.length > 1
-      ? `<select data-mline="${gm.fixtureId}">${gm.options.map(o => `<option value="${esc(o.lineId)}"${o.lineId === l.lineId ? ' selected' : ''}>Gols: ${esc(o.line)} · ${pct(o.p)}${o.quoted ? '' : ' (não cotada)'}</option>`).join('')}</select>`
-      : `Gols: <b>${esc(l.line)}</b>`) + (l.quoted ? '' : ` ${noQuote}`);
+      ? `<select data-mline="${gm.fixtureId}" title="2 gols: o 1,75 ganha metade, o 2 devolve, o 2,25 perde metade">${gm.options.map(o => `<option value="${esc(o.lineId)}"${o.lineId === l.lineId ? ' selected' : ''}>Gols: ${esc(o.line)} · ${pct(o.p)}${o.asian ? ' (asiática)' : o.quoted ? '' : ' (não cotada)'}</option>`).join('')}</select>`
+      : `Gols: <b>${esc(l.line)}</b>`) + (l.asian ? ` <span class="tag" title="perde só com 0–1 gol, como o 1,5; com 2 gols: ${esc(l.line)} ${l.lineId === 'gO1.75' ? 'ganha metade' : l.lineId === 'gO2' ? 'devolve' : 'perde metade'}; 3+ gols paga inteira (${pct(l.p_win)})">asiática</span>` : l.quoted ? '' : ` ${noQuote}`);
     const row = (gm, l) => { const x = ticketNo.get(l.key), on = inPool(l);
       return `<tr class="${x ? '' : 'weak'}${x?.leg.below ? ' bad' : ''}"><td><input type="checkbox" data-mpick="${l.fixtureId}"${on ? ' checked' : ''}></td>
         <td>${x ? `<b>${x.i + 1}</b>` : '<span class="muted">—</span>'}</td><td>${hour(l.kickoff)}</td><td>${esc(l.home)} x ${esc(l.away)}</td><td class="muted">${esc(l.competition)}</td><td>${pernaCell(gm, l)}</td>

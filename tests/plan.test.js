@@ -64,7 +64,7 @@ test('um jogo uma vez só; mesmo jogo e múltiplas nos jogos que sobraram; jogo 
   assert.match(txt, /MESMO JOGO \(5\)/);
   const sim = buildPlanSim(plan);
   assert.equal(sim.id, 'plano-2026-10-09');
-  assert.deepEqual([...new Set(sim.bets.map(b => b.cat))], ['Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo']);
+  assert.deepEqual([...new Set(sim.bets.map(b => b.cat))], ['Plano: simples (nossa leitura)', 'Plano: múltipla', 'Plano: mesmo jogo']);
   assert.equal(sim.bets.length, 1 + 2 + 5);
 });
 
@@ -96,4 +96,55 @@ test('simulação do plano: uma por montagem, com o nome da janela', () => {
   const sim = buildPlanSim(plan, { id: 'plano-123', win: 'h4', label: '08/10, 13:12–17:12 (próximas 4 h)' });
   assert.equal(sim.id, 'plano-123'); assert.equal(sim.win, 'h4'); assert.match(sim.label, /próximas 4 h/);
   assert.equal(buildPlanSim(plan).id, 'plano-2026-10-08', 'sem id: um por data');
+});
+
+test('simples em duas frentes: 🎯 nossa leitura e 🤝 acordo com a Pinnacle, alternando; um jogo uma vez só', async () => {
+  const { LENS, needOf } = await import('../src/plan.js');
+  id = 0;
+  // linha consistente (aba de mercado): âncora/sólida, contexto, odd da Pinnacle na própria linha
+  const agree = (extra = {}) => ({ id: 'cornersO8.5', market: 'Total de escanteios', line: 'Mais de 8,5', tier: 'âncora', consistency_score: 0.8, p_model: 0.7, p_blend: 0.69,
+    p_pinnacle: 0.68, pinnacle_odd: 1.43, odd_min: 1.5, odd_min_vs_pinnacle_pct: 4.9, politica_e: 'cheia', fragile: false, entry_brl: 200,
+    context: { verdict: 'a favor', signals: [] }, ...extra });
+  const withAgree = (opts, extra) => { const g = G(opts); g.lines = [agree(extra)]; return g; };
+  const games = [
+    G({ lg: 1, single: [0.58, 0.48, 2.05] }), G({ lg: 2, single: [0.57, 0.48, 2.05] }),
+    withAgree({ lg: 3 }), withAgree({ lg: 4 }, { context: { verdict: 'neutro', signals: [] }, tier: 'sólida' }),
+    withAgree({ lg: 5 }, { p_model: 0.6 }),                          // o modelo 8 pp abaixo da Pinnacle: não é acordo
+    withAgree({ lg: 6 }, { derived: true, pinnacle_odd: null }),     // a Pinnacle não cota a linha: fora
+    withAgree({ lg: 7, single: [0.6, 0.48, 2.1] }),                  // as duas frentes no mesmo jogo: entra uma vez
+  ];
+  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
+  const ids = plan.singles.map(x => x.g.fx.id);
+  assert.equal(new Set(ids).size, ids.length, 'um jogo uma vez só');
+  assert.deepEqual(plan.singles.filter(x => x.lens === 'agree').map(x => x.g.fx.id).sort(), [3, 4]);
+  assert.deepEqual(plan.singles.filter(x => x.lens === 'ours').map(x => x.g.fx.id).sort(), [1, 2, 7]);
+  assert.ok(!ids.includes(5) && !ids.includes(6));
+  const a = plan.singles.find(x => x.g.fx.id === 3);
+  assert.equal(a.value, needOf(a.line)); assert.equal(a.value, Math.round((1.5 / 1.43 - 1) * 1000) / 1000);
+  // chaves com a frente, texto com a frente e a simulação separada por frente
+  const again = planFromKeys({ games }, planKeys(plan));
+  assert.deepEqual(again.singles.map(x => `${x.g.fx.id}:${x.lens}`), plan.singles.map(x => `${x.g.fx.id}:${x.lens}`));
+  assert.match(planText(plan), new RegExp(LENS.agree));
+  const cats = new Set(buildPlanSim(plan).bets.map(b => b.cat));
+  assert.ok(cats.has('Plano: simples (nossa leitura)') && cats.has('Plano: simples (acordo com a Pinnacle)'));
+});
+
+test('múltipla editável no plano: perna asiática no bilhete (sem a odd da Pinnacle) e de volta pelas chaves', async () => {
+  const { multiOf } = await import('../src/plan.js');
+  const { multiGames } = await import('../src/multiple.js');
+  id = 0;
+  const o25 = p => ({ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', p_blend: p, p_pinnacle: p, pinnacle_odd: +(1 / p / 1.025).toFixed(2), context: { verdict: 'neutro', signals: [] } });
+  const games = [0, 1, 2].map(i => { const g = G({ lg: 10 + i, over: 0.8 }); g.lines.push(o25(0.55)); return g; });
+  const ms = multiGames(games, { now: NOW });
+  const legs = ms.map(m => m.best);
+  const asian = ms[0].options.find(o => o.lineId === 'gO2');
+  const t = multiOf([asian, ...legs.slice(1)], 44000);
+  assert.equal(t.odd, null, 'a Pinnacle não cota a perna asiática aqui: sem odd total dela');
+  assert.ok(t.asian && t.min > 0 && t.p_all <= 0.8 ** 3 + 1e-9);
+  const plan = { scan_at: 'x', date: '2026-10-09', target: 6, singles: [], sameGame: [], multis: [t] };
+  const back = planFromKeys({ games }, planKeys(plan));
+  assert.equal(back.multis[0].legs[0].lineId, 'gO2');
+  assert.equal(back.multis[0].min, t.min);
+  const sim = buildPlanSim(plan);
+  assert.equal(sim.bets[0].odd_src, 'mínima', 'perna asiática: odd mínima, sem CLV');
 });

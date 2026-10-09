@@ -39,7 +39,7 @@ test('linha disponível: over 1,5 que a Pinnacle não cota passa para o over 2,5
   const ms = multiGames(gs, { now: NOW });
   const by = new Map(ms.map(m => [m.fixtureId, m]));
   assert.equal(by.get(1).best.lineId, 'gO2.5'); assert.ok(by.get(1).best.quoted);
-  assert.deepEqual(by.get(1).options.map(o => o.lineId), ['gO2.5', 'gO1.5'], 'dá para trocar para o 1,5');
+  assert.deepEqual(by.get(1).options.map(o => o.lineId), ['gO2.5', 'gO1.5', 'gO1.75', 'gO2', 'gO2.25'], 'dá para trocar para o 1,5 e as asiáticas');
   assert.equal(by.get(2).best.quoted, false); assert.equal(by.get(3).best.lineId, 'gO1.5');
   assert.deepEqual(ms.slice(0, 2).map(m => m.fixtureId).sort(), [1, 4], 'cotadas primeiro');
   assert.deepEqual(autoTicket(ms.map(m => m.best), { target: 100 }).map(l => l.fixtureId).sort(), [1, 4]);
@@ -79,10 +79,13 @@ test('registro no app de apostas: pernas, última perna para a conferência, pri
 });
 
 test('liquidação e ao vivo: uma perna perdida perde tudo; todas ganhas ganha; anulada vai à mão', () => {
-  assert.deepEqual(settleMulti(['A', 'A', 'A']), { winner: 'A', done: true });
-  assert.deepEqual(settleMulti(['A', 'RED', null]), { winner: 'RED', done: true });
+  assert.deepEqual(settleMulti(['A', 'A', 'A']), { winner: 'A', done: true, mult: null });
+  assert.deepEqual(settleMulti(['A', 'A'], [1.5, 2]), { winner: 'A', done: true, mult: 3 });
+  assert.deepEqual(settleMulti(['A', 'RED', null]), { winner: 'RED', done: true, mult: 0 });
   assert.deepEqual(settleMulti(['A', null]), { winner: null, done: false });
   assert.equal(settleMulti(['A', 'VOID']).manual, true);
+  // asiáticas: devolução vale 1, meia vitória (1 + odd)/2, meia derrota 1/2 — o bilhete segue
+  assert.deepEqual(settleMulti(['A', 'VOID', 'HW', 'HL'], [1.5, 1.6, 1.8, 2]), { winner: null, done: true, manual: true, mult: 1.05 });
   const info = new Map([[1, { status: '2H', live: true, finished: false, elapsed: 60, goals: [1, 1], home: 'A', game: { t: NOW, home: true, opp: 'B', gf: 1, ga: 1, g1: null } }],
     [2, { status: '1H', live: true, finished: false, elapsed: 20, goals: [0, 0], home: 'C', game: { t: NOW, home: true, opp: 'D', gf: 0, ga: 0, g1: null } }],
     [3, { status: 'NS', live: false, finished: false, goals: [0, 0], home: 'E', game: null }]]);
@@ -100,7 +103,7 @@ test('varredura da demo: a aba Múltipla tem pernas e monta o bilhete', async ()
 
 test('bilhetes por faixa de horário: do mais próximo ao mais longe, cada jogo num bilhete só', async () => {
   const { bandTickets } = await import('../src/multiple.js');
-  const leg = (k, h, p = 0.75, extra = {}) => ({ key: `${k}:gO1.5`, fixtureId: k, kickoff: NOW + h * H, p, p_pinnacle: p, quoted: true, context: 'neutro', ...extra });
+  const leg = (k, h, p = 0.75, extra = {}) => ({ key: `${k}:gO1.5`, fixtureId: k, kickoff: NOW + h * H, p, p_pinnacle: p, fair: 1 / p, quoted: true, context: 'neutro', ...extra });
   // 13h: três jogos; 13h30: um; 16h: dois; 20h: um sozinho
   const legs = [leg(1, 1), leg(2, 1, 0.8), leg(3, 1, 0.78), leg(4, 1.5), leg(5, 4), leg(6, 4.5), leg(7, 8)];
   const ts = bandTickets(legs, { target: 3, band: 2 });
@@ -133,4 +136,25 @@ test('exposição: jogo que já tem entrada (app de apostas ou caixa de envio) �
   assert.ok(e.has(999, 'Vanersborgs FK', 'Kumla'), 'à mão: pelo nome dos times');
   assert.ok(!e.has(998, 'Kumla', 'Outro'));
   delete globalThis.localStorage;
+});
+
+test('perna asiática: 1,75 / 2 / 2,25 perdem só com 0–1 gol; as chances e a justa saem do 1,5 e do 2,5 do jogo', async () => {
+  const { ASIAN, fairOf, legEV } = await import('../src/multiple.js');
+  id = 0;
+  const o25 = { id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', p_blend: 0.55, p_pinnacle: 0.55, pinnacle_odd: 1.78, context: { verdict: 'neutro' } };
+  const [m] = multiGames([game({ p: 0.8, pin: 0.8, extra: [o25] })], { now: NOW });
+  const by = Object.fromEntries(m.options.map(o => [o.lineId, o]));
+  // 2 gols = 25%: o 2 devolve (justa = 0,75/0,55), o 1,75 ganha metade, o 2,25 perde metade
+  assert.equal(by['gO2'].fair, Math.round((0.75 / 0.55) * 100) / 100);
+  assert.ok(by['gO1.75'].fair < by['gO2'].fair && by['gO2'].fair < by['gO2.25'].fair && by['gO2.25'].fair < 1 / 0.55, 'entre a justa do 1,5 e a do 2,5');
+  assert.ok(!by['gO2.5'], 'o 2,5 a 55% não passa como perna (60%+)');
+  assert.ok(['gO1.75', 'gO2', 'gO2.25'].every(k => by[k].p === 0.8 && by[k].asian && !by[k].quoted), 'não perde = a chance do 1,5; fora do automático');
+  for (const [k] of ASIAN) assert.ok(Math.abs(legEV(by[k].out, fairOf(by[k].out)) - 1) < 1e-9, 'na justa o valor esperado é 1');
+  // no bilhete: com a perna de 2, a chance de não perder segue a do 1,5 e o EV usa devolução
+  const other = multiGames([game({ p: 0.78, pin: 0.78 })], { now: NOW })[0].best;
+  const t = ticketOf([by['gO2'], other], { houseTotal: by['gO2'].fair * other.fair * 1.1 });
+  assert.equal(t.p_all, Math.round(0.8 * 0.78 * 1000) / 1000);
+  // odd total 10% acima da justa: a parte que devolve (os 2 gols) não ganha com a odd maior — o EV fica abaixo de 10%
+  // (√1,1 × 0,75 + 0,25) × √1,1 − 1 ≈ +8,7% (com as justas arredondadas, ~8%)
+  assert.ok(t.asian && t.ev > 0.07 && t.ev < 0.095, `EV ${t.ev}`);
 });

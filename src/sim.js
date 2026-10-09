@@ -15,7 +15,7 @@ import { COMBOS, FILTER_KEYS, bestLine } from './scanner.js';
 import { isBet } from './dossier.js';
 import { TARGET, bandTickets, multiLegs, settleMulti, ticketOf } from './multiple.js';
 
-export const CATS = ['Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo', 'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T',
+export const CATS = ['Plano: simples (nossa leitura)', 'Plano: simples (acordo com a Pinnacle)', 'Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo', 'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T',
   'Handicap gols', '1X2', 'Escanteios', 'Escanteios 1T', 'Chutes', 'Combo', 'Múltipla'];
 const CAT_OF = { 'Total de gols': 'Gols', 'Total de gols 1T': 'Gols 1T', 'Handicap asiático': 'Handicap gols', '1X2': '1X2', 'Total de escanteios': 'Escanteios',
   'Total escanteios 1T': 'Escanteios 1T', 'Total de chutes': 'Chutes', 'Total de chutes no gol': 'Chutes' };
@@ -55,14 +55,15 @@ export function buildSim(scan, { banca = 44000 } = {}) {
     window: scan.window ? { from: scan.window.from, to: scan.window.to } : null, date: scan.date || null, bets };
 }
 
-// Uma múltipla (pernas de multiple.js) na odd da Pinnacle: o produto das odds dela em cada perna.
+// Uma múltipla (pernas de multiple.js) na odd da Pinnacle: o produto das odds dela em cada perna (perna asiática, que ela
+// não cota aqui: a mínima da perna — e o bilhete fica sem CLV).
 function multiBet(legs, banca, cat) {
-  const odd = legs.reduce((t, l) => t * l.pinnacle_odd, 1), t = ticketOf(legs, { houseTotal: odd, banca });
+  const oddOf = l => l.pinnacle_odd || l.min || l.fair, odd = legs.reduce((t, l) => t * oddOf(l), 1), t = ticketOf(legs, { houseTotal: odd, banca });
   return { key: `${cat}|${legs.map(l => l.key).join(',')}`, cat, fixtureId: null, kickoff: Math.min(...legs.map(l => l.kickoff)),
     home: `Múltipla (${legs.length})`, away: '', competition: [...new Set(legs.map(l => l.competition))].join(', '), lineId: 'multi', market: 'Múltipla',
-    line: legs.map(l => `${l.home} x ${l.away} ${l.line}`).join(' · '), odd: r2(odd), odd_src: 'pinnacle', p: t.p_all, p_pinnacle: t.p_pinnacle_all,
+    line: legs.map(l => `${l.home} x ${l.away} ${l.line}`).join(' · '), odd: r2(odd), odd_src: legs.every(l => l.pinnacle_odd > 1) ? 'pinnacle' : 'mínima', p: t.p_all, p_pinnacle: t.p_pinnacle_all,
     // entrada: a do bilhete na odd da Pinnacle; se ali não vale (margem), a que o app propõe na odd mínima
-    stake_brl: t.stake || t.stake_at_min || 0, legs: legs.map(l => ({ fixtureId: l.fixtureId, lineId: l.lineId, home: l.home, away: l.away, line: l.line, odd: l.pinnacle_odd })),
+    stake_brl: t.stake || t.stake_at_min || 0, legs: legs.map(l => ({ fixtureId: l.fixtureId, lineId: l.lineId, home: l.home, away: l.away, line: l.line, odd: oddOf(l) })),
     status: 'aberta', winner: null, profit_u: null, profit_brl: null, clv: null, detail: null };
 }
 
@@ -71,7 +72,8 @@ function multiBet(legs, banca, cat) {
 // win: a janela escolhida (h4, d1…); label: o nome do plano no painel.
 export function buildPlanSim(plan, { banca = 44000, id = `plano-${plan.date}`, win = null, label = null } = {}) {
   const bets = [
-    ...plan.singles.map(({ g, line }) => base(g, line, 'Plano: simples', line.pinnacle_odd, 'pinnacle', line.entry_brl)),
+    ...plan.singles.map(({ g, line, lens }) => base(g, line, lens === 'agree' ? 'Plano: simples (acordo com a Pinnacle)' : 'Plano: simples (nossa leitura)',
+      line.pinnacle_odd, 'pinnacle', line.entry_brl)),
     ...plan.multis.map(t => multiBet(t.legs, banca, 'Plano: múltipla')),
     ...plan.sameGame.map(({ g, combo }) => base(g, combo, 'Plano: mesmo jogo', combo.odd_min, 'mínima', combo.entry_brl)),
   ];
@@ -79,9 +81,11 @@ export function buildPlanSim(plan, { banca = 44000, id = `plano-${plan.date}`, w
   return { id, plan: true, win, label, date: plan.date, scan_at: plan.scan_at, created_at: now, updated_at: now, window: null, bets };
 }
 
-function close(b, winner, detail) {
+// mult: o quanto a múltipla pagou por unidade quando uma perna devolveu ou deu meia (o lucro sai dele)
+function close(b, winner, detail, mult = null) {
   b.winner = winner; b.status = 'encerrada'; b.detail = detail;
-  b.profit_u = r3(UNIT[winner](b.odd)); b.profit_brl = r2(b.profit_u * b.stake_brl);
+  b.profit_u = r3(mult != null ? mult - 1 : UNIT[winner](b.odd)); b.profit_brl = r2(b.profit_u * b.stake_brl);
+  if (mult != null) b.mult = mult;
 }
 
 // Liquida o que está aberto. io (settlement.js simIO): { fixtures(ids) -> Map(id -> { finished, cancelled, long, score, … }),
@@ -107,8 +111,10 @@ export async function settleSim(sim, io) {
     if (b.legs) {
       const rs = [];
       for (const l of b.legs) rs.push(await leg(l.fixtureId, l.lineId));
-      const s = settleMulti(rs.map(x => x.r));
-      if (s.done) { close(b, s.manual ? 'VOID' : s.winner, rs.map((x, i) => `${b.legs[i].home} x ${b.legs[i].away}: ${x.txt}`).join(' · ')); settled++; }
+      const s = settleMulti(rs.map(x => x.r), b.legs.map(l => l.odd));
+      const txt = rs.map((x, i) => `${b.legs[i].home} x ${b.legs[i].away}: ${x.txt}`).join(' · ');
+      // devolução ou meia numa perna: o bilhete paga o produto do que cada perna pagou
+      if (s.done) { if (s.manual && s.mult != null) close(b, s.mult > 1 ? 'A' : s.mult === 1 ? 'VOID' : 'HL', txt, s.mult); else close(b, s.manual ? 'VOID' : s.winner, txt); settled++; }
       continue;
     }
     const x = await leg(b.fixtureId, b.lineId);

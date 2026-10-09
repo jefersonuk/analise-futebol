@@ -56,11 +56,12 @@ async function checkMulti(meta, oddTaken) {
     if (NO_MATCH.has(st)) return { l, r: 'VOID', txt: `${l.home} x ${l.away}: não disputado` };
     if (!FINISHED.has(st)) return { l, r: null, txt: `${l.home} x ${l.away}: ${f.fixture.status.long}` };
     const g = gameOf(f), x = settleLine(l.lineId, g, f.teams.home.name);
-    return { l, r: x?.winner ?? null, txt: `${f.teams.home.name} ${g.gf}–${g.ga} ${f.teams.away.name} ${x?.winner === 'A' ? '✅' : x?.winner === 'RED' ? '❌' : '↩'}` };
+    return { l, r: x?.winner ?? null, txt: `${f.teams.home.name} ${g.gf}–${g.ga} ${f.teams.away.name} ${{ A: '✅', HW: '½✅', VOID: '↩', HL: '½❌', RED: '❌' }[x?.winner] || '?'}` };
   });
-  const s = settleMulti(res.map(x => x.r)), detail = `múltipla ${res.filter(x => x.r === 'A').length}/${legs.length}: ${res.map(x => x.txt).join(' · ')}`;
+  const s = settleMulti(res.map(x => x.r), legs.map(l => l.odd_casa)), detail = `múltipla ${res.filter(x => x.r === 'A').length}/${legs.length}: ${res.map(x => x.txt).join(' · ')}`;
   if (!s.done) return { status: 'pendente', detail };
-  if (s.manual) return { status: 'manual', detail: `${detail} — perna anulada: a casa recalcula a odd (marque à mão)` };
+  // devolução ou meia numa perna (jogo cancelado, linha asiática com 2 gols): a casa recalcula a odd
+  if (s.manual) return { status: 'manual', detail: `${detail} — perna com devolução ou meia: a casa recalcula a odd${s.mult != null ? ` (pelas odds das pernas, o bilhete paga ${s.mult.toFixed(2).replace('.', ',')} × a entrada)` : ''}; confira o valor pago e marque à mão` };
   let clv = null, closingFair = null;
   if (s.winner === 'A' || legs.every(l => fs.get(l.fixtureId) && FINISHED.has(fs.get(l.fixtureId).fixture.status.short))) {
     try {
