@@ -11,8 +11,9 @@
 // Odd: sempre a da Pinnacle na hora — o pior cenário (regra do Jeferson, 09/10/2026: "nem sempre vou encontrar a odd
 // mínima; simule na odd que você puxou da Pinnacle naquele momento; o que vier além disso é bônus"). Onde ela não cota a
 // aposta exata (linha derivada do total, combo, perna asiática), a odd que ela pagaria: a justa pelas chances dela, com a
-// margem dela no jogo em cada perna (odd_src = 'pinnacle est.'). Sem nenhuma chance da Pinnacle (linha só do modelo), a
-// entrada fica fora. Simulações antigas podem ter odd_src = 'mínima' (a odd mínima do app, antes desta regra).
+// margem dela no jogo em cada perna (odd_src = 'pinnacle est.'). Sem nenhuma chance da Pinnacle (linha só do modelo:
+// chutes), a justa do nosso modelo com a margem de uma casa, 5% (odd_src = 'modelo est.') — abaixo da nossa mínima (8%).
+// Simulações antigas podem ter odd_src = 'mínima' (a odd mínima do app, antes desta regra).
 // Lucro em unidades (stake fixa de 1) e em R$ (a entrada proposta pelo app).
 
 import { CENARIO, COMBOS, FILTER_KEYS, bestLine } from './scanner.js';
@@ -20,7 +21,7 @@ import { isBet } from './dossier.js';
 import { MULTI, TARGET, bandTickets, multiLegs, settleMulti, ticketOf } from './multiple.js';
 import { pinMargin } from './odds.js';
 
-export const CATS = ['Plano: simples (nossa leitura)', 'Plano: simples (acordo com a Pinnacle)', 'Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo', 'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T',
+export const CATS = ['Plano: simples (nossa leitura)', 'Plano: simples (acordo com a Pinnacle)', 'Plano: simples (chutes)', 'Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo', 'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T',
   'Handicap gols', '1X2', 'Escanteios', 'Escanteios 1T', 'Chutes', 'Combo', 'Múltipla'];
 const CAT_OF = { 'Total de gols': 'Gols', 'Total de gols 1T': 'Gols 1T', 'Handicap asiático': 'Handicap gols', '1X2': '1X2', 'Total de escanteios': 'Escanteios',
   'Total escanteios 1T': 'Escanteios 1T', 'Total de chutes': 'Chutes', 'Total de chutes no gol': 'Chutes' };
@@ -32,10 +33,13 @@ const base = (g, l, cat, odd, oddSrc, stake) => ({
   key: `${cat}|${g.fx.id}|${l.id}`, cat, fixtureId: g.fx.id, kickoff: g.fx.t, home: g.fx.home.name, away: g.fx.away.name, competition: g.fx.league.name,
   lineId: l.id, market: l.market, line: l.line, odd: r2(odd), odd_src: oddSrc, p: r3(l.p_nossa ?? l.p_blend), p_pinnacle: l.p_pinnacle ?? null,
   stake_brl: stake > 0 ? stake : 0, status: 'aberta', winner: null, profit_u: null, profit_brl: null, clv: null, detail: null });
-// [odd, origem] de uma linha: a da Pinnacle; derivada, a que ela pagaria (1 / (chance dela × margem)); sem chance dela, nada
+// [odd, origem] de uma linha: a da Pinnacle; derivada, a que ela pagaria (1 / (chance dela × margem)); só do modelo, a
+// justa dele com a margem de uma casa (5%); sem chance nenhuma, nada
+export const HOUSE_MARGIN = 1.05;
 export function linePin(l, g) {
   if (l.pinnacle_odd > 1) return [l.pinnacle_odd, 'pinnacle'];
-  return l.p_pinnacle > 0 ? [1 / (l.p_pinnacle * pinMargin(g?.lines)), 'pinnacle est.'] : [null, null];
+  if (l.p_pinnacle > 0) return [1 / (l.p_pinnacle * pinMargin(g?.lines)), 'pinnacle est.'];
+  return l.model_only && l.p_blend > 0 ? [1 / (l.p_blend * HOUSE_MARGIN), 'modelo est.'] : [null, null];
 }
 // o combo como a Pinnacle pagaria: a justa pelas chances dela (empate anula com a perna de gols certa devolve, como na
 // liquidação), com a margem dela em cada perna. Combo guardado antes de push_pinnacle: a devolução na proporção da mistura.
@@ -65,7 +69,7 @@ export function buildSim(scan, { banca = 44000 } = {}) {
       if (!l || !isBet(l) || seen.has(l.id)) continue;
       seen.add(l.id);
       const [odd, src] = linePin(l, g);
-      if (odd) bets.push(base(g, l, CAT_OF[l.market] || l.market, odd, src, l.entry_brl));   // só do modelo: fora
+      if (odd) bets.push(base(g, l, CAT_OF[l.market] || l.market, odd, src, l.entry_brl));
     }
     // combo: o do jogo na aba Combos (a Pinnacle não cota combo: a odd que ela pagaria)
     const cb = want(COMBOS) && (g.combos || []).find(isBet), [co, cs] = cb ? comboPin(cb, g) : [];
@@ -96,8 +100,10 @@ function multiBet(legs, banca, cat) {
 // win: a janela escolhida (h4, d1…); label: o nome do plano no painel.
 export function buildPlanSim(plan, { banca = 44000, id = `plano-${plan.date}`, win = null, label = null } = {}) {
   const bets = [
-    ...plan.singles.map(({ g, line, lens }) => base(g, line, lens === 'agree' ? 'Plano: simples (acordo com a Pinnacle)' : 'Plano: simples (nossa leitura)',
-      line.pinnacle_odd, 'pinnacle', line.entry_brl)),
+    ...plan.singles.flatMap(({ g, line, lens }) => {
+      const [odd, src] = linePin(line, g), cat = { agree: 'Plano: simples (acordo com a Pinnacle)', shots: 'Plano: simples (chutes)' }[lens] || 'Plano: simples (nossa leitura)';
+      return odd ? [base(g, line, cat, odd, src, line.entry_brl)] : [];
+    }),
     ...plan.multis.map(t => multiBet(t.legs, banca, 'Plano: múltipla')).filter(Boolean),
     ...plan.sameGame.flatMap(({ g, combo }) => { const [odd, src] = comboPin(combo, g); return odd ? [base(g, combo, 'Plano: mesmo jogo', odd, src, combo.entry_brl)] : []; }),
   ];

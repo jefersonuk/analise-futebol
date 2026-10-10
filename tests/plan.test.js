@@ -194,3 +194,55 @@ test('mesmo jogo: vitória do favorito + 1,5; se a de 1,5 paga menos de 1,60, a 
   }
 });
 
+
+test('mercados e ligas marcados: só handicap, escanteios e chutes; chutes como 3ª frente só em liga grande; ligas menores fora', async () => {
+  const { PLAN_DEFAULT, LENS } = await import('../src/plan.js');
+  id = 0;
+  const big = { id: 39, name: 'Premier League' };
+  const ctx = { verdict: 'a favor', signals: [] };
+  const line = (lid, market, extra = {}) => ({ id: lid, market, line: lid, tier: 'âncora', consistency_score: 0.8, p_model: 0.72, p_blend: 0.71, p_pinnacle: 0.7,
+    pinnacle_odd: 1.46, odd_min: 1.52, odd_min_vs_pinnacle_pct: 4.1, politica_e: 'cheia', context: ctx, entry_brl: 150, ...extra });
+  const shots = (extra = {}) => line('shotsO24.5', 'Total de chutes', { model_only: true, pinnacle_odd: null, p_pinnacle: null, odd_min_vs_pinnacle_pct: null,
+    p_model_range: [0.64, 0.78], hit_rate_last10: 0.75, ...extra });
+  const mk = (lg, lines, extra = {}) => { const g = G({ lg }); g.fx.league = lg === 39 ? big : { id: lg, name: `Liga ${lg}` }; g.lines = lines; return Object.assign(g, extra); };
+  const games = [
+    mk(39, [line('gO2.5', 'Total de gols')]),                    // gols: desmarcado no padrão
+    mk(39, [line('cornersO9.5', 'Total de escanteios')]),         // escanteios: entra (🤝)
+    mk(39, [shots()]),                                            // chutes em liga grande: entra (📊)
+    mk(7, [shots()]),                                             // chutes em liga menor: fora
+    mk(8, [line('cornersO9.5', 'Total de escanteios')]),          // liga menor: fora com "só as grandes"
+  ];
+  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: PLAN_DEFAULT, big: true });
+  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]).sort(), [[2, 'agree'], [3, 'shots']]);
+  assert.equal(plan.stats.small, 2, 'dois jogos de ligas menores');
+  assert.match(LENS.shots, /chutes/);
+  // sem "só as grandes": a liga menor entra nos escanteios, mas chutes continuam só em liga grande
+  const all = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: PLAN_DEFAULT, big: false });
+  assert.ok(all.singles.some(x => x.g.fx.id === 5) && !all.singles.some(x => x.g.fx.id === 4));
+  // só escanteios: sem chutes, sem mesmo jogo, sem múltiplas
+  const only = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: ['Total de escanteios'], big: false });
+  assert.ok(only.singles.every(x => x.line.market === 'Total de escanteios') && !only.sameGame.length && !only.multis.length);
+  // guardado e refeito com a frente 📊; na simulação, chutes na justa do modelo com 5% (sem a Pinnacle)
+  const back = planFromKeys({ games }, planKeys(plan));
+  assert.deepEqual(back.singles.map(x => x.lens).sort(), ['agree', 'shots']);
+  assert.deepEqual(back.markets, PLAN_DEFAULT); assert.equal(back.big, true);
+  const b = buildPlanSim(plan).bets.find(x => x.cat === 'Plano: simples (chutes)');
+  assert.equal(b.odd_src, 'modelo est.'); assert.equal(b.odd, Math.round(100 / (0.71 * 1.05)) / 100);
+});
+
+test('múltiplas do plano: odd justa 6+, as de 1,5 mais prováveis e a de 2,5 onde precisa; sem chegar a 6, nada', async () => {
+  const { ticketTo } = await import('../src/plan.js');
+  const { multiGames } = await import('../src/multiple.js');
+  id = 0;
+  const o25 = p => ({ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', p_blend: p, p_pinnacle: p, pinnacle_odd: +(1 / p / 1.025).toFixed(2), context: { verdict: 'neutro', signals: [] } });
+  const games = Array.from({ length: 8 }, (_, i) => { const g = G({ lg: 40 + i, over: 0.8 }); g.lines.push(o25(0.6 + (i % 4) * 0.02)); return g; });
+  const ms = multiGames(games, { now: NOW });
+  const t = ticketTo(ms, { target: 6 });
+  const fair = t.reduce((a, l) => a * l.fair, 1);
+  assert.ok(fair >= 6 && t.length <= 6, `odd ${fair} em ${t.length} pernas`);
+  assert.ok(t.some(l => l.lineId === 'gO2.5') && t.some(l => l.lineId === 'gO1.5'), 'mais de 1,5 e, onde precisou, mais de 2,5');
+  // só 3 jogos de 1,5: não chega a 6
+  assert.equal(ticketTo(multiGames([G({ lg: 50, over: 0.8 }), G({ lg: 51, over: 0.8 }), G({ lg: 52, over: 0.8 })], { now: NOW }), { target: 6 }), null);
+  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
+  assert.ok(plan.multis.length >= 1 && plan.multis.every(x => x.fair >= 6), plan.multis.map(x => x.fair).join());
+});

@@ -200,7 +200,8 @@ export function pickGames(games, { market = null, top = 20, order = 'time' } = {
 // expand: false mantém a janela de horas pedida, mesmo com poucos jogos (o Plano do dia: a janela é a do operador).
 // markets: as linhas pedidas (SCAN_OPTIONS; null = todas): os jogos guardados são os melhores nelas — e só eles levam o
 // contexto da API (confronto, desfalques, clubes) —; o histórico do 1º tempo só com escanteios 1T ou o ao vivo.
-export async function scanDay(api, { date = null, hours = null, now = Date.now(), top = 20, budget = 1500, banca = 44000, half = true, expand = true, markets = null, onProgress = () => {} }) {
+// only(fixture): os jogos que entram (o Plano do dia: só ligas grandes, leagues.js); os outros nem carregam a liga.
+export async function scanDay(api, { date = null, hours = null, now = Date.now(), top = 20, budget = 1500, banca = 44000, half = true, expand = true, markets = null, only = null, onProgress = () => {} }) {
   const want = k => !markets || markets.includes(k);
   const used = (() => { const s0 = api.stats().api; return () => api.stats().api - s0; })();
   const skipped = [];
@@ -225,13 +226,13 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
       to = now + span * 3600e3;
       for (const d of new Set([brDate(now), brDate(to)])) await loadDate(d);
       fixtures = inWindow(to);
-      if (!expand || fixtures.filter(f => odds.has(f.id)).length >= Math.ceil(top * 1.5) || span >= Math.max(hours, MAX_HOURS)) break;
+      if (!expand || fixtures.filter(f => odds.has(f.id) && (!only || only(f))).length >= Math.ceil(top * 1.5) || span >= Math.max(hours, MAX_HOURS)) break;
       span = Math.min(span + STEP_HOURS, Math.max(hours, MAX_HOURS));
     }
   } else { await loadDate(date); fixtures = inWindow(to); }
   const dates = [...byDate.keys()];
   onProgress(`${fixtures.length} jogos ainda por começar${span > hours ? ` (janela ampliada para ${span} horas)` : ''}. Montando as ligas…`);
-  const pool = fixtures.filter(f => odds.has(f.id));
+  const pool = fixtures.filter(f => odds.has(f.id) && (!only || only(f))), outside = only ? fixtures.filter(f => odds.has(f.id) && !only(f)).length : 0;
   const has1h = f => odds.get(f.id).bookmakers.some(b => b.bets.some(x => x.id === 77));
   const oddsOf = fx => odds.get(fx.id);
   const leagues = new Map();
@@ -367,7 +368,7 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
   // ligas diferentes); v 5: piso de 60% de acerto e odd mínima com
   // piso de 1,50; v 4: janela de horas, contexto e plano ao vivo do 1º tempo. A tela avisa quando a varredura
   // guardada é de antes
-  return { v: 11, markets: markets?.length ? markets : null, mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
+  return { v: 11, markets: markets?.length ? markets : null, ...(only ? { outside } : {}), mode: hours ? 'janela' : 'dia', date: dates[0], hours: span, asked_hours: hours, window: hours ? { from, to } : null, corners_report: cornersReport,
     generated_at: new Date(now).toISOString(), requests: used(), budget, top, fixtures: fixtures.length,
     with_odds: pool.length, with_1h: pool.filter(has1h).length, analyzed: games.length, games: ranked, skipped };
 }

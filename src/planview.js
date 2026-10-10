@@ -9,7 +9,8 @@ import { scanDay } from './scanner.js';
 import { load, save } from './store.js';
 import { exposedGames } from './entry.js';
 import { multiGames, multiLine } from './multiple.js';
-import { LENS, SINGLES, buildPlan, multiOf, planFromKeys, planKeys, planText } from './plan.js';
+import { LENS, PLAN_DEFAULT, PLAN_OPTIONS, SINGLES, buildPlan, multiOf, planFromKeys, planKeys, planText } from './plan.js';
+import { BIG_LEAGUES, isBig } from './leagues.js';
 import { buildPlanSim, comboPin, simReport, ticketPin } from './sim.js';
 import { simPanel } from './simview.js';
 import { bindSpecialist, briefPlan } from './brief.js';
@@ -25,12 +26,13 @@ const dayStr = off => new Date(Date.now() + off * 864e5).toLocaleDateString('sv-
 const dm = d => d.split('-').reverse().slice(0, 2).join('/');
 const WEEK = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 const weekday = d => WEEK[new Date(`${d}T12:00:00`).getDay()];
-const BUDGET_KEY = 'afScanBudget', WIN_KEY = 'afPlanWin';
+const BUDGET_KEY = 'afScanBudget', WIN_KEY = 'afPlanWin', MARKETS_KEY = 'afPlanMarkets', BIG_KEY = 'afPlanBig';
 // Janelas do plano: horas a partir de agora (padrão: 4 h) ou o dia inteiro (hoje, amanhã) — a critério do operador.
 const HOURS = [1, 2, 3, 4, 6, 8, 12, 24];
 const isHours = w => /^h\d+$/.test(w);
 const keyOf = w => (isHours(w) ? `plano-${w}` : dayStr(Number(w.slice(1))));   // onde a varredura e o plano ficam guardados
-const SHORT = { 'Handicap asiático': 'Handicap', 'Total de gols': 'Gols', '1X2': '1X2' };
+const SHORT = { 'Handicap asiático': 'Handicap', 'Total de gols': 'Gols', '1X2': '1X2', 'Total de escanteios': 'Escanteios', 'Total escanteios 1T': 'Escanteios 1T',
+  'Total de chutes': 'Chutes', 'Total de chutes no gol': 'Chutes no gol' };
 const brl = x => `R$ ${Math.round(x).toLocaleString('pt-BR')}`;
 
 export function initPlan({ api, openEntry, banca }) {
@@ -44,6 +46,39 @@ export function initPlan({ api, openEntry, banca }) {
   const labelOf = sc => (sc?.window ? `${dm(sc.date)}, ${hour(sc.window.from)}–${hour(sc.window.to)} (próximas ${sc.hours} h)` : sc?.date ? `${weekday(sc.date)}, ${dm(sc.date)} (dia todo)` : '');
   const msg = (text, err = false) => { const el = $('#planMsg'); el.hidden = !text; el.textContent = text || ''; el.classList.toggle('err', err); };
 
+  // Mercados e ligas do plano (pedido do Jeferson, 10/10/2026), como as linhas da varredura: guardados neste aparelho;
+  // padrão: o recorte dele (handicap de gols, escanteios, chutes, mesmo jogo, múltiplas) e só ligas grandes. Mudar a
+  // marcação refaz o plano com a análise guardada, sem gastar requisição; só incluir as ligas menores pede analisar de novo.
+  const chosen = () => {
+    try { const v = JSON.parse(localStorage.getItem(MARKETS_KEY)); if (Array.isArray(v)) return PLAN_OPTIONS.map(([k]) => k).filter(k => v.includes(k)); } catch { /* padrão */ }
+    return [...PLAN_DEFAULT];
+  };
+  const bigOn = () => { try { return localStorage.getItem(BIG_KEY) !== '0'; } catch { return true; } };
+  const bigList = [...BIG_LEAGUES.values()].join(', ');
+  function renderMarkets() {
+    const sel = chosen(), isDefault = sel.length === PLAN_DEFAULT.length && sel.every(k => PLAN_DEFAULT.includes(k)) && bigOn();
+    $('#planMarkets').innerHTML = `<span class="muted">Mercados:</span>${PLAN_OPTIONS.map(([k, t]) => `<label class="mk"><input type="checkbox" data-pm value="${esc(k)}"${sel.includes(k) ? ' checked' : ''}>${esc(t)}</label>`).join('')}
+      <span class="muted">· Ligas:</span><label class="mk" title="${esc(bigList)}"><input type="checkbox" data-pbig${bigOn() ? ' checked' : ''}>só as grandes</label>
+      ${isDefault ? '' : '<button class="ghost mini" data-pmdef>padrão</button>'}`;
+  }
+  // mudou a marcação: refaz o plano da análise guardada (as ligas menores, se ela foi feita só com as grandes, pedem outra)
+  async function remake() {
+    renderMarkets();
+    if (!scan?.games) return;
+    if (!bigOn() && scan.outside != null) msg('A análise guardada tem só as ligas grandes: toque em Montar o plano para incluir as outras.');
+    else msg('');
+    if (!chosen().length) { msg('Marque pelo menos um mercado.', true); return; }
+    await makePlan();
+    render();
+  }
+  $('#planMarkets').addEventListener('change', e => {
+    if (e.target.matches('[data-pm]')) localStorage.setItem(MARKETS_KEY, JSON.stringify([...$('#planMarkets').querySelectorAll('[data-pm]:checked')].map(x => x.value)));
+    else if (e.target.matches('[data-pbig]')) localStorage.setItem(BIG_KEY, e.target.checked ? '1' : '0');
+    else return;
+    remake();
+  });
+  $('#planMarkets').addEventListener('click', e => { if (e.target.closest('[data-pmdef]')) { localStorage.removeItem(MARKETS_KEY); localStorage.removeItem(BIG_KEY); remake(); } });
+
   // o plano da data: o guardado (as mesmas entradas, mesmo depois de registrar algumas) ou um novo da varredura
   async function show() {
     const w = sel.value, key = keyOf(w);
@@ -52,13 +87,14 @@ export function initPlan({ api, openEntry, banca }) {
     plan = null;
     if (scan?.games && isHours(w) === !!scan.window) {
       const keys = await load(`af:plan:${key}`);
-      if (keys?.scan_at === scan.generated_at) plan = planFromKeys(scan, keys, { banca });
+      const same = keys && (keys.markets || PLAN_OPTIONS.map(([k]) => k)).join() === chosen().join() && !!keys.big === bigOn();
+      if (keys?.scan_at === scan.generated_at && same) plan = planFromKeys(scan, keys, { banca });
       if (!plan) await makePlan();
     }
     render();
   }
   async function makePlan() {
-    plan = buildPlan(scan, { exposed: exposedGames(), banca });
+    plan = buildPlan(scan, { exposed: exposedGames(), banca, markets: chosen(), big: bigOn() });
     await save(`af:plan:${keyOf(sel.value)}`, planKeys(plan));
     await simPlan();
   }
@@ -105,13 +141,15 @@ export function initPlan({ api, openEntry, banca }) {
     const w = sel.value, budget = Math.max(50, Number(localStorage.getItem(BUDGET_KEY)) || 1500);
     busy = true; $('#planRun').disabled = true;
     try {
-      // a janela do operador (horas a partir de agora, exatas, ou o dia inteiro); sem o histórico dos escanteios do 1º tempo
-      // (o plano não usa) e guardando mais jogos por filtro
+      // a janela do operador (horas a partir de agora, exatas, ou o dia inteiro), guardando mais jogos por filtro; só as ligas
+      // grandes quando marcado (as outras nem carregam); o histórico dos escanteios do 1º tempo só com escanteios 1T marcado
       const win = isHours(w) ? { hours: Number(w.slice(1)), expand: false } : { date: keyOf(w) };
-      scan = await scanDay(api.dossierApi, { ...win, budget, banca, top: 30, half: false, onProgress: t => msg(t) });
+      if (!chosen().length) { msg('Marque pelo menos um mercado.', true); busy = false; $('#planRun').disabled = false; return; }
+      scan = await scanDay(api.dossierApi, { ...win, budget, banca, top: 30, half: chosen().includes('Total escanteios 1T'),
+        only: bigOn() ? f => isBig(f.league) : null, onProgress: t => msg(t) });
       await save(`af:scan:${keyOf(w)}`, scan);
       await makePlan();
-      msg(scan.games.length ? '' : isHours(w) ? `Nenhum jogo com odds da Pinnacle nas próximas ${win.hours} h: escolha uma janela maior.` : 'Nenhum jogo com odds da Pinnacle nesta data (ainda).');
+      msg(scan.games.length ? '' : `Nenhum jogo${bigOn() ? ' de liga grande' : ''} com odds da Pinnacle ${isHours(w) ? `nas próximas ${win.hours} h: escolha uma janela maior${bigOn() ? ' ou desmarque "só as grandes"' : ''}.` : 'nesta data (ainda).'}`);
       render();
     } catch (e) { msg(e.message, true); }
     busy = false; $('#planRun').disabled = false;
@@ -202,17 +240,20 @@ export function initPlan({ api, openEntry, banca }) {
     const total = stake.reduce((s, [v]) => s + v, 0), pot = stake.reduce((s, [v, o]) => s + (o > 1 ? v * (o - 1) : 0), 0);
     const n = plan.singles.length, st = plan.stats, budgetOut = (scan.skipped || []).filter(s => /orçamento/.test(s.why || '')).length;
     const head = `<p class="muted"><b>${esc(labelOf(scan))}</b> · análise de ${when}: ${scan.analyzed} jogos analisados de ${scan.fixtures} ${scan.window ? 'na janela' : 'do dia'} · ${scan.requests} requisições.
-      <b>${n} simples (${plan.singles.filter(x => x.lens !== 'agree').length} 🎯 nossa leitura · ${plan.singles.filter(x => x.lens === 'agree').length} 🤝 acordo com a Pinnacle)
+      <b>${n} simples (${['ours', 'agree', 'shots'].map(k => [k, plan.singles.filter(x => (x.lens || 'ours') === k).length]).filter(([k, c]) => c || k !== 'shots').map(([k, c]) => `${c} ${LENS[k]}`).join(' · ')})
       · ${plan.multis.length} múltipla${plan.multis.length === 1 ? '' : 's'} · ${plan.sameGame.length} no mesmo jogo</b> · entradas ${brl(total)}
-      · <span class="pos">+${brl(pot)} se tudo green</span> <span class="muted">(na odd da Pinnacle)</span>${st ? ` · fora do plano: ${st.exposed ? `${st.exposed} jogo${st.exposed > 1 ? 's' : ''} que já têm entrada, ` : ''}${st.waiting} que dependem da escalação ("entrar se…")` : ''}.
+      · <span class="pos">+${brl(pot)} se tudo green</span> <span class="muted">(na odd da Pinnacle)</span>${st ? ` · fora do plano: ${st.small || scan.outside ? `${(st.small || 0) + (scan.outside || 0)} de ligas menores, ` : ''}${st.exposed ? `${st.exposed} jogo${st.exposed > 1 ? 's' : ''} que já têm entrada, ` : ''}${st.waiting} que dependem da escalação ("entrar se…")` : ''}.
       Toque numa entrada para ver o porquê dela.</p>
       ${budgetOut ? `<p class="neg">${budgetOut} jogos com odds ficaram fora da análise pelo limite de requisições (${scan.budget}): aumente o limite na seção de varredura e monte de novo.</p>` : ''}
       ${n < SINGLES[0] ? `<p class="muted">${scan.window ? 'A janela' : 'O dia'} rendeu ${n} simples — menos que 5: melhor poucas do que forçar entrada sem valor.</p>` : ''}`;
     // simples: as duas frentes; na 🎯 o valor é o nosso (conservador) na odd da Pinnacle; na 🤝 o valor está na casa pagar a mínima
-    const lensTag = x => (x.lens === 'agree'
+    const lensTag = x => (x.lens === 'shots'
+      ? '<span class="tag" title="a Pinnacle não cota chutes: o preço é só do modelo (âncora: 70%+ e o histórico dos dois times), em liga grande">📊 chutes</span>'
+      : x.lens === 'agree'
       ? '<span class="tag ok" title="o modelo e a Pinnacle concordam; linha consistente (histórico e contexto); o valor está na casa pagar a mínima">🤝 acordo</span>'
       : `<span class="tag mid" title="a nossa chance (modelo corrigido + cenário) acima da Pinnacle: valor contra ela">🎯 nossa leitura${x.line.contra ? ' · contra a Pinnacle' : ''}</span>`);
-    const valueCell = x => (x.lens === 'agree'
+    const valueCell = x => (x.lens === 'shots' ? '<span class="muted" title="sem a Pinnacle: a casa precisa pagar a mínima do modelo">casa ≥ mínima (modelo)</span>'
+      : x.lens === 'agree'
       ? `<span class="muted" title="a casa precisa pagar a mínima: ${x.value > 0 ? `${(x.value * 100).toFixed(1).replace('.', ',')}% acima` : 'até'} da odd da Pinnacle">casa ≥ mínima${x.value > 0 ? ` (+${(x.value * 100).toFixed(1).replace('.', ',')}% Pin)` : ''}</span>`
       : `<span class="pos">+${(x.value * 100).toFixed(1).replace('.', ',')}%</span>`);
     const inSim = simUI.get(simIdOf()), sum = inSim && simReport(inSim).total, sg = x => `${x > 0 ? '+' : ''}${x.toFixed(2).replace('.', ',')}`;
@@ -272,12 +313,15 @@ export function initPlan({ api, openEntry, banca }) {
       ${plan.sameGame.map(({ g, combo }, i) => card(`pw-c${i}`, `Mesmo jogo ${i + 1}`, g, `Combo: <b>${esc(combo.line)}</b> · odd mínima <b>${n2(combo.odd_min)}</b>${combo.entry_brl ? ` · R$ ${combo.entry_brl}` : ''}`,
         comboBody(g, combo), reg(`c:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t))).join('')}`;
     out.innerHTML = `${head}${empty ? '' : simLine}${singles}${multis}${same}${empty}
-      <p class="muted small">Como o plano é montado: um jogo entra uma vez só; jogo que já tem entrada fica fora. <b>Simples em duas frentes</b>, alternando:
+      <p class="muted small">Como o plano é montado: só os <b>mercados marcados</b> acima e, com "só as grandes", só jogos de liga grande (onde há dados
+      completos e as casas oferecem as linhas — chutes sobretudo). Um jogo entra uma vez só; jogo que já tem entrada fica fora. <b>Simples em três frentes</b>, em rodízio:
       <b>🎯 nossa leitura</b> — a nossa chance (modelo corrigido + cenário) acima da Pinnacle, com ela pagando de 1,80 a 2,70 e acima da nossa mínima,
       pelo valor conservador (a nossa chance encolhida pela metade na direção da dela); e <b>🤝 acordo com a Pinnacle</b> — linhas consistentes (âncora
-      ou sólida, 60%+, histórico dos times e contexto que não é contra) em que o modelo não discorda dela: aí o valor está na casa pagar a mínima.
+      ou sólida, 60%+, histórico dos times e contexto que não é contra) em que o modelo não discorda dela: aí o valor está na casa pagar a mínima;
+      e <b>📊 chutes</b> — a Pinnacle não cota, o preço é só do modelo: só âncora (70%+ e o histórico dos dois times) e só em liga grande.
       No máximo 3 por liga. Fica fora o que depende da escalação — copa (rodízio), time de base/B, dúvida de desfalque, leitura longe da Pinnacle,
-      amostra curta — e o jogo difícil de analisar. <b>Múltiplas</b>: over de gols com a linha cotada pela Pinnacle; dá para trocar a linha da perna
+      amostra curta — e o jogo difícil de analisar. <b>Múltiplas</b> (são bingo: até 2, de odd justa 6 ou mais): over de gols com a linha cotada
+      pela Pinnacle — as de mais de 1,5 mais prováveis e, se não chegar a 6, a de 2,5 nos jogos em que ela é mais provável; dá para trocar a linha da perna
       (1,75, 2 e 2,25 perdem só com 0–1 gol, como o 1,5; com 2 gols o 1,75 ganha metade, o 2 devolve, o 2,25 perde metade), tirar e pôr perna.
       <b>No mesmo jogo</b>: a vitória do favorito + mais de 1,5 gols — ou de 2,5, quando a de 1,5 paga menos de 1,60 —, com chance de 50%+
       e odd mínima até 2,70, os de maior chance; dá para trocar a linha de gols (a dupla chance + gols acerta mais, mas a casa paga bem abaixo
@@ -286,5 +330,6 @@ export function initPlan({ api, openEntry, banca }) {
     bindTooltips(out);
   }
 
+  renderMarkets();
   show();
 }

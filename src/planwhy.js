@@ -34,6 +34,7 @@ export function expectedOf(g, market = 'Total de gols') {
   const e = g.context?.expected, H = g.fx.home.name, A = g.fx.away.name;
   if (!e) return null;
   const one = (x, what) => (x?.total != null ? `${n1(x.total)} ${what} (${H} ${n1(x.home)} x ${n1(x.away)} ${A}${x.pinnacle ? `; Pinnacle ${n1(x.pinnacle)}` : ''})` : null);
+  if (/chutes/i.test(market)) return null;   // o esperado de chutes não está no contexto
   if (/escanteios 1T/i.test(market)) return one(e.corners_1h, 'escanteios no 1º tempo');
   if (/escanteios/i.test(market)) return one(e.corners, 'escanteios');
   const goals = one(e.goals, 'gols'), s = e.supremacy;
@@ -92,6 +93,18 @@ export function agreeWhy(g, x) {
   return { summary,
     bars: [['Pinnacle', l.p_pinnacle, false, 'a chance da Pinnacle, sem a margem dela'], ['Modelo', l.p_model, false, 'o nosso modelo de forças'],
       ['Últimos 10 jogos', hit, false, 'quanto a linha teria acertado nos últimos 10 jogos dos dois times'], ['Chance da linha', l.p_blend, true, 'a Pinnacle sem margem com o modelo']],
+    mark: [1 / l.odd_min, `a mínima ${n2(l.odd_min)} exige`],
+    reasons: [...checks(l), ...reading(g), ...facts(g, l.market)],
+    chartLine: l };
+}
+// 📊 chutes: a Pinnacle não cota — o modelo, o pior cenário dele e o histórico dos dois times
+export function shotsWhy(g, x) {
+  const l = x.line, hit = l.hit_rate_last10 ?? null, low = l.p_model_range?.[0] ?? null;
+  const summary = `${cap(l.tier)}: acerta ${pct(l.p_blend)} pelo modelo${low != null ? ` (${pct(low)} no pior cenário dele)` : ''}${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}`
+    + `${l.context ? `; contexto ${l.context.verdict}` : ''}. A Pinnacle não cota chutes: o preço é só do modelo, com margem de 8%. A mínima ${n2(l.odd_min)} exige ${pct(1 / l.odd_min)}.`;
+  return { summary,
+    bars: [['Pior cenário', low, false, 'o modelo com um erro-padrão contra, em cada time'], ['Últimos 10 jogos', hit, false, 'quanto a linha teria acertado nos últimos 10 jogos dos dois times'],
+      ['Modelo', l.p_blend, true, 'o nosso modelo de chutes (a Pinnacle não cota)']],
     mark: [1 / l.odd_min, `a mínima ${n2(l.odd_min)} exige`],
     reasons: [...checks(l), ...reading(g), ...facts(g, l.market)],
     chartLine: l };
@@ -162,7 +175,7 @@ const stripBox = x => `<div class="stripbox"><small><b>${esc(x.name)}</b> (${x.r
 
 // o corpo do cartão de uma simples: o resumo, o gráfico da chance, os motivos e os gráficos dos últimos jogos
 export function singleBody(g, x) {
-  const w = x.lens === 'agree' ? agreeWhy(g, x) : oursWhy(g, x);
+  const w = x.lens === 'agree' ? agreeWhy(g, x) : x.lens === 'shots' ? shotsWhy(g, x) : oursWhy(g, x);
   return `<p class="whysum">${esc(w.summary)}</p><div class="whygrid">${chanceChart(w.bars, w.mark)}${reasonsHtml(w.reasons)}</div>
     ${g.teams?.length ? `<div class="teams">${teamCharts(w.chartLine, g.teams)}</div>` : ''}`;
 }

@@ -16,6 +16,7 @@ const RES = { A: '✅', HW: '½✅', VOID: '↩', HL: '½❌', RED: '❌' };
 // de onde veio a odd de entrada: a da Pinnacle, a que ela pagaria (onde não cota a aposta) ou, nas simulações de antes
 // da regra do pior cenário, a odd mínima do app
 const SRC = { pinnacle: ['Pin', 'a odd da Pinnacle na hora'], 'pinnacle est.': ['Pin est.', 'a odd que a Pinnacle pagaria: a justa pelas chances dela, com a margem dela'],
+  'modelo est.': ['mod. est.', 'sem a Pinnacle (chutes): a justa do nosso modelo com a margem de uma casa (5%)'],
   'mínima': ['mín.', 'a odd mínima do app (simulada antes da regra: na odd da Pinnacle)'] };
 const IDX = 'af:simidx', DOC = id => `af:sim:${id}`;
 // algum jogo da simulação já deve ter terminado e ela ainda tem entrada aberta
