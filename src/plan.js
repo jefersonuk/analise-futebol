@@ -13,7 +13,11 @@
 //     🤝 acordo com a Pinnacle: as linhas consistentes (âncora ou sólida, 60%+, histórico dos times e contexto que não é
 //        contra, odd da Pinnacle na própria linha) em que o modelo não discorda dela (no máximo 3 pp abaixo); o valor
 //        está na casa pagar a mínima (até 5% acima da Pinnacle); ordem: contexto a favor, âncora, consistência;
-//   uma de cada, alternando, até 10 (de 5 a 10 quando o dia tem; não força), no máximo 3 por liga;
+//   uma de cada, alternando, até 10 (de 5 a 10 quando o dia tem; não força), no máximo 5 por liga (eram 3; Jeferson,
+//   12/10/2026: rodada cheia da Championship rende mais de 3);
+// - dúvida de desfalque (jogador "Questionable" na API — basta um, até reserva) barra só a 🎯 e os 📊 chutes: no 🤝 e no
+//   mesmo jogo o preço é o da Pinnacle, que já embute a notícia (Jeferson, 12/10/2026); copa, base/B e começo de temporada
+//   continuam barrando todas as frentes;
 // - mesmo jogo: a vitória do favorito + mais de 1,5 gols — ou de 2,5, quando a de 1,5 paga menos de 1,60 — com chance de
 //   50%+ e odd mínima até 2,70, os de maior chance, nos jogos que sobraram (pedido do Jeferson, 09/10/2026: a dupla chance
 //   + gols acerta muito, mas a casa paga bem abaixo de 1,50; a vitória do favorito + gols sai perto de 2);
@@ -31,8 +35,9 @@ import { isBet } from './dossier.js';
 import { SHOTS } from './consistency.js';
 import { isBig } from './leagues.js';
 import { MAX_LEGS, MULTI, TARGET, legOrder, multiGames, ticketOf } from './multiple.js';
+import { isDoubt } from './scenario.js';
 
-export const SINGLES = [5, 10], SAME_GAME = 5, MULTIS = 2, PER_LEAGUE = 3, ODDS = [1.8, 2.7];
+export const SINGLES = [5, 10], SAME_GAME = 5, MULTIS = 2, PER_LEAGUE = 5, ODDS = [1.8, 2.7];
 export const COMBO_P = 0.5, COMBO_ODDS = [1.6, 2.7];   // mesmo jogo: chance mínima e faixa da odd mínima
 export const LENS = { ours: '🎯 nossa leitura', agree: '🤝 acordo com a Pinnacle', shots: '📊 chutes (só o modelo)' };
 // Os mercados do plano (a marcação na tela): [chave, rótulo]. Padrão: o recorte do Jeferson (10/10/2026).
@@ -47,13 +52,18 @@ const r3 = x => Math.round(x * 1000) / 1000;
 
 // Valor conservador de uma simples: a nossa chance encolhida pela metade na direção da Pinnacle, na odd dela.
 export const valueOf = l => r3(((l.p_nossa + l.p_pinnacle) / 2) * l.pinnacle_odd - 1);
+// O jogo tem condição que barra a frente? doubt: false ignora a dúvida de desfalque (🤝 e mesmo jogo: preço da Pinnacle).
+const barred = (g, { doubt = true } = {}) => (g.conditions || []).some(c => doubt || !isDoubt(c));
+// Nas funções de cada frente, loose: como seria sem a regra da escalação (o "entrar se…" e as condições do jogo) — só
+// para o funil dizer quantos jogos ela tirou.
 // A simples de um jogo (a de maior valor) e o combo (o de maior chance).
-const singleOf = (g, markets) => (g.hard ? null : (g.scenario || [])
-  .filter(l => l.bet && !l.conditional && l.p_pinnacle != null && l.pinnacle_odd >= ODDS[0] && l.pinnacle_odd <= ODDS[1] && inMarkets(markets, l))
+const singleOf = (g, markets, loose = false) => (g.hard ? null : (g.scenario || [])
+  .filter(l => (l.bet || (loose && l.conditional)) && l.p_pinnacle != null && l.pinnacle_odd >= ODDS[0] && l.pinnacle_odd <= ODDS[1] && inMarkets(markets, l))
   .map(l => ({ l, v: valueOf(l) })).filter(x => x.v > 0).sort((a, b) => b.v - a.v || b.l.p_nossa - a.l.p_nossa)[0] || null);
 // 🤝 a linha consistente do jogo que concorda com a Pinnacle; need: quanto a casa precisa pagar acima da Pinnacle.
-// Como na 🎯, fica fora o jogo que depende da escalação (copa, base/B, dúvida, começo de temporada com mudança grande).
-const agreeOf = (g, markets) => (g.hard || g.conditions?.length ? null : (g.lines || [])
+// Como na 🎯, fica fora o jogo que depende da escalação (copa, base/B, começo de temporada com mudança grande) — menos
+// a dúvida de desfalque, que a odd da Pinnacle já embute.
+const agreeOf = (g, markets, loose = false) => (g.hard || (!loose && barred(g, { doubt: false })) ? null : (g.lines || [])
   .filter(l => AGREE_MARKETS.includes(l.market) && inMarkets(markets, l) && isBet(l) && !l.model_only && !l.derived && l.pinnacle_odd > 1 && l.p_pinnacle != null
     && l.p_model != null && l.p_model >= l.p_pinnacle - 0.03)
   .sort((a, b) => (b.context?.verdict === 'a favor') - (a.context?.verdict === 'a favor') || (b.tier === 'âncora') - (a.tier === 'âncora')
@@ -61,13 +71,14 @@ const agreeOf = (g, markets) => (g.hard || g.conditions?.length ? null : (g.line
 export const needOf = l => r3(l.odd_min / l.pinnacle_odd - 1);
 // 📊 chutes: a Pinnacle não cota, o preço é só do modelo (margem de 8%) — então só âncora (70%+ e o histórico dos dois
 // times), odd mínima 1,50–3,00, em liga grande (as casas só têm a linha nelas) e fora do jogo que depende da escalação
-const shotsOf = g => (g.hard || g.conditions?.length || !isBig(g.fx.league) ? null : (g.lines || [])
+const shotsOf = (g, loose = false) => (g.hard || (!loose && barred(g)) || !isBig(g.fx.league) ? null : (g.lines || [])
   .filter(l => SHOTS.includes(l.market) && isBet(l) && l.tier === 'âncora' && l.odd_min >= 1.5 && l.odd_min <= 3)
   .sort((a, b) => b.consistency_score - a.consistency_score || b.p_blend - a.p_blend)[0] || null);
-// mesmo jogo: a vitória do favorito + 1,5 gols; se ela pagar pouco, + 2,5 (fav_combos vem nessa ordem). Como nas simples,
-// fica fora o jogo que depende da escalação.
+// mesmo jogo: a vitória do favorito + 1,5 gols; se ela pagar pouco, + 2,5 (fav_combos vem nessa ordem). Como no 🤝,
+// fica fora o jogo que depende da escalação, menos a dúvida de desfalque (o preço sai da matriz da Pinnacle).
 export const comboOk = c => c.p_blend >= COMBO_P && c.odd_min >= COMBO_ODDS[0] && c.odd_min <= COMBO_ODDS[1];
-const comboOf = g => (g.hard || g.conditions?.length ? null : (g.fav_combos || []).find(comboOk) || null);
+const comboOf = (g, loose = false) => (g.hard || (!loose && barred(g, { doubt: false })) ? null : (g.fav_combos || []).find(comboOk) || null);
+const leagueKey = g => g.fx.league.id ?? g.fx.league.name;
 // o bilhete na odd da Pinnacle quando ela cota todas as pernas (perna asiática: sem a odd dela)
 export const multiOf = (legs, banca) => ticketOf(legs, { houseTotal: legs.every(l => l.pinnacle_odd > 1) ? legs.reduce((t, l) => t * l.pinnacle_odd, 1) : null, banca });
 // Um bilhete de odd justa ≥ target com as pernas cotadas: as melhores (legOrder) de mais de 1,5, até maxLegs; não chegou,
@@ -108,7 +119,7 @@ export function buildPlan(scan, { exposed = null, now = Date.now(), banca = 4400
   const C = want(SHOTS_KEY) ? games.map(g => ({ g, line: shotsOf(g) })).filter(x => x.line)
     .sort((a, b) => b.line.consistency_score - a.line.consistency_score).map(x => ({ ...x, value: null, lens: 'shots' })) : [];
   const singles = [], take = x => {
-    const lg = x.g.fx.league.id ?? x.g.fx.league.name, n = perLeague.get(lg) || 0;
+    const lg = leagueKey(x.g), n = perLeague.get(lg) || 0;
     if (used.has(x.g.fx.id) || n >= PER_LEAGUE) return false;
     perLeague.set(lg, n + 1); used.add(x.g.fx.id); singles.push(x);
     return true;
@@ -138,13 +149,39 @@ export function buildPlan(scan, { exposed = null, now = Date.now(), banca = 4400
     }
   }
   const byTime = (a, b) => a.g.fx.t - b.g.fx.t;
-  return { date: scan.date || null, scan_at: scan.generated_at, target, markets: markets || null, big: !!big, singles: singles.sort(byTime), sameGame: sameGame.sort(byTime), multis,
-    stats: { games: scan.games.length, future: future.length, small: future.length - scope.length, exposed: scope.length - games.length,
-      waiting: games.filter(g => !used.has(g.fx.id) && (g.scenario || []).some(l => l.conditional) && !(g.scenario || []).some(l => l.bet)).length } };
+  return { date: scan.date || null, scan_at: scan.generated_at, made_at: now, target, markets: markets || null, big: !!big, singles: singles.sort(byTime), sameGame: sameGame.sort(byTime), multis,
+    stats: { games: scan.games.length, future: future.length, small: future.length - scope.length, exposed: scope.length - games.length } };
+}
+
+// O funil do plano (pedido do Jeferson, 12/10/2026: "não é possível que o dia inteiro só encontre 2"): dos jogos da
+// janela às entradas, onde cada jogo caiu — cada um conta uma vez só, na primeira etapa que o tirou, e as contas fecham:
+// analisados = não guardados + soma dos destinos. plan: o de buildPlan ou de planFromKeys (com as edições da tela);
+// now: a hora em que o plano foi montado; exposed: entry.js exposedGames().
+const SKIP_WHY = [[/orçamento/, 'limite de requisições'], [/menos de \d+ jogos/, 'histórico curto dos times'], [/não carregou|falhou/, 'falha ao carregar a liga']];
+export function planFunnel(scan, plan, { exposed = null, markets = plan.markets, big = plan.big, now = plan.made_at ?? Date.parse(plan.scan_at) } = {}) {
+  const want = k => !markets || markets.includes(k);
+  const skipped = {};
+  for (const s of scan.skipped || []) { const k = SKIP_WHY.find(([re]) => re.test(s.why || ''))?.[1] || 'outros motivos'; skipped[k] = (skipped[k] || 0) + 1; }
+  const ids = [plan.singles.map(x => x.g.fx.id), plan.sameGame.map(x => x.g.fx.id), plan.multis.flatMap(t => t.legs.map(l => l.fixtureId))].map(xs => new Set(xs));
+  const perLeague = new Map();
+  for (const { g } of plan.singles) perLeague.set(leagueKey(g), (perLeague.get(leagueKey(g)) || 0) + 1);
+  const single = (g, loose) => singleOf(g, markets, loose) || agreeOf(g, markets, loose) || (want(SHOTS_KEY) && shotsOf(g, loose));
+  const combo = (g, loose) => want(COMBO_KEY) && comboOf(g, loose);
+  // tinha simples e ficou fora: o teto da liga ou o plano cheio (10 simples); tinha combo: o plano cheio (5 no mesmo jogo)
+  const fate = g => (ids[0].has(g.fx.id) ? 'singles' : ids[1].has(g.fx.id) ? 'same' : ids[2].has(g.fx.id) ? 'multi'
+    : g.fx.t <= now + 10 * 60e3 ? 'started' : big && !isBig(g.fx.league) ? 'small' : exposed?.has(g.fx.id, g.fx.home.name, g.fx.away.name) ? 'exposed'
+    : single(g) ? ((perLeague.get(leagueKey(g)) || 0) >= PER_LEAGUE ? 'cap' : 'full') : combo(g) ? 'full'
+    : g.hard ? 'hard' : single(g, true) || combo(g, true) ? 'lineup' : 'none');
+  const analyzed = scan.analyzed ?? scan.games.length;
+  const out = { fixtures: scan.fixtures ?? null, quoted: scan.with_odds != null ? scan.with_odds + (scan.outside || 0) : null, outside: scan.outside || 0,
+    skipped, analyzed, unkept: Math.max(0, analyzed - scan.games.length),
+    singles: 0, same: 0, multi: 0, started: 0, small: 0, exposed: 0, cap: 0, full: 0, hard: 0, lineup: 0, none: 0 };
+  for (const g of scan.games) out[fate(g)]++;
+  return out;
 }
 
 // O plano guardado pelas chaves (fica igual ao registrar entradas: a exposição muda, o plano não).
-export const planKeys = plan => ({ scan_at: plan.scan_at, date: plan.date, target: plan.target, markets: plan.markets ?? null, big: !!plan.big,
+export const planKeys = plan => ({ scan_at: plan.scan_at, made_at: plan.made_at ?? null, date: plan.date, target: plan.target, markets: plan.markets ?? null, big: !!plan.big,
   singles: plan.singles.map(x => [x.g.fx.id, x.line.id, x.lens]), sameGame: plan.sameGame.map(x => [x.g.fx.id, x.combo.id]),
   multis: plan.multis.map(t => t.legs.map(l => [l.fixtureId, l.lineId])) });
 export function planFromKeys(scan, keys, { banca = 44000 } = {}) {
@@ -157,7 +194,7 @@ export function planFromKeys(scan, keys, { banca = 44000 } = {}) {
   const sameGame = keys.sameGame.map(([f, id]) => { const x = g(f), c = [...(x?.fav_combos || []), ...(x?.combos || [])].find(s => s.id === id); return c && { g: x, combo: c }; });
   const multis = keys.multis.map(ls => ls.map(([f, id]) => opts.get(`${f}:${id}`))).filter(ls => ls.every(Boolean)).map(ls => multiOf(ls, banca));
   if (singles.some(x => !x) || sameGame.some(x => !x)) return null;   // a varredura mudou: monta de novo
-  return { date: keys.date, scan_at: keys.scan_at, target: keys.target, markets: keys.markets ?? null, big: !!keys.big, singles, sameGame, multis, stats: null };
+  return { date: keys.date, scan_at: keys.scan_at, made_at: keys.made_at ?? null, target: keys.target, markets: keys.markets ?? null, big: !!keys.big, singles, sameGame, multis, stats: null };
 }
 
 // Texto do plano para copiar (bloco de notas, WhatsApp) e apostar nas casas.

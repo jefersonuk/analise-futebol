@@ -9,7 +9,7 @@ import { scanDay } from './scanner.js';
 import { load, save } from './store.js';
 import { exposedGames } from './entry.js';
 import { multiGames, multiLine } from './multiple.js';
-import { LENS, PLAN_DEFAULT, PLAN_OPTIONS, SINGLES, buildPlan, multiOf, planFromKeys, planKeys, planText } from './plan.js';
+import { LENS, PER_LEAGUE, PLAN_DEFAULT, PLAN_OPTIONS, SAME_GAME, SINGLES, buildPlan, multiOf, planFromKeys, planFunnel, planKeys, planText } from './plan.js';
 import { BIG_LEAGUES, isBig } from './leagues.js';
 import { buildPlanSim, comboPin, simReport, ticketPin } from './sim.js';
 import { simPanel } from './simview.js';
@@ -34,6 +34,18 @@ const keyOf = w => (isHours(w) ? `plano-${w}` : dayStr(Number(w.slice(1))));   /
 const SHORT = { 'Handicap asiático': 'Handicap', 'Total de gols': 'Gols', '1X2': '1X2', 'Total de escanteios': 'Escanteios', 'Total escanteios 1T': 'Escanteios 1T',
   'Total de chutes': 'Chutes', 'Total de chutes no gol': 'Chutes no gol' };
 const brl = x => `R$ ${Math.round(x).toLocaleString('pt-BR')}`;
+
+// O funil do plano (plan.js planFunnel) numa linha: dos jogos da janela aos analisados, e onde caiu cada analisado.
+function funnelLine(f, inWindow = false) {
+  const nz = xs => xs.filter(([k]) => k > 0).map(([k, t]) => `${k} ${t}`);
+  const before = nz([[f.outside, 'de ligas menores, não analisados ("só as grandes")'], ...Object.entries(f.skipped).map(([t, k]) => [k, `fora da análise (${t})`])]);
+  const lost = nz([[f.unkept, 'sem nada entre os melhores de cada mercado'], [f.started, 'já tinham começado'], [f.small, 'de ligas menores'],
+    [f.exposed, 'já têm entrada'], [f.lineup, 'dependem da escalação ("entrar se…")'], [f.hard, 'jogo difícil (só múltipla)'],
+    [f.cap, `no teto de ${PER_LEAGUE} por liga`], [f.full, `com o plano cheio (${SINGLES[1]} simples, ${SAME_GAME} no mesmo jogo)`],
+    [f.none, 'nenhuma linha passou nas métricas']]);
+  return `<p class="muted funnel"><b>Funil</b> (cada jogo conta uma vez): ${f.fixtures != null ? `${f.fixtures} ${inWindow ? 'na janela' : 'do dia'} → ` : ''}${f.quoted != null ? `${f.quoted} com odd da Pinnacle → ` : ''}<b>${f.analyzed} analisados</b>${before.length ? ` (antes disso ficaram fora ${before.join(', ')})` : ''}
+    → no plano: <b>${f.singles} simples · ${f.multi} em múltipla · ${f.same} no mesmo jogo</b>${lost.length ? ` · sem entrada: ${lost.join(' · ')}` : ''}.</p>`;
+}
 
 export function initPlan({ api, openEntry, banca }) {
   let scan = null, plan = null, busy = false;
@@ -238,12 +250,13 @@ export function initPlan({ api, openEntry, banca }) {
     const stake = [...plan.singles.map(x => [x.line.entry_brl || 0, x.line.pinnacle_odd]), ...plan.multis.map(t => [t.stake || t.stake_at_min || 0, ticketPin(t.legs)[0]]),
       ...plan.sameGame.map(x => [x.combo.entry_brl || 0, comboPin(x.combo, x.g)[0]])];
     const total = stake.reduce((s, [v]) => s + v, 0), pot = stake.reduce((s, [v, o]) => s + (o > 1 ? v * (o - 1) : 0), 0);
-    const n = plan.singles.length, st = plan.stats, budgetOut = (scan.skipped || []).filter(s => /orçamento/.test(s.why || '')).length;
+    const n = plan.singles.length, budgetOut = (scan.skipped || []).filter(s => /orçamento/.test(s.why || '')).length;
     const head = `<p class="muted"><b>${esc(labelOf(scan))}</b> · análise de ${when}: ${scan.analyzed} jogos analisados de ${scan.fixtures} ${scan.window ? 'na janela' : 'do dia'} · ${scan.requests} requisições.
       <b>${n} simples (${['ours', 'agree', 'shots'].map(k => [k, plan.singles.filter(x => (x.lens || 'ours') === k).length]).filter(([k, c]) => c || k !== 'shots').map(([k, c]) => `${c} ${LENS[k]}`).join(' · ')})
       · ${plan.multis.length} múltipla${plan.multis.length === 1 ? '' : 's'} · ${plan.sameGame.length} no mesmo jogo</b> · entradas ${brl(total)}
-      · <span class="pos">+${brl(pot)} se tudo green</span> <span class="muted">(na odd da Pinnacle)</span>${st ? ` · fora do plano: ${st.small || scan.outside ? `${(st.small || 0) + (scan.outside || 0)} de ligas menores, ` : ''}${st.exposed ? `${st.exposed} jogo${st.exposed > 1 ? 's' : ''} que já têm entrada, ` : ''}${st.waiting} que dependem da escalação ("entrar se…")` : ''}.
+      · <span class="pos">+${brl(pot)} se tudo green</span> <span class="muted">(na odd da Pinnacle)</span>.
       Toque numa entrada para ver o porquê dela.</p>
+      ${funnelLine(planFunnel(scan, plan, { exposed: exp }), !!scan.window)}
       ${budgetOut ? `<p class="neg">${budgetOut} jogos com odds ficaram fora da análise pelo limite de requisições (${scan.budget}): aumente o limite na seção de varredura e monte de novo.</p>` : ''}
       ${n < SINGLES[0] ? `<p class="muted">${scan.window ? 'A janela' : 'O dia'} rendeu ${n} simples — menos que 5: melhor poucas do que forçar entrada sem valor.</p>` : ''}`;
     // simples: as duas frentes; na 🎯 o valor é o nosso (conservador) na odd da Pinnacle; na 🤝 o valor está na casa pagar a mínima
@@ -319,8 +332,9 @@ export function initPlan({ api, openEntry, banca }) {
       pelo valor conservador (a nossa chance encolhida pela metade na direção da dela); e <b>🤝 acordo com a Pinnacle</b> — linhas consistentes (âncora
       ou sólida, 60%+, histórico dos times e contexto que não é contra) em que o modelo não discorda dela: aí o valor está na casa pagar a mínima;
       e <b>📊 chutes</b> — a Pinnacle não cota, o preço é só do modelo: só âncora (70%+ e o histórico dos dois times) e só em liga grande.
-      No máximo 3 por liga. Fica fora o que depende da escalação — copa (rodízio), time de base/B, dúvida de desfalque, leitura longe da Pinnacle,
-      amostra curta — e o jogo difícil de analisar. <b>Múltiplas</b> (são bingo: até 2, de odd justa 6 ou mais): over de gols com a linha cotada
+      No máximo ${PER_LEAGUE} por liga. Fica fora o que depende da escalação — copa (rodízio), time de base/B, dúvida de desfalque, leitura longe da Pinnacle,
+      amostra curta — e o jogo difícil de analisar; no 🤝 e no mesmo jogo a dúvida de desfalque não tira o jogo (o preço é o da Pinnacle, que já embute
+      a notícia). O <b>funil</b> embaixo do resumo diz onde caiu cada jogo analisado. <b>Múltiplas</b> (são bingo: até 2, de odd justa 6 ou mais): over de gols com a linha cotada
       pela Pinnacle — as de mais de 1,5 mais prováveis e, se não chegar a 6, a de 2,5 nos jogos em que ela é mais provável; dá para trocar a linha da perna
       (1,75, 2 e 2,25 perdem só com 0–1 gol, como o 1,5; com 2 gols o 1,75 ganha metade, o 2 devolve, o 2,25 perde metade), tirar e pôr perna.
       <b>No mesmo jogo</b>: a vitória do favorito + mais de 1,5 gols — ou de 2,5, quando a de 1,5 paga menos de 1,60 —, com chance de 50%+

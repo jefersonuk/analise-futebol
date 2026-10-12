@@ -20,15 +20,16 @@ const G = ({ h = 14, lg = 1, single = null, cond = false, combo = null, over = n
     lines: over ? [{ id: 'gO1.5', market: 'Total de gols', line: 'Mais de 1,5', p_blend: over, p_pinnacle: over, pinnacle_odd: +(1 / over / 1.025).toFixed(2), context: { verdict: 'neutro', signals: [] } }] : [] };
 };
 
-test('simples: as apostas da nossa análise pelo valor conservador; fora "entrar se…", jogo difícil e odd fora de 1,80–2,70; até 3 por liga e 10 no total', () => {
+test('simples: as apostas da nossa análise pelo valor conservador; fora "entrar se…", jogo difícil e odd fora de 1,80–2,70; até 5 por liga e 10 no total', () => {
   id = 0;
   const games = [
-    ...Array.from({ length: 5 }, (_, i) => G({ lg: 1, single: [0.56 + i * 0.01, 0.48, 2.05] })),   // liga 1: cinco, só 3 entram
+    ...Array.from({ length: 7 }, (_, i) => G({ lg: 1, single: [0.56 + i * 0.01, 0.48, 2.05] })),   // liga 1: sete, só 5 entram
     ...Array.from({ length: 9 }, (_, i) => G({ lg: 2 + i, single: [0.55, 0.49, 2.0] })),
     G({ lg: 20, single: [0.7, 0.6, 2.1], cond: true }), G({ lg: 21, single: [0.7, 0.6, 2.1], hard: { reasons: ['base'] } }), G({ lg: 22, single: [0.8, 0.7, 1.5] }),
   ];
   const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
   assert.equal(plan.singles.length, SINGLES[1]);
+  assert.equal(PER_LEAGUE, 5);
   assert.equal(plan.singles.filter(x => x.g.fx.league.id === 1).length, PER_LEAGUE);
   assert.ok(plan.singles.every(x => x.line.bet && !x.line.conditional && x.line.pinnacle_odd >= ODDS[0] && x.line.pinnacle_odd <= ODDS[1] && !x.g.hard));
   assert.ok(plan.singles.slice(1).every((x, i) => x.g.fx.t >= plan.singles[i].g.fx.t), 'em ordem de horário');
@@ -165,6 +166,41 @@ test('🤝 acordo com a Pinnacle: o jogo que depende da escalação fica fora, c
   games[1].conditions = ['copa: risco de rodízio — confirmar a escalação'];
   const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
   assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]), [[1, 'agree']]);
+  // dúvida de desfalque não barra o 🤝: a odd da Pinnacle já embute a notícia
+  games[1].conditions = ['dúvida: Fulano (F2) — confirmar se joga'];
+  const doubt = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
+  assert.deepEqual(doubt.singles.map(x => [x.g.fx.id, x.lens]), [[1, 'agree'], [2, 'agree']]);
+  // ...nem o mesmo jogo; copa junto com a dúvida continua barrando
+  const cb = G({ lg: 3, combo: 0.6 });
+  cb.conditions = ['dúvida: Beltrano (C3) — confirmar se joga'];
+  assert.equal(buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games: [cb] }, { now: NOW }).sameGame.length, 1);
+  cb.conditions.push('copa: risco de rodízio — confirmar a escalação');
+  assert.equal(buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games: [cb] }, { now: NOW }).sameGame.length, 0);
+});
+
+test('funil do plano: cada jogo analisado cai numa etapa só e as contas fecham', async () => {
+  const { planFunnel } = await import('../src/plan.js');
+  id = 0;
+  const games = [
+    ...Array.from({ length: 7 }, (_, i) => G({ lg: 1, single: [0.56 + i * 0.01, 0.48, 2.05] })),   // 5 simples, 2 no teto da liga
+    G({ lg: 2, single: [0.6, 0.5, 2.0], cond: true }),                                               // entrar se…: escalação
+    G({ lg: 3, single: [0.6, 0.5, 2.0], hard: { reasons: ['base'] } }),                              // jogo difícil
+    G({ lg: 4, single: [0.6, 0.5, 2.0], h: -1 }),                                                    // já começou
+    G({ lg: 5, single: [0.46, 0.5, 2.0] }),                                                          // sem valor: nenhuma linha passou
+    G({ lg: 6, single: [0.62, 0.5, 2.1] }),                                                          // já tem entrada
+  ];
+  const scan = { generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games, fixtures: 40, with_odds: 14, outside: 9, analyzed: 13,
+    skipped: [{ why: 'liga fora do orçamento de requisições' }] };
+  const exposed = { has: f => f === 12 };
+  const plan = buildPlan(scan, { now: NOW, exposed });
+  const f = planFunnel(scan, plan, { exposed });
+  assert.deepEqual({ singles: f.singles, cap: f.cap, lineup: f.lineup, hard: f.hard, started: f.started, none: f.none, exposed: f.exposed },
+    { singles: 5, cap: 2, lineup: 1, hard: 1, started: 1, none: 1, exposed: 1 });
+  assert.equal(f.quoted, 23); assert.equal(f.unkept, 1); assert.deepEqual(f.skipped, { 'limite de requisições': 1 });
+  const placed = ['singles', 'same', 'multi', 'started', 'small', 'exposed', 'cap', 'full', 'hard', 'lineup', 'none'].reduce((s, k) => s + f[k], 0);
+  assert.equal(placed + f.unkept, f.analyzed, 'analisados = não guardados + destinos');
+  // guardado pelas chaves: o mesmo funil (a hora do plano vai junto)
+  assert.deepEqual(planFunnel(scan, planFromKeys(scan, planKeys(plan)), { exposed }), f);
 });
 
 test('mesmo jogo: vitória do favorito + 1,5; se a de 1,5 paga menos de 1,60, a de 2,5; abaixo de 50% ou com escalação a conferir, fora', async () => {

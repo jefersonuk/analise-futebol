@@ -165,6 +165,8 @@ export function conditionsOf({ fx, hard = null, injuries = [], clubs = null }) {
   if (doubt.length) out.push(`dúvida: ${doubt.slice(0, 4).map(i => `${i.player} (${i.team === fx.home.id ? fx.home.name : fx.away.name})`).join(', ')} — confirmar se joga`);
   return out;
 }
+// A condição é só dúvida de desfalque (o Plano do dia não barra o 🤝 nem o mesmo jogo por ela: plan.js).
+export const isDoubt = c => String(c).startsWith('dúvida:');
 // O jogo não tem base para a nossa leitura (ligas diferentes sem jogos entre elas): nada de entrada.
 const unmeasured = hard => hard?.reasons?.some(r => /entre times das duas ligas/.test(r));
 
