@@ -9,7 +9,7 @@ import { rank } from './ratings.js';
 import { buildInsights, recentGames } from './insights.js';
 import { collect } from './odds.js';
 import { history } from './dashboard.js';
-import { GOAL_HANDICAP, MAIN_LINES, ODD_FLOOR, SHOTS, consistency, isMain, isMainLine, rankScore, rankTier, underOk, valueOf } from './consistency.js';
+import { GOAL_HANDICAP, MAIN_LINES, SHOTS, consistency, floorOf, isMain, isMainLine, rankScore, rankTier, underOk, valueOf } from './consistency.js';
 import { HALF_FROM } from './client.js';
 import { favorFor } from './favoritism.js';
 import { buildContext, contextGames, contextText, lineContext, scenarioOf } from './context.js';
@@ -44,7 +44,7 @@ const r = (x, d = 3) => (x == null || Number.isNaN(x) ? null : Math.round(x * 10
 const cond = s => s.pWin / (s.pWin + s.pLose);   // probabilidade sem o push (como a Pinnacle precifica)
 
 // Mistura log-linear Pinnacle × modelo, normalizada no par de pernas complementares.
-function blend(pPin, pMod, w) {
+export function blend(pPin, pMod, w) {
   const a = pPin ** (1 - w) * pMod ** w, b = (1 - pPin) ** (1 - w) * (1 - pMod) ** w;
   return a / (a + b);
 }
@@ -302,9 +302,9 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
     if (odd && pp != null) {
       const pb = x12[l.id] ?? blend(pp, pm, W_MODEL[l.market] ?? 0.1), e = ev(l, odd), diff = (pm - pp) * 100;
       const fragile = alerts.length > 0 || Math.abs(diff) >= (soft ? 10 : 5);
-      // odd mínima: justa + margem de segurança, nunca abaixo do núcleo (1,50). Só aqui, onde a odd da Pinnacle
+      // odd mínima: justa + margem de segurança, nunca abaixo do núcleo (1,50; gols 1,30). Só aqui, onde a odd da Pinnacle
       // diz se a casa soft paga isso (até 5% acima dela); sem ela, linha de 70%+ com justa abaixo de 1,43 fica de fora.
-      const oddMin = Math.max(ODD_FLOOR, (1 / pb) * (fragile ? 1.05 : 1.03)), c = cons(pb);
+      const oddMin = Math.max(floorOf(l.market), (1 / pb) * (fragile ? 1.05 : 1.03)), c = cons(pb);
       const v = valueOf({ p: pb, q: pp, pLow: Math.min(...range), hits: [hi.home, hi.away].filter(Boolean) });
       priced.push({ ...base, priced_by: 'pinnacle', pinnacle_odd: odd, p_pinnacle: r(pp), diff_pp: r(diff, 1), p_blend: r(pb),
         value_pct: r(v.value * 100, 1), value_level: v.level,
@@ -339,10 +339,10 @@ export function priceLines(res, { odds, fair, alerts = [], teams, banca = 44000,
   return { priced: priced.map(h), anchored: anchored.map(h), modelOnly };
 }
 
-// Candidata (consistência primeiro, preço depois): âncora/sólida (acerto ≥ 60%), odd mínima ≥ 1,50 e permitida
+// Candidata (consistência primeiro, preço depois): âncora/sólida (acerto ≥ 60%), odd mínima ≥ 1,50 (gols: 1,30) e permitida
 // pela Política E, que uma casa soft consegue pagar (até ~5% acima da Pinnacle), e só over (nos escanteios, só o
 // over do total ou por time: underOk em consistency.js).
-export const isCandidate = l => l.tier !== 'especulativa' && l.odd_min >= ODD_FLOOR && l.politica_e !== 'não entrar'
+export const isCandidate = l => l.tier !== 'especulativa' && l.odd_min >= floorOf(l.market) && l.politica_e !== 'não entrar'
   && (l.odd_min_vs_pinnacle_pct == null || l.odd_min_vs_pinnacle_pct <= 5) && underOk(l) && !l.inviable;
 // Aposta: candidata cujo contexto do jogo não contradiz a linha (context.js). Com contexto contra, a
 // estatística sozinha não basta.
@@ -354,7 +354,7 @@ export const byConsistency = (a, b) => rankTier(a) - rankTier(b) || a.fragile - 
   || rankScore(b) - rankScore(a) || (a.odd_min_vs_pinnacle_pct ?? 99) - (b.odd_min_vs_pinnacle_pct ?? 99);
 
 // Candidatas de todos os mercados — consistência primeiro, preço depois: só linhas âncora/sólida, com odd
-// mínima dentro da faixa operada (≥ 1,50 e permitida pela Política E), que uma casa soft consegue pagar (até
+// mínima dentro da faixa operada (≥ 1,50 — gols ≥ 1,30 — e permitida pela Política E), que uma casa soft consegue pagar (até
 // ~5% acima da Pinnacle), que o mercado oferece e sem contexto contra. Ordem: nível, não frágil antes de
 // frágil, score, preço.
 // Foco: o mesmo filtro só nas linhas principais do pré-jogo (isMainLine: preço da Pinnacle, derivado do total dela
@@ -553,7 +553,7 @@ export async function buildDossier(api, { fx, team = fx.home, teams = [], fixtur
     method: { blend_weight_model: W_MODEL, blend: 'log-linear p ∝ p_pinnacle^(1−w)·p_modelo^w, normalizado nas pernas complementares',
       probabilities: 'condicionais ao não-push (como a Pinnacle precifica)',
       fragile: 'algum alerta de qualidade, ou |diff_pp| ≥ 5 (1X2/AH/gols/BTTS) ou ≥ 10 (escanteios/chutes)',
-      odd_min: 'fair_odd_blend × 1,03 (× 1,05 se frágil); nas linhas com odd da Pinnacle, nunca abaixo de 1,50 (piso do núcleo: em linha de 70%+ a mínima é o próprio 1,50, e ela só é candidata se isso ficar até 5% acima da Pinnacle); linhas só do modelo: fair_odd_model × 1,08',
+      odd_min: 'fair_odd_blend × 1,03 (× 1,05 se frágil); nas linhas com odd da Pinnacle, nunca abaixo de 1,50 — no total de gols, 1,30 — (piso do núcleo: em linha de 70%+ a mínima é o próprio piso, e ela só é candidata se isso ficar até 5% acima da Pinnacle); linhas só do modelo: fair_odd_model × 1,08',
       entry: `¼ Kelly sobre banca de R$ ${banca} com p_blend na odd mínima, teto 300·min(1, p/0,70), × fator da Política E dessa odd`,
       odds_cache: 'odds da Pinnacle com até 10 minutos de cache',
       over_first: 'só over: nenhum under (gols, escanteios ou chutes) é candidata, jogável ou sugestão; nos escanteios, só o over do total e por time (handicap, quem tem mais e corrida ficam fora)',

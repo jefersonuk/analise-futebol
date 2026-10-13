@@ -211,7 +211,7 @@ export function liveLine(lineId, info) {
   if (isCombo(lineId)) return liveCombo(lineId, info);
   const h = history(lineId, 'home', info.home, [info.game]), bar = h?.bars[0];
   if (!bar) return null;
-  const now = WINNER[bar.res], firstHalf = /^(g1|c1)/.test(lineId);
+  const now = WINNER[bar.res], firstHalf = /^(g1|c1|1T)/.test(lineId);
   const over = /^(g|g1|corners|c1|c[HA]|shots|sot)O/.test(lineId), under = /^(g|g1|corners|c1|c[HA]|shots|sot)U/.test(lineId);
   const decided = info.finished || (firstHalf && (info.status === 'HT' || PAST_HT.has(info.status)));
   const locked = decided || (over && now === 'A') || (under && now === 'RED');

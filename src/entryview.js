@@ -1,6 +1,7 @@
 // Formulário "➕ Entrar": escolhe a casa e manda a aposta para o app de apostas de valor. A stake é
 // digitada na moeda da casa (R$, US$ ou €, como está no app de apostas) e enviada também em R$, que é
-// como o app de apostas guarda. Sugestão de stake: a do Modelo F (em R$) convertida pela cotação dele.
+// como o app de apostas guarda. Stake sugerida: a entrada padrão (stake.js: 10 €, Jeferson, 13/10/2026) convertida para
+// a moeda da casa pela cotação do app de apostas; a casa principal (Sportmarket) vem primeiro e escolhida.
 //
 // Entrada manual (✍️, ou "Minha análise" marcado no formulário): a sua análise, registrada sem as regras do
 // app (piso de 60%, odd mínima, jogo difícil). Serve para um jogo da busca ou digitado e para qualquer linha
@@ -8,7 +9,8 @@
 // confere o resultado sozinho (e acompanha ao vivo); senão o resultado é marcado à mão lá.
 
 import { BETS_URL, SYMBOL, betsApp, buildEntry, retryCloud, sendEntry, sentRecently } from './entry.js';
-import { HIT_IDEAL, HIT_MIN } from './consistency.js';
+import { HIT_IDEAL, HIT_MIN, floorOf } from './consistency.js';
+import { STAKE, money } from './stake.js';
 import { marketOfId, parseLine } from './myline.js';
 
 const $ = s => document.querySelector(s);
@@ -24,8 +26,9 @@ const SEND = 'Registrar no app de apostas';
 // (pior cenário ou histórico abaixo do piso) ou odd abaixo da mínima pedem um segundo toque. Nas apostas da
 // análise de 02–05/10/2026, as que passavam nessa regra acertaram 64%; as outras, 41%. A entrada manual
 // não passa por essas regras.
-// aposta de cenário (odd perto de 2) segue a regra de valor do cenário, não o piso de 60%
-const belowFloor = line => !line.scenario && !line.multi && !(line.p_blend >= HIT_MIN);
+// aposta de cenário (odd perto de 2) segue a regra de valor do cenário, não o piso de 60%; as do favorito no plano (a
+// vitória dele + gols e a vitória no 1º tempo, perto de 2) seguem a regra delas (plan.js)
+const belowFloor = line => !line.scenario && !line.multi && !line.fav && !(line.p_blend >= HIT_MIN);
 const offRule = (line, odd) => [line.blocked && 'jogo difícil de analisar (só over de gols com a odd da Pinnacle)',
   line.scenario && line.conditional && `entrar se… (${line.conditions.join('; ')}) — confirmou?`,
   line.scenario && line.status === 'sem aposta' && `sem aposta pela nossa análise (${line.why_not?.[0] || 'não passa na regra'})`,
@@ -58,15 +61,20 @@ export function initEntry({ getLine, getFixture }) {
   const curLine = () => (entry.typedLine ? manualLine($('#enLine').value, curFx()) : manual() ? { ...entry.line, manual: true } : entry.line);
   const autoCheck = (fx, line) => !!(fx?.id && line?.id);
 
-  // Moeda do formulário segue a casa; a stake sugerida (Modelo F, em R$) é convertida para ela.
+  // A entrada padrão (10 €) na moeda da casa: pela cotação do app de apostas (R$ por € e por US$); sem a cotação do euro,
+  // numa casa que não é em euro, a stake do Modelo F convertida (como antes).
+  const stakeIn = cur => {
+    if (cur === STAKE.cur) return STAKE.value;
+    const rs = rateOf(STAKE.cur), r = rateOf(cur);
+    if (rs && r) { const v = STAKE.value * rs / r; return cur === 'BRL' ? Math.round(v) : Math.round(v * 100) / 100; }
+    return r ? Math.round(entry.stakeBRL / r) : '';
+  };
+  // Moeda do formulário segue a casa; a stake sugerida é a entrada padrão convertida para ela.
   function syncCurrency(resetStake) {
     const h = house(), cur = h?.currency || 'BRL';
     $('#enCurWrap').hidden = $('#enHouse').value !== 'other';
     $('#enStakeLabel').textContent = `Stake (${SYMBOL[cur] || cur})`;
-    if (resetStake) {
-      const r = rateOf(cur);
-      $('#enStake').value = r ? Math.round(entry.stakeBRL / r) : '';
-    }
+    if (resetStake) $('#enStake').value = stakeIn(cur);
     check();
   }
 
@@ -100,11 +108,11 @@ export function initEntry({ getLine, getFixture }) {
       const evv = line.p_blend * odd - 1;
       out.push(`EV nessa odd ${line.multi ? 'pela chance do bilhete' : line.scenario ? 'pela nossa análise' : 'pelo modelo'}: <b class="${evv > 0 ? 'pos' : 'neg'}">${(evv * 100).toFixed(1).replace('.', ',')}%</b> (acerto ${pct(line.p_blend)})`);
       if (!manual() && odd < line.odd_min) out.push(`<span class="neg">Abaixo da odd mínima ${num(line.odd_min)}: a margem de segurança some.</span>`);
-      if (!manual() && !line.multi && odd < 1.5) out.push('<span class="neg">Fora do seu núcleo (odd abaixo de 1,50).</span>');
+      if (!manual() && !line.multi && odd < floorOf(line.market)) out.push(`<span class="neg">Fora do seu núcleo (odd abaixo de ${num(floorOf(line.market))}).</span>`);
     }
     if (stake > 0 && cur !== 'BRL') out.push(r ? `<span class="muted">= ${cash(stake * r)} na cotação do app de apostas (${cash(r)} por ${SYMBOL[cur]})</span>`
       : `<span class="neg">Sem cotação de ${cur} no app de apostas: abra o app de apostas uma vez para ele buscar.</span>`);
-    out.push(`<span class="muted">${line?.multi ? 'Entrada da múltipla (¼ Kelly, até 0,5% da banca)' : 'Stake do Modelo F'}: ${cash(entry.stakeBRL)}${cur !== 'BRL' && r ? ` = ${cash(entry.stakeBRL / r, cur)}` : ''}.</span>`);
+    out.push(`<span class="muted">Entrada padrão: ${money(STAKE.value)}${cur !== STAKE.cur && rateOf(STAKE.cur) && r ? ` = ${cash(STAKE.value * rateOf(STAKE.cur) / r, cur)}` : ''}${cur !== STAKE.cur && !rateOf(STAKE.cur) ? ' (sem a cotação do euro no app de apostas: a sugestão é a stake do Modelo F)' : ''}.</span>`);
     if (h?.value != null && stake > h.value) out.push(`<span class="neg">Stake maior que o saldo da casa (${cash(h.value, cur)}).</span>`);
     if (h?.limited) out.push('<span class="neg">Casa marcada como limitada no app de apostas.</span>');
     if (h?.name && autoCheck(fx, line) && sentRecently(fx.id, line.id, h.name)) out.push('<span class="neg">Você já enviou esta linha nesta casa há pouco. Enviar de novo registra outra aposta.</span>');
@@ -131,14 +139,14 @@ export function initEntry({ getLine, getFixture }) {
 
   // Parte comum da abertura: casas, odd, avisos e a caixa na tela.
   function show(app, odd) {
-    $('#enHouse').innerHTML = app.houses.map((h, i) => `<option value="${i}">${esc(h.name)} — ${cash(h.value, h.currency)}${h.limited ? ' · ⊘ limitada' : ''}</option>`).join('')
+    $('#enHouse').innerHTML = app.houses.map((h, i) => `<option value="${i}">${esc(h.name)} — ${h.missing ? `${SYMBOL[h.currency] || h.currency}, ainda sem saldo no app de apostas` : cash(h.value, h.currency)}${h.limited ? ' · ⊘ limitada' : ''}</option>`).join('')
       + '<option value="other">Outra casa…</option>';
     $('#enHouseOther').hidden = app.houses.length > 0;
-    if (!app.houses.length) $('#enHouse').value = 'other';
+    $('#enHouse').value = app.houses.length ? '0' : 'other';   // a casa principal (stake.js), primeira da lista
     $('#enOdd').value = odd > 1 ? odd.toFixed(2) : '';
     $('#enMsg').hidden = true;
     syncSend();
-    if (!app.found || app.houses.length < 3) say('Este navegador ainda não tem as suas casas do app de apostas. '
+    if (!app.found || app.houses.filter(h => !h.missing).length < 3) say('Este navegador ainda não tem as suas casas do app de apostas. '
       + `<a href="${BETS_URL}" target="apostas">Abra o app de apostas aqui</a> e espere ele sincronizar com a nuvem; depois reabra este formulário. `
       + 'Se registrar agora, a aposta fica aguardando no app de apostas até a casa existir lá.', true);
     syncCurrency(true);

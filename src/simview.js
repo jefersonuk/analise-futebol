@@ -4,6 +4,7 @@
 // da varredura) e o Plano do dia (as dos planos, id plano-…). Nada daqui vai para o app de apostas.
 
 import { settleSim, simReport } from './sim.js';
+import { CUR_SYMBOL, money } from './stake.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pct = x => `${Math.round(x * 100)}%`;
@@ -70,28 +71,30 @@ export function simPanel({ api, el, mine, title, intro, cat = c => c, onChange =
   function render() {
     const list = st.ids.map(id => st.list.get(id)).filter(Boolean);
     if (!list.length) { el.innerHTML = st.msg ? `<p class="muted">${esc(st.msg)}</p>` : ''; return; }
-    const row = (name, s, strong = false) => `<tr${strong ? ' class="on"' : ''}><td>${strong ? `<b>${esc(name)}</b>` : esc(name)}</td><td>${s.n}</td><td>${s.green} · ${s.void} · ${s.red}</td>
+    // dinheiro na moeda da simulação (sim.cur; sem ela, R$ — as de antes da entrada padrão de 10 €), com sinal
+    const cash = (x, cur) => (x == null ? '' : `${x > 0 ? '+' : ''}${money(x, cur, cur === 'BRL' ? 0 : 2)}`);
+    const row = (name, s, cur, strong = false) => `<tr${strong ? ' class="on"' : ''}><td>${strong ? `<b>${esc(name)}</b>` : esc(name)}</td><td>${s.n}</td><td>${s.green} · ${s.void} · ${s.red}</td>
       <td class="muted">${s.open}</td><td class="${cls(s.profit_u)}"><b>${sg(s.profit_u)}</b></td><td class="${cls(s.yield)}">${pc(s.yield)}</td>
-      <td class="${cls(s.profit_brl)}">${s.done ? `R$ ${sg(s.profit_brl, 0)}` : '—'}</td><td class="${cls(s.clv)}">${pc(s.clv)}${s.clv_n ? ` <span class="muted">(${s.clv_n})</span>` : ''}</td></tr>`;
+      <td class="${cls(s.profit_brl)}">${s.done ? cash(s.profit_brl, cur) : '—'}</td><td class="${cls(s.clv)}">${pc(s.clv)}${s.clv_n ? ` <span class="muted">(${s.clv_n})</span>` : ''}</td></tr>`;
     const cards = list.slice(0, 10).map(sim => {
-      const rep = simReport(sim), t = rep.total, cond = sim.bets.some(b => b.cat === 'nossa análise: entrar se…');
+      const rep = simReport(sim), t = rep.total, cond = sim.bets.some(b => b.cat === 'nossa análise: entrar se…'), cur = sim.cur || 'BRL', sym = CUR_SYMBOL[cur] || cur;
       const old = sim.bets.filter(b => b.odd_src === 'mínima').length;
       const when = new Date(sim.scan_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
       const bets = [...sim.bets].sort((a, b) => a.kickoff - b.kickoff).map(b => `<tr class="${b.status === 'aberta' ? 'weak' : ''}"><td>${hour(b.kickoff)}</td>
         <td>${esc(b.home)}${b.away ? ` x ${esc(b.away)}` : ''}</td><td class="muted">${esc(cat(b.cat))}</td><td>${esc(b.line)}</td>
         <td>${n2(b.odd)} <span class="muted" title="${esc((SRC[b.odd_src] || SRC['mínima'])[1])}">${(SRC[b.odd_src] || SRC['mínima'])[0]}</span></td><td>${pct(b.p)}</td>
         <td title="${esc(b.detail || '')}">${b.status === 'aberta' ? `<span class="muted">${esc(b.detail || 'aberta')}</span>` : `${RES[b.winner]} <span class="muted">${esc(b.detail || '')}</span>`}</td>
-        <td class="${cls(b.profit_u)}">${b.profit_u == null ? '' : sg(b.profit_u)}</td><td class="${cls(b.profit_brl)}">${b.profit_brl == null ? '' : sg(b.profit_brl, 0)}</td></tr>`).join('');
+        <td class="${cls(b.profit_u)}">${b.profit_u == null ? '' : sg(b.profit_u)}</td><td class="${cls(b.profit_brl)}">${cash(b.profit_brl, cur)}</td></tr>`).join('');
       return `<div class="simcard" id="sim-${esc(sim.id)}"><div><b>${sim.plan ? `📋 Plano ${esc(sim.label || sim.date.split('-').reverse().slice(0, 2).join('/'))}` : `Varredura de ${when}`}</b> · ${t.n} entradas · ${t.done} encerradas${t.open ? `, ${t.open} em aberto` : ''} ·
-        <b class="${cls(t.profit_u)}">${sg(t.profit_u)} u</b> (yield ${pc(t.yield)}) · <span class="${cls(t.profit_brl)}">R$ ${sg(t.profit_brl, 0)}</span>
+        <b class="${cls(t.profit_u)}">${sg(t.profit_u)} u</b> (yield ${pc(t.yield)}) · <span class="${cls(t.profit_brl)}">${t.done ? cash(t.profit_brl, cur) : money(0, cur)}</span>
         ${t.clv != null ? ` · CLV médio ${pc(t.clv)}` : ''}
         <button class="ghost mini" data-simcheck="${esc(sim.id)}"${st.busy ? ' disabled' : ''}>🔄 Conferir resultados</button>
         <button class="ghost mini" data-simdel="${esc(sim.id)}">apagar</button>
         ${sim.checked_at ? `<span class="muted"> · conferida às ${hour(Date.parse(sim.checked_at))}</span>` : ''}
         ${old ? `<div class="neg small">⚠️ ${old} entrada${old > 1 ? 's' : ''} na odd mínima do app (simulada${old > 1 ? 's' : ''} antes da regra do pior cenário): o resultado delas é otimista</div>` : ''}</div>
-        <div class="scroll"><table class="scanrank simtab"><tr><th>Lente</th><th>Entradas</th><th>✓ · ↩ · ✗</th><th>Abertas</th><th>Lucro (u)</th><th>Yield</th><th>Lucro R$</th><th>CLV</th></tr>
-          ${rep.cats.map(([c, s]) => row(cat(c), s)).join('')}${row(sim.plan ? 'Total' : 'Total (sem repetir a mesma linha)', t, true)}${cond ? row('Total sem as "entrar se…"', rep.confirmed, true) : ''}</table></div>
-        <details><summary>As ${sim.bets.length} entradas</summary><div class="scroll"><table class="scanrank simtab"><tr><th>Hora</th><th>Jogo</th><th>Lente</th><th>Linha</th><th>Odd</th><th>Chance</th><th>Resultado</th><th>u</th><th>R$</th></tr>${bets}</table></div></details></div>`;
+        <div class="scroll"><table class="scanrank simtab"><tr><th>Lente</th><th>Entradas</th><th>✓ · ↩ · ✗</th><th>Abertas</th><th>Lucro (u)</th><th>Yield</th><th>Lucro ${sym}</th><th>CLV</th></tr>
+          ${rep.cats.map(([c, s]) => row(cat(c), s, cur)).join('')}${row(sim.plan ? 'Total' : 'Total (sem repetir a mesma linha)', t, cur, true)}${cond ? row('Total sem as "entrar se…"', rep.confirmed, cur, true) : ''}</table></div>
+        <details><summary>As ${sim.bets.length} entradas</summary><div class="scroll"><table class="scanrank simtab"><tr><th>Hora</th><th>Jogo</th><th>Lente</th><th>Linha</th><th>Odd</th><th>Chance</th><th>Resultado</th><th>u</th><th>${sym}</th></tr>${bets}</table></div></details></div>`;
     }).join('');
     el.innerHTML = `<details class="sims" open><summary>${esc(title)} (${list.length}) — fora do app de apostas</summary>
       <p class="muted">${intro}</p>${st.msg ? `<p class="muted">${esc(st.msg)}</p>` : ''}${cards}</details>`;

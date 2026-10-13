@@ -3,8 +3,9 @@
 
 export const PINNACLE = 4;
 // Mercados da API que o app lê (mapValue): 1X2, handicap asiático, gols (jogo e 1º tempo), ambas marcam,
-// escanteios do jogo, handicap de escanteios, escanteios por time e total de escanteios do 1º tempo.
-export const BETS = [1, 4, 5, 6, 8, 45, 50, 56, 57, 58, 77];
+// escanteios do jogo, handicap de escanteios, escanteios por time, total de escanteios do 1º tempo e o resultado
+// do 1º tempo (13) com o handicap asiático do 1º tempo (19) — a vitória do favorito no 1º tempo (favhalf.js).
+export const BETS = [1, 4, 5, 6, 8, 13, 19, 45, 50, 56, 57, 58, 77];
 
 const n = s => String(parseFloat(s));   // "2.50" -> "2.5", "-0" -> "0"
 
@@ -16,6 +17,11 @@ function mapValue(betId, value) {
   let m;
   switch (betId) {
     case 1: return { Home: '1', Draw: 'X', Away: '2' }[v] ? { id: { Home: '1', Draw: 'X', Away: '2' }[v], group: '1' } : null;
+    case 13: return { Home: '1T1', Draw: '1TX', Away: '1T2' }[v] ? { id: { Home: '1T1', Draw: '1TX', Away: '1T2' }[v], group: '13' } : null;
+    case 19: {   // handicap asiático do 1º tempo, na convenção do 4 ("Away -0.5" = visitante +0,5)
+      if (!(m = v.match(/^(Home|Away)\s*([+-]?[\d.]+)$/))) return null;
+      return m[1] === 'Home' ? { id: `a1H${n(m[2])}`, group: `19:${n(m[2])}` } : { id: `a1A${n(-parseFloat(m[2]))}`, group: `19:${n(m[2])}` };
+    }
     case 8: return v === 'Yes' ? { id: 'bttsY', group: '8' } : v === 'No' ? { id: 'bttsN', group: '8' } : null;
     case 4: case 56: {   // 56 = handicap asiático de escanteios do jogo (mesma convenção do de gols)
       if (!(m = v.match(/^(Home|Away)\s*([+-]?[\d.]+)$/))) return null;

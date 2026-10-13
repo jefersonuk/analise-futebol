@@ -13,9 +13,9 @@
 //   motivação  pela tabela: título, vaga, rebaixamento, nada a disputar
 //   clássico   os dois times da mesma cidade (cadastro do time na API)
 //
-// Entrada (odd perto de 2, regra de 08/10: melhor acertar 50% a 2,00 com valor do que 60% a 1,50):
+// Entrada (odd perto de 2, regra de 08/10: melhor acertar 50% a 2,00 com valor do que 60% a 1,50; aberta em 13/10):
 //   aposta      a nossa chance ≥ 45%, odd mínima (nossa justa × 1,05) ≤ 2,70, e a Pinnacle paga a mínima com odd
-//               de 1,80 a 2,70 — o mercado paga o que a nossa leitura pede
+//               de 1,70 (1X2 e handicap) ou 1,30 (total de gols) a 2,70 — o mercado paga o que a nossa leitura pede
 //   entrar se…  passaria, mas depende de algo que só se confirma perto do jogo (condições: escalação de time de
 //               base, rodízio em copa, dúvida, ou a nossa leitura muito longe da Pinnacle) — conferir 30 min antes
 //   na mira     a nossa leitura vê valor, mas a Pinnacle paga abaixo da mínima: entra se a casa pagar ≥ a mínima
@@ -27,7 +27,11 @@ import { earlyRisk } from './clubs.js';
 export const BANDS = ['favorito forte', 'favorito', 'equilibrado', 'zebra', 'zebra forte'];
 export const bandOf = sup => (sup == null ? null : sup >= 1 ? 0 : sup >= 0.35 ? 1 : sup > -0.35 ? 2 : sup > -1 ? 3 : 4);
 export const LEVELS = ['forte', 'médio', 'fraco'];
-export const MIN_N = 5, MAX_N = 15, K = 20, CAP = 0.6, ALVO = [1.8, 2.7], P_MIN = 0.45, MARGIN = 1.05;
+export const MIN_N = 5, MAX_N = 15, K = 20, CAP = 0.6, P_MIN = 0.45, MARGIN = 1.05;
+// Faixa da odd da Pinnacle para a aposta, por mercado (Jeferson, 13/10/2026: "para 1X2 e handicaps podemos ter odds a
+// partir de 1,7; total de gols a partir de 1,3"; antes, 1,80 em todos); o teto é o mesmo
+export const ALVO_MAX = 2.7, ALVO_MIN = { '1X2': 1.7, 'Handicap asiático': 1.7, 'Total de gols': 1.3 };
+export const alvoOf = market => [ALVO_MIN[market] ?? 1.8, ALVO_MAX];
 export const AGREE_PP = 0.04, CONTRA_PP = 0.05, FAR_PP = 0.12;   // concorda / contra a Pinnacle / longe demais (confirmar)
 const YEARS = 3, DAY = 864e5;
 const r2 = x => (x == null || !Number.isFinite(x) ? null : Math.round(x * 100) / 100);
@@ -185,14 +189,14 @@ export function scenarioLines(sc, lines, { banca = 44000, hard = null, condition
     const why = [];   // o que falta para ser entrada
     if (p < P_MIN) why.push(`a nossa chance é ${pct(p)} (abaixo de ${pct(P_MIN)})`);
     if (pe.factor === 0) why.push(`odd mínima ${nb(oddMin.toFixed(2))} acima de 3,00`);
-    else if (oddMin > ALVO[1]) why.push(`odd mínima ${nb(oddMin.toFixed(2))} acima do alvo de ${nb(ALVO[1].toFixed(2))}`);
+    else if (oddMin > ALVO_MAX) why.push(`odd mínima ${nb(oddMin.toFixed(2))} acima do alvo de ${nb(ALVO_MAX.toFixed(2))}`);
     if (unmeasured(hard)) why.push('ligas diferentes sem jogos entre elas: a diferença de nível não está medida');
     if (l.inviable) why.push(l.inviable);
     const cond = [...conditions];
     if (diff != null && Math.abs(diff) >= FAR_PP) cond.push(`a nossa leitura está ${Math.round(Math.abs(diff) * 100)} pp ${diff > 0 ? 'acima' : 'abaixo'} da Pinnacle — conferir escalação e notícias`);
     if (!sc.enough) cond.push('cenário com amostra curta — conferir escalação');
     // o mercado paga a nossa mínima? (sem odd da Pinnacle na linha, depende da casa)
-    const pays = odd != null && odd >= oddMin && odd >= ALVO[0] && odd <= ALVO[1];
+    const pays = odd != null && odd >= oddMin && odd >= alvoOf(l.market)[0] && odd <= ALVO_MAX;
     const status = why.length ? 'sem aposta' : !pays ? 'na mira' : cond.length ? 'entrar se' : 'aposta';
     const contra = diff != null && diff >= CONTRA_PP;
     const { history, context, ...rest } = l;   // o histórico de 10 jogos e as checagens são da lente de consistência

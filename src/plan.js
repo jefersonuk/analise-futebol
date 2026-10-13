@@ -10,12 +10,14 @@
 //   discordando da Pinnacle, mas também concordando com ela; absorva tudo de melhor"):
 //     🤝 acordo com a Pinnacle: as linhas cotadas por ela e consistentes (âncora ou sólida: 60%+, pior cenário e histórico
 //        dos times; contexto que não é contra) em que o modelo não discorda dela (no máximo 3 pp abaixo). O alvo é a odd
-//        justa da linha + 2% (nunca abaixo de 1,50) e a linha entra quando o alvo fica até 8% acima da odd da Pinnacle;
+//        justa da linha + 2% (nunca abaixo de 1,50; no total de gols, 1,30) e a linha entra quando o alvo fica até 8% acima
+//        da odd da Pinnacle;
 //        ordem: contexto a favor, o alvo mais perto da Pinnacle (o mais fácil de achar na casa), consistência;
 //     📊 chutes: a Pinnacle não cota, o preço é só do modelo — sólida ou âncora com os dois times batendo a linha em 60%+
 //        dos últimos jogos, odd mínima de 1,50 a 3,00, só em liga grande;
-//     🎯 nossa leitura: as apostas da nossa análise (odd da Pinnacle de 1,80 a 2,70, pagando a nossa mínima), pelo valor
-//        conservador — a nossa chance encolhida pela metade na direção da Pinnacle, na odd dela;
+//     🎯 nossa leitura: as apostas da nossa análise (odd da Pinnacle de 1,70 no 1X2 e no handicap, de 1,30 no total de
+//        gols, até 2,70 — Jeferson, 13/10/2026 —, pagando a nossa mínima), pelo valor conservador — a nossa chance
+//        encolhida pela metade na direção da Pinnacle, na odd dela;
 //   em rodízio, as de mais acerto primeiro (🤝, 📊, 🎯), até 10 (de 5 a 10 quando o dia tem; não força), no máximo 5 por
 //   liga (eram 3; Jeferson, 12/10/2026: rodada cheia da Championship rende mais de 3);
 // - revisão das réguas (Jeferson, 13/10/2026: "pouquíssimas oportunidades… a régua alta só se justificaria com alto
@@ -46,20 +48,26 @@
 // grandes" (leagues.js), o plano olha só os jogos delas: é onde há dados completos e as casas oferecem as linhas. Chutes
 // formam uma terceira frente nas simples (📊: a Pinnacle não cota, o preço é só do modelo) e só em liga grande.
 
-import { HIT_MIN, ODD_FLOOR, SHOTS, underOk } from './consistency.js';
+import { HIT_MIN, ODD_FLOOR, SHOTS, floorOf, underOk } from './consistency.js';
 import { politicaE, stakeFor } from './model.js';
 import { isBig } from './leagues.js';
 import { MAX_LEGS, MULTI, TARGET, legOrder, multiGames, ticketOf } from './multiple.js';
-import { isDoubt } from './scenario.js';
+import { alvoOf, isDoubt } from './scenario.js';
+import { STAKE, money } from './stake.js';
 
-export const SINGLES = [5, 10], SAME_GAME = 5, MULTIS = 2, PER_LEAGUE = 5, ODDS = [1.8, 2.7];
+export const SINGLES = [5, 10], SAME_GAME = 5, MULTIS = 2, PER_LEAGUE = 5;
 export const COMBO_P = 0.5, COMBO_ODDS = [1.6, 2.7];   // mesmo jogo: chance mínima e faixa da odd mínima
+// ⏱️ favorito no 1º tempo (favhalf.js): até 3, com a odd da Pinnacle de 1,70 a 2,70 (a faixa do 1X2)
+export const HALF_KEY = 'fav1t', HALF_MAX = 3, HALF_ODDS = [1.7, 2.7];
 export const LENS = { ours: '🎯 nossa leitura', agree: '🤝 acordo com a Pinnacle', shots: '📊 chutes (só o modelo)' };
 // Os mercados do plano (a marcação na tela): [chave, rótulo]. Padrão: o recorte do Jeferson (10/10/2026).
 export const COMBO_KEY = 'combos', SHOTS_KEY = 'Chutes';
-export const PLAN_OPTIONS = [['Handicap asiático', 'Handicap de gols'], ['Total de escanteios', 'Escanteios'], ['Total escanteios 1T', 'Escanteios 1T'],
-  [SHOTS_KEY, 'Chutes'], [COMBO_KEY, 'Mesmo jogo'], [MULTI, 'Múltiplas (odd 6+)'], ['Total de gols', 'Gols'], ['1X2', '1X2']];
-export const PLAN_DEFAULT = ['Handicap asiático', 'Total de escanteios', 'Total escanteios 1T', SHOTS_KEY, COMBO_KEY, MULTI];
+export const PLAN_OPTIONS = [['Handicap asiático', 'Handicap de gols'], ['Total de gols', 'Gols'], ['1X2', '1X2'], ['Total de escanteios', 'Escanteios'],
+  ['Total escanteios 1T', 'Escanteios 1T'], [SHOTS_KEY, 'Chutes'], [COMBO_KEY, 'Mesmo jogo'], [HALF_KEY, 'Favorito no 1º tempo'], [MULTI, 'Múltiplas (odd 6+)']];
+// padrão: o recorte do Jeferson (10/10/2026) aberto em 13/10 ("expanda o leque"): gols, 1X2 e o favorito no 1º tempo
+export const PLAN_DEFAULT = ['Handicap asiático', 'Total de gols', '1X2', 'Total de escanteios', 'Total escanteios 1T', SHOTS_KEY, COMBO_KEY, HALF_KEY, MULTI];
+// as opções que existiam antes de 13/10: numa marcação guardada antes, as novas entram pelo padrão (planview.js)
+export const PLAN_OPTIONS_V1 = ['Handicap asiático', 'Total de escanteios', 'Total escanteios 1T', SHOTS_KEY, COMBO_KEY, MULTI, 'Total de gols', '1X2'];
 // a linha está nos mercados marcados (null = todos)? Chutes cobre o total e o no gol
 const inMarkets = (markets, l) => !markets || markets.includes(l.market) || (SHOTS.includes(l.market) && markets.includes(SHOTS_KEY));
 const AGREE_MARKETS = ['Total de gols', 'Handicap asiático', '1X2', 'Total de escanteios', 'Total escanteios 1T'];
@@ -73,13 +81,13 @@ const barred = (g, { doubt = true } = {}) => (g.conditions || []).some(c => doub
 // para o funil dizer quantos jogos ela tirou.
 // A simples de um jogo (a de maior valor) e o combo (o de maior chance).
 const singleOf = (g, markets, loose = false) => (g.hard ? null : (g.scenario || [])
-  .filter(l => (l.bet || (loose && l.conditional)) && l.p_pinnacle != null && l.pinnacle_odd >= ODDS[0] && l.pinnacle_odd <= ODDS[1] && inMarkets(markets, l))
+  .filter(l => (l.bet || (loose && l.conditional)) && l.p_pinnacle != null && l.pinnacle_odd >= alvoOf(l.market)[0] && l.pinnacle_odd <= alvoOf(l.market)[1] && inMarkets(markets, l))
   .map(l => ({ l, v: valueOf(l) })).filter(x => x.v > 0).sort((a, b) => b.v - a.v || b.l.p_nossa - a.l.p_nossa)[0] || null);
 // 🤝 o alvo (a odd que a casa precisa pagar): a justa da linha (a Pinnacle sem margem com o modelo) + AGREE_EDGE, nunca
 // abaixo do piso do núcleo (1,50); a linha entra quando ele fica até REACH acima da odd da Pinnacle. Não usa a mínima do
 // app (odd_min): ela já leva 3% (5% com a odd da Pinnacle de mais de 90 min) e, somada à margem da Pinnacle, passava de 5%.
 export const AGREE_EDGE = 1.02, REACH = 0.08;
-export const agreeMin = l => r2(Math.max(ODD_FLOOR, AGREE_EDGE / l.p_blend));
+export const agreeMin = l => r2(Math.max(floorOf(l.market), AGREE_EDGE / l.p_blend));
 export const needOf = l => r3(l.odd_min / l.pinnacle_odd - 1);
 // a linha do 🤝 no plano: o alvo no lugar da mínima, e a entrada por ele (¼ Kelly, Política E)
 export const agreeLine = (l, banca = 44000) => { const m = agreeMin(l); return { ...l, odd_min: m, odd_min_vs_pinnacle_pct: r2((m / l.pinnacle_odd - 1) * 100), ...stakeFor(l.p_blend, m, banca) }; };
@@ -111,6 +119,14 @@ const shotsOf = (g, loose = false) => (g.hard || (!loose && barred(g, { doubt: f
 // fica fora o jogo que depende da escalação, menos a dúvida de desfalque (o preço sai da matriz da Pinnacle).
 export const comboOk = c => c.p_blend >= COMBO_P && c.odd_min >= COMBO_ODDS[0] && c.odd_min <= COMBO_ODDS[1];
 const comboOf = (g, loose = false) => (g.hard || (!loose && barred(g, { doubt: false })) ? null : (g.fav_combos || []).find(comboOk) || null);
+// ⏱️ o favorito no 1º tempo: cotado pela Pinnacle de 1,70 a 2,70, o nosso modelo do 1º tempo não mais que 3 pp abaixo dela,
+// e o alvo (a justa + 2%, nunca abaixo de 1,70) até 8% acima da odd dela. Como no 🤝, a dúvida de desfalque não barra (o
+// preço é o da Pinnacle).
+export const halfMin = c => r2(Math.max(HALF_ODDS[0], AGREE_EDGE / c.p_blend));
+export const halfLine = (c, banca = 44000) => { const m = halfMin(c); return { ...c, odd_min: m, odd_min_vs_pinnacle_pct: r2((m / c.pinnacle_odd - 1) * 100), ...stakeFor(c.p_blend, m, banca) }; };
+const halfOk = c => c?.pinnacle_odd >= HALF_ODDS[0] && c.pinnacle_odd <= HALF_ODDS[1] && c.p_pinnacle != null && c.p_blend > 0
+  && (c.p_model == null || c.p_model >= c.p_pinnacle - 0.03) && halfMin(c) / c.pinnacle_odd - 1 <= REACH;
+const halfOf = (g, loose = false) => (g.hard || (!loose && barred(g, { doubt: false })) || !halfOk(g.fav_half) ? null : g.fav_half);
 const leagueKey = g => g.fx.league.id ?? g.fx.league.name;
 // o bilhete na odd da Pinnacle quando ela cota todas as pernas (perna asiática: sem a odd dela)
 export const multiOf = (legs, banca) => ticketOf(legs, { houseTotal: legs.every(l => l.pinnacle_odd > 1) ? legs.reduce((t, l) => t * l.pinnacle_odd, 1) : null, banca });
@@ -170,6 +186,10 @@ export function buildPlan(scan, { exposed = null, now = Date.now(), banca = 4400
   const sameGame = want(COMBO_KEY) ? games.filter(g => !used.has(g.fx.id)).map(g => ({ g, combo: comboOf(g) })).filter(x => x.combo)
     .sort((a, b) => b.combo.p_blend - a.combo.p_blend).slice(0, SAME_GAME) : [];
   sameGame.forEach(x => used.add(x.g.fx.id));
+  // ⏱️ favorito no 1º tempo: nos jogos que sobraram, os mais prováveis
+  const halves = want(HALF_KEY) ? games.filter(g => !used.has(g.fx.id)).map(g => ({ g, c: halfOf(g) })).filter(x => x.c)
+    .sort((a, b) => b.c.p_blend - a.c.p_blend).slice(0, HALF_MAX).map(x => ({ g: x.g, line: halfLine(x.c, banca) })) : [];
+  halves.forEach(x => used.add(x.g.fx.id));
   // múltiplas: 2 bilhetes de odd justa 6+ (sem faixa de horário: à noite tudo é apostado de uma vez), as melhores pernas
   // no primeiro; cada jogo num bilhete só
   const multis = [];
@@ -184,7 +204,7 @@ export function buildPlan(scan, { exposed = null, now = Date.now(), banca = 4400
     }
   }
   const byTime = (a, b) => a.g.fx.t - b.g.fx.t;
-  return { date: scan.date || null, scan_at: scan.generated_at, made_at: now, target, markets: markets || null, big: !!big, singles: singles.sort(byTime), sameGame: sameGame.sort(byTime), multis,
+  return { date: scan.date || null, scan_at: scan.generated_at, made_at: now, target, markets: markets || null, big: !!big, singles: singles.sort(byTime), sameGame: sameGame.sort(byTime), halves: halves.sort(byTime), multis,
     stats: { games: scan.games.length, future: future.length, small: future.length - scope.length, exposed: scope.length - games.length } };
 }
 
@@ -197,20 +217,20 @@ export function planFunnel(scan, plan, { exposed = null, markets = plan.markets,
   const want = k => !markets || markets.includes(k);
   const skipped = {};
   for (const s of scan.skipped || []) { const k = SKIP_WHY.find(([re]) => re.test(s.why || ''))?.[1] || 'outros motivos'; skipped[k] = (skipped[k] || 0) + 1; }
-  const ids = [plan.singles.map(x => x.g.fx.id), plan.sameGame.map(x => x.g.fx.id), plan.multis.flatMap(t => t.legs.map(l => l.fixtureId))].map(xs => new Set(xs));
+  const ids = [plan.singles.map(x => x.g.fx.id), plan.sameGame.map(x => x.g.fx.id), plan.multis.flatMap(t => t.legs.map(l => l.fixtureId)), (plan.halves || []).map(x => x.g.fx.id)].map(xs => new Set(xs));
   const perLeague = new Map();
   for (const { g } of plan.singles) perLeague.set(leagueKey(g), (perLeague.get(leagueKey(g)) || 0) + 1);
   const single = (g, loose) => singleOf(g, markets, loose) || agreeOf(g, markets, loose) || (want(SHOTS_KEY) && shotsOf(g, loose));
-  const combo = (g, loose) => want(COMBO_KEY) && comboOf(g, loose);
+  const combo = (g, loose) => (want(COMBO_KEY) && comboOf(g, loose)) || (want(HALF_KEY) && halfOf(g, loose));
   // tinha simples e ficou fora: o teto da liga ou o plano cheio (10 simples); tinha combo: o plano cheio (5 no mesmo jogo)
-  const fate = g => (ids[0].has(g.fx.id) ? 'singles' : ids[1].has(g.fx.id) ? 'same' : ids[2].has(g.fx.id) ? 'multi'
+  const fate = g => (ids[0].has(g.fx.id) ? 'singles' : ids[1].has(g.fx.id) ? 'same' : ids[3].has(g.fx.id) ? 'half' : ids[2].has(g.fx.id) ? 'multi'
     : g.fx.t <= now + 10 * 60e3 ? 'started' : big && !isBig(g.fx.league) ? 'small' : exposed?.has(g.fx.id, g.fx.home.name, g.fx.away.name) ? 'exposed'
     : single(g) ? ((perLeague.get(leagueKey(g)) || 0) >= PER_LEAGUE ? 'cap' : 'full') : combo(g) ? 'full'
     : g.hard ? 'hard' : single(g, true) || combo(g, true) ? 'lineup' : 'none');
   const analyzed = scan.analyzed ?? scan.games.length;
   const out = { fixtures: scan.fixtures ?? null, quoted: scan.with_odds != null ? scan.with_odds + (scan.outside || 0) : null, outside: scan.outside || 0,
     skipped, analyzed, unkept: Math.max(0, analyzed - scan.games.length),
-    singles: 0, same: 0, multi: 0, started: 0, small: 0, exposed: 0, cap: 0, full: 0, hard: 0, lineup: 0, none: 0 };
+    singles: 0, same: 0, half: 0, multi: 0, started: 0, small: 0, exposed: 0, cap: 0, full: 0, hard: 0, lineup: 0, none: 0 };
   for (const g of scan.games) out[fate(g)]++;
   return out;
 }
@@ -218,7 +238,7 @@ export function planFunnel(scan, plan, { exposed = null, markets = plan.markets,
 // O plano guardado pelas chaves (fica igual ao registrar entradas: a exposição muda, o plano não).
 export const planKeys = plan => ({ scan_at: plan.scan_at, made_at: plan.made_at ?? null, date: plan.date, target: plan.target, markets: plan.markets ?? null, big: !!plan.big,
   singles: plan.singles.map(x => [x.g.fx.id, x.line.id, x.lens]), sameGame: plan.sameGame.map(x => [x.g.fx.id, x.combo.id]),
-  multis: plan.multis.map(t => t.legs.map(l => [l.fixtureId, l.lineId])) });
+  halves: (plan.halves || []).map(x => [x.g.fx.id, x.line.id]), multis: plan.multis.map(t => t.legs.map(l => [l.fixtureId, l.lineId])) });
 export function planFromKeys(scan, keys, { banca = 44000 } = {}) {
   const g = id => scan.games.find(x => x.fx.id === id);
   const opts = new Map(multiGames(scan.games, { now: 0 }).flatMap(m => m.options.map(o => [`${o.fixtureId}:${o.lineId}`, o])));
@@ -227,27 +247,32 @@ export function planFromKeys(scan, keys, { banca = 44000 } = {}) {
     return l && { g: x, line: l, value: lens === 'agree' ? needOf(l) : lens === 'shots' ? null : valueOf(l), lens };
   });
   const sameGame = keys.sameGame.map(([f, id]) => { const x = g(f), c = [...(x?.fav_combos || []), ...(x?.combos || [])].find(s => s.id === id); return c && { g: x, combo: c }; });
+  const halves = (keys.halves || []).map(([f, id]) => { const x = g(f), c = x?.fav_half?.id === id ? x.fav_half : null; return c && { g: x, line: halfLine(c, banca) }; });
   const multis = keys.multis.map(ls => ls.map(([f, id]) => opts.get(`${f}:${id}`))).filter(ls => ls.every(Boolean)).map(ls => multiOf(ls, banca));
-  if (singles.some(x => !x) || sameGame.some(x => !x)) return null;   // a varredura mudou: monta de novo
-  return { date: keys.date, scan_at: keys.scan_at, made_at: keys.made_at ?? null, target: keys.target, markets: keys.markets ?? null, big: !!keys.big, singles, sameGame, multis, stats: null };
+  if (singles.some(x => !x) || sameGame.some(x => !x) || halves.some(x => !x)) return null;   // a varredura mudou: monta de novo
+  return { date: keys.date, scan_at: keys.scan_at, made_at: keys.made_at ?? null, target: keys.target, markets: keys.markets ?? null, big: !!keys.big, singles, sameGame, halves, multis, stats: null };
 }
 
 // Texto do plano para copiar (bloco de notas, WhatsApp) e apostar nas casas.
 export function planText(plan, { dateLabel = plan.date } = {}) {
   const nb = x => (x == null ? '—' : x.toFixed(2).replace('.', ','));
   const hh = t => new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const out = [`PLANO ${dateLabel}`];
+  const out = [`PLANO ${dateLabel} · entrada ${money(STAKE.value, STAKE.cur)} em cada`];
   if (plan.singles.length) {
     out.push('', `SIMPLES (${plan.singles.length})`);
-    plan.singles.forEach(({ g, line, lens }, i) => out.push(`${i + 1}. ${hh(g.fx.t)} ${g.fx.home.name} x ${g.fx.away.name} — ${line.line} · odd ≥ ${nb(line.odd_min)} (Pinnacle ${nb(line.pinnacle_odd)})${line.entry_brl ? ` · R$ ${line.entry_brl}` : ''} · ${LENS[lens || 'ours']}`));
+    plan.singles.forEach(({ g, line, lens }, i) => out.push(`${i + 1}. ${hh(g.fx.t)} ${g.fx.home.name} x ${g.fx.away.name} — ${line.line} · odd ≥ ${nb(line.odd_min)} (Pinnacle ${nb(line.pinnacle_odd)}) · ${LENS[lens || 'ours']}`));
   }
-  plan.multis.forEach((t, i) => {
-    out.push('', `MÚLTIPLA ${i + 1} (${t.n} pernas) · odd total ≥ ${nb(t.min)} · ${t.asian ? 'não perde' : 'acerta tudo'} ${Math.round(t.p_all * 100)}%${t.stake || t.stake_at_min ? ` · R$ ${t.stake || t.stake_at_min}` : ''}`);
-    t.legs.forEach(l => out.push(`   ${hh(l.kickoff)} ${l.home} x ${l.away} — ${l.line} (≥ ${nb(l.min)})`));
-  });
+  if (plan.halves?.length) {
+    out.push('', `FAVORITO NO 1º TEMPO (${plan.halves.length})`);
+    plan.halves.forEach(({ g, line }, i) => out.push(`${i + 1}. ${hh(g.fx.t)} ${g.fx.home.name} x ${g.fx.away.name} — ${line.line} · odd ≥ ${nb(line.odd_min)} (Pinnacle ${nb(line.pinnacle_odd)})`));
+  }
   if (plan.sameGame.length) {
     out.push('', `MESMO JOGO (${plan.sameGame.length})`);
-    plan.sameGame.forEach(({ g, combo }, i) => out.push(`${i + 1}. ${hh(g.fx.t)} ${g.fx.home.name} x ${g.fx.away.name} — ${combo.line} · odd ≥ ${nb(combo.odd_min)}${combo.entry_brl ? ` · R$ ${combo.entry_brl}` : ''}`));
+    plan.sameGame.forEach(({ g, combo }, i) => out.push(`${i + 1}. ${hh(g.fx.t)} ${g.fx.home.name} x ${g.fx.away.name} — ${combo.line} · odd ≥ ${nb(combo.odd_min)}`));
   }
+  plan.multis.forEach((t, i) => {
+    out.push('', `MÚLTIPLA ${i + 1} (${t.n} pernas) · odd total ≥ ${nb(t.min)} · ${t.asian ? 'não perde' : 'acerta tudo'} ${Math.round(t.p_all * 100)}%`);
+    t.legs.forEach(l => out.push(`   ${hh(l.kickoff)} ${l.home} x ${l.away} — ${l.line} (≥ ${nb(l.min)})`));
+  });
   return out.join('\n');
 }

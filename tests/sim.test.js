@@ -29,12 +29,13 @@ test('entradas: o que cada aba propôs, na odd da Pinnacle (onde ela não cota, 
   // chutes (a Pinnacle não cota): a justa do nosso modelo (70%) com a margem de uma casa, 5% — abaixo da mínima (1,60)
   assert.equal(by('Chutes|1').odd_src, 'modelo est.'); assert.equal(by('Chutes|1').odd, 1.36);
   // combo: a justa pela chance da Pinnacle (68%) com a margem dela nas duas pernas (sem linha cotada no jogo: 3%)
-  assert.equal(by('Combo|2').odd, 1.39); assert.equal(by('Combo|2').odd_src, 'pinnacle est.'); assert.equal(by('nossa análise: entrar se…|2').stake_brl, 100);
+  assert.equal(by('Combo|2').odd, 1.39); assert.equal(by('Combo|2').odd_src, 'pinnacle est.'); assert.equal(by('nossa análise: entrar se…|2').stake_brl, 10, 'a entrada padrão (10 €), não a do app');
+  assert.equal(buildSim(scan).cur, 'EUR');
   assert.ok(!sim.bets.some(b => b.fixtureId === 3), 'especulativa não é proposta');
   assert.equal(sim.id, String(T0));
 });
 
-test('liquidação: resultados, unidades, R$, CLV; aberto até o jogo acabar; cancelado anula', async () => {
+test('liquidação: resultados, unidades, dinheiro (10 € por entrada), CLV; aberto até o jogo acabar; cancelado anula', async () => {
   const sim = buildSim(scan);
   const fixtures = new Map([[1, { finished: true, score: 'C1 1–1 F1', game: {} }], [2, { finished: false, long: 'Second Half' }]]);
   const RESULT = { 'ahA0.5': 'A', 'gO2.5': 'RED', 'cornersO9.5': 'A', 'shotsO24.5': 'RED' };
@@ -43,7 +44,7 @@ test('liquidação: resultados, unidades, R$, CLV; aberto até o jogo acabar; ca
   const r = await settleSim(sim, io);
   assert.deepEqual(r, { settled: 4, pending: 2 });
   const b = k => sim.bets.find(x => x.key.startsWith(k));
-  assert.equal(b('nossa análise: aposta|1').profit_u, 1.05); assert.equal(b('nossa análise: aposta|1').profit_brl, 157.5);
+  assert.equal(b('nossa análise: aposta|1').profit_u, 1.05); assert.equal(b('nossa análise: aposta|1').profit_brl, 10.5);
   assert.equal(b('nossa análise: aposta|1').clv, 0.066, '2,05 contra a justa 1/0,52');
   assert.equal(b('Gols|1').profit_u, -1); assert.equal(b('Escanteios|1').clv, null, 'odd estimada: sem CLV');
   assert.equal(b('Combo|2').status, 'aberta'); assert.equal(b('Combo|2').detail, 'Second Half');

@@ -7,10 +7,15 @@
 <link rel="stylesheet" href="src/style.css">
 </head>
 <body>
-<header>
+<header class="topbar">
   <h1>📊 Análise de Jogos</h1>
+  <nav class="tabs" id="tabs" aria-label="Seções">
+    <button data-tab="plan" class="on">📋 Plano do dia</button>
+    <button data-tab="scan">🔎 Varredura</button>
+    <button data-tab="game">⚽ Jogo</button>
+  </nav>
   <span id="quota" class="muted"></span>
-  <button id="btnKey" class="ghost">⚙️ Chave</button>
+  <button id="btnKey" class="ghost" title="Chave da API e cache na nuvem">⚙️</button>
 </header>
 
 <section id="keyBox" class="card" hidden>
@@ -29,21 +34,56 @@
   <p id="cloudInfo" class="muted"></p>
 </section>
 
-<section class="card" id="planSec">
-  <h2>📋 Plano do dia <span class="muted">a análise de uma janela — as próximas horas, a partir de agora, ou o dia inteiro — em poucas entradas: 5 a 10 simples, 2 múltiplas e 5 no mesmo jogo</span></h2>
-  <div class="row">
-    <select id="planDate"></select>
-    <button id="planRun" class="primary">Montar o plano</button>
-    <button id="planCopy" class="ghost" hidden title="Copia a lista para apostar nas casas">📋 Copiar o plano</button>
-    <button id="planSpec" class="ghost" hidden title="Copia o plano com o contexto dos jogos e abre o especialista no claude.ai">🧠 Especialista</button>
-  </div>
-  <div class="row markets" id="planMarkets"></div>
-  <p id="planMsg" class="msg" hidden></p>
+<div class="pane" data-pane="plan">
+  <section class="card" id="planSec">
+    <div class="sechead">
+      <h2>📋 Plano do dia</h2>
+      <p class="muted">Poucas entradas da janela escolhida — simples, favorito no 1º tempo, mesmo jogo e múltiplas —, para apostar de uma vez.</p>
+    </div>
+    <div class="toolbar">
+      <select id="planDate"></select>
+      <button id="planRun" class="primary">Montar o plano</button>
+      <button id="planCopy" class="ghost" hidden title="Copia a lista para apostar nas casas">📋 Copiar</button>
+      <button id="planSpec" class="ghost" hidden title="Copia o plano com o contexto dos jogos e abre o especialista no claude.ai">🧠 Especialista</button>
+    </div>
+    <div class="row markets" id="planMarkets"></div>
+    <p id="planMsg" class="msg" hidden></p>
+  </section>
   <div id="planOut"></div>
   <div id="planSimOut"></div>
-</section>
+</div>
 
+<div class="pane" data-pane="scan" hidden>
+  <section class="card" id="scanSec">
+    <div class="sechead">
+      <h2>🔎 Varredura</h2>
+      <p class="muted">Os jogos das próximas horas com as melhores linhas, em ordem de horário, com o contexto de cada jogo.</p>
+    </div>
+    <details class="howto"><summary>ℹ️ Como funciona</summary><div class="howbody">
+      <p>Até 20 jogos das próximas 4 horas (a janela cresce quando há poucos), em ordem de horário, só over.</p>
+      <p><b>🎯 Nossa análise</b> (padrão): a nossa leitura primeiro, a Pinnacle como segunda opinião, odd de 1,70 (1X2 e handicap) ou 1,30 (gols) a 2,70 —
+      e os "entrar se…" para conferir perto do jogo. <b>Melhor do jogo</b>: handicap de gols · gols · 1X2 (chutes só na aba Chutes). <b>Combos</b>: duas pernas
+      no mesmo jogo (resultado + over de gols). <b>Escanteios</b> (over) nas abas deles, com o plano ao vivo do 1º tempo.</p></div></details>
+    <div class="toolbar">
+      <select id="scanDate"></select>
+      <label for="scanBudget">Limite de requisições</label>
+      <input id="scanBudget" type="number" min="50" step="50" inputmode="numeric">
+      <button id="scanSpec" class="ghost" hidden title="Copia a varredura (os jogos na ordem da tela) e abre o especialista no claude.ai">🧠 Especialista</button>
+      <button id="scanRun" class="primary">Varrer jogos</button>
+    </div>
+    <div class="row markets" id="scanMarkets"></div>
+    <p id="scanMsg" class="msg" hidden></p>
+    <div id="scanOut"></div>
+    <div id="simOut"></div>
+  </section>
+</div>
+
+<div class="pane" data-pane="game" hidden>
 <section class="card">
+  <div class="sechead">
+    <h2>⚽ Analisar um jogo</h2>
+    <p class="muted">Todas as linhas de um jogo, a sua linha e o contexto. Da varredura e do plano, "🔬 Análise completa" abre o jogo aqui.</p>
+  </div>
   <label for="teamInput">Time</label>
   <div class="row">
     <input id="teamInput" type="text" placeholder="Nome de um dos times do jogo">
@@ -58,22 +98,6 @@
   </div>
   <p id="msg" class="msg" hidden></p>
   <div id="savedList" class="chips saved" hidden></div>
-</section>
-
-<section class="card" id="scanSec">
-  <h2>🔎 Varredura <span class="muted">até 20 jogos das próximas 4 horas, em ordem de horário, só over. 🎯 Nossa análise (padrão): a nossa leitura primeiro, a Pinnacle como segunda opinião, odd perto de 2 — e os "entrar se…" para conferir perto do jogo. Melhor do jogo: handicap de gols · gols · 1X2 (chutes só na aba Chutes). Combos: duas pernas no mesmo jogo (resultado + over de gols).
-    Escanteios (over) nas abas deles, com o plano ao vivo do 1º tempo. Com o contexto de cada jogo</span></h2>
-  <div class="row">
-    <select id="scanDate"></select>
-    <label for="scanBudget">Limite de requisições</label>
-    <input id="scanBudget" type="number" min="50" step="50" inputmode="numeric">
-    <button id="scanSpec" class="ghost" hidden title="Copia a varredura (os jogos na ordem da tela) e abre o especialista no claude.ai">🧠 Especialista</button>
-    <button id="scanRun" class="primary">Varrer jogos</button>
-  </div>
-  <div class="row markets" id="scanMarkets"></div>
-  <p id="scanMsg" class="msg" hidden></p>
-  <div id="scanOut"></div>
-  <div id="simOut"></div>
 </section>
 
 <main id="out" hidden>
@@ -129,6 +153,7 @@
     <div id="games" class="teams"></div>
   </section>
 </main>
+</div>
 
 <dialog id="entryDlg">
   <form method="dialog" id="entryForm">
