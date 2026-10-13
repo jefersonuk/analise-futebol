@@ -239,7 +239,7 @@ test('mercados e ligas marcados: só handicap, escanteios e chutes; chutes como 
   const line = (lid, market, extra = {}) => ({ id: lid, market, line: lid, tier: 'âncora', consistency_score: 0.8, p_model: 0.72, p_blend: 0.71, p_pinnacle: 0.7,
     pinnacle_odd: 1.46, odd_min: 1.52, odd_min_vs_pinnacle_pct: 4.1, politica_e: 'cheia', context: ctx, entry_brl: 150, ...extra });
   const shots = (extra = {}) => line('shotsO24.5', 'Total de chutes', { model_only: true, pinnacle_odd: null, p_pinnacle: null, odd_min_vs_pinnacle_pct: null,
-    p_model_range: [0.64, 0.78], hit_rate_last10: 0.75, ...extra });
+    p_model_range: [0.64, 0.78], hit_rate_last10: 0.75, history: { home: { wins: 7, n: 10 }, away: { wins: 6.4, n: 9.6 } }, ...extra });
   const mk = (lg, lines, extra = {}) => { const g = G({ lg }); g.fx.league = lg === 39 ? big : { id: lg, name: `Liga ${lg}` }; g.lines = lines; return Object.assign(g, extra); };
   const games = [
     mk(39, [line('gO2.5', 'Total de gols')]),                    // gols: desmarcado no padrão
@@ -281,4 +281,71 @@ test('múltiplas do plano: odd justa 6+, as de 1,5 mais prováveis e a de 2,5 on
   assert.equal(ticketTo(multiGames([G({ lg: 50, over: 0.8 }), G({ lg: 51, over: 0.8 }), G({ lg: 52, over: 0.8 })], { now: NOW }), { target: 6 }), null);
   const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
   assert.ok(plan.multis.length >= 1 && plan.multis.every(x => x.fair >= 6), plan.multis.map(x => x.fair).join());
+});
+
+test('📊 chutes (revisão de 13/10): sólida ou âncora com os dois times batendo a linha em 60%+; a dúvida de desfalque não barra', () => {
+  id = 0;
+  const big = { id: 39, name: 'Premier League' };
+  const hist = (h, a) => ({ home: { wins: h * 10, n: 10 }, away: { wins: a * 10, n: 10 } });
+  // sólida a 66% (mínima do modelo 1,08 ÷ 0,66 = 1,64): antes ficava fora por não ser âncora
+  const shot = (extra = {}) => ({ id: 'shotsO23.5', market: 'Total de chutes', line: 'Mais de 23,5', model_only: true, tier: 'sólida', consistency_score: 0.66,
+    p_model: 0.66, p_blend: 0.66, pinnacle_odd: null, p_pinnacle: null, odd_min: 1.64, politica_e: 'cheia', entry_brl: 120,
+    context: { verdict: 'neutro', signals: [] }, history: hist(0.7, 0.6), ...extra });
+  const mk = (line, conditions = []) => { const g = G({ lg: 39 }); g.fx.league = big; g.lines = [line]; g.conditions = conditions; return g; };
+  const games = [
+    mk(shot()),                                                                  // entra
+    mk(shot({ history: hist(0.8, 0.5) })),                                       // um time abaixo de 60%: fora
+    mk(shot({ tier: 'especulativa' })),                                          // especulativa: fora
+    mk(shot({ odd_min: 1.38, p_blend: 0.78, tier: 'âncora', history: hist(0.9, 0.8) })),   // mínima abaixo de 1,50: fora (piso do núcleo)
+    mk(shot(), ['dúvida: Fulano (F5) — confirmar se joga']),                     // dúvida: entra (chute é volume do time)
+    mk(shot(), ['copa: risco de rodízio — confirmar a escalação']),             // copa: fora
+  ];
+  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games }, { now: NOW, markets: ['Chutes'], big: true });
+  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]).sort(), [[1, 'shots'], [5, 'shots']]);
+});
+
+test('🤝 acordo (revisão de 13/10): alvo = justa + 2% (piso 1,50) até 8% acima da Pinnacle, no lugar da mínima do app; as de mais acerto primeiro no rodízio', async () => {
+  const { AGREE_EDGE, REACH, agreeMin, needOf } = await import('../src/plan.js');
+  id = 0;
+  // handicap +1 a 64% (Pinnacle 1,52, a dela 63%): a mínima do app com a odd da Pinnacle "velha" (justa × 1,05 = 1,64) ficava 7,9%
+  // acima da Pinnacle e a linha não entrava; o alvo do 🤝 é a justa + 2% = 1,59 (4,6% acima)
+  const ah = (extra = {}) => ({ id: 'ahA1', market: 'Handicap asiático', line: 'F +1', tier: 'sólida', consistency_score: 0.66, p_model: 0.66, p_blend: 0.64,
+    p_pinnacle: 0.63, pinnacle_odd: 1.52, odd_min: 1.64, odd_min_vs_pinnacle_pct: 7.9, fragile: true, politica_e: 'cheia', entry_brl: 0,
+    context: { verdict: 'neutro', signals: [] }, ...extra });
+  const mk = (line, single = null) => { const g = G({ lg: 60 + id, single }); g.lines = [line]; return g; };
+  const games = [
+    mk(ah()),
+    mk(ah({ p_blend: 0.6, p_pinnacle: 0.6, pinnacle_odd: 1.5 })),                // alvo 1,70: 13% acima da Pinnacle — fora
+    mk(ah({ context: { verdict: 'contra', signals: [] } })),                       // contexto contra: fora
+    mk(ah({ tier: 'especulativa' })),                                              // sem consistência: fora
+    mk(ah({ p_model: 0.58 })),                                                     // o modelo 5 pp abaixo da Pinnacle: fora
+    mk(ah({ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5' }), [0.56, 0.48, 2.05]),   // 🤝 e 🎯 no mesmo jogo: entra uma vez (na vez da 🎯)
+  ];
+  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games }, { now: NOW });
+  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]).sort(), [[1, 'agree'], [6, 'ours']]);
+  const a = plan.singles.find(x => x.g.fx.id === 1);
+  assert.equal(a.line.odd_min, agreeMin(ah()));
+  assert.equal(agreeMin(ah()), Math.round(100 * AGREE_EDGE / 0.64) / 100);
+  assert.ok(needOf(a.line) <= REACH && Math.abs(a.value - needOf(a.line)) < 1e-9);
+  assert.ok(a.line.entry_brl > 0, 'a entrada sai do alvo (¼ Kelly)');
+  assert.equal(games[0].lines[0].odd_min, 1.64, 'a linha da varredura fica como está');
+  // piso do núcleo: linha de 70% tem alvo 1,50, não a justa + 2% (1,46)
+  assert.equal(agreeMin(ah({ p_blend: 0.7 })), 1.5);
+  // guardado e refeito com o alvo; no texto e na simulação, o alvo e a odd da Pinnacle
+  const back = planFromKeys({ games }, planKeys(plan));
+  assert.deepEqual(back.singles.map(x => x.line.odd_min), plan.singles.map(x => x.line.odd_min));
+  assert.match(planText(plan), /odd ≥ 1,59 \(Pinnacle 1,52\)/);
+  const sim = buildPlanSim(plan).bets.find(b => b.fixtureId === 1);
+  assert.equal(sim.odd, 1.52); assert.equal(sim.odd_src, 'pinnacle');
+  // rodízio com as três frentes cheias (4 candidatas cada, 10 vagas): o desempate é 🤝, 📊, 🎯 — a 🎯 fica com 3, não 4
+  id = 0;
+  const shot = () => ({ id: 'shotsO23.5', market: 'Total de chutes', line: 'Mais de 23,5', model_only: true, tier: 'sólida', consistency_score: 0.66,
+    p_model: 0.66, p_blend: 0.66, pinnacle_odd: null, p_pinnacle: null, odd_min: 1.64, politica_e: 'cheia', context: { verdict: 'neutro', signals: [] },
+    history: { home: { wins: 7, n: 10 }, away: { wins: 6, n: 10 } } });
+  const bigGame = () => { const g = G({ lg: 39 }); g.fx.league = { id: 39, name: 'Premier League' }; g.lines = [shot()]; return g; };
+  const mix = [...Array.from({ length: 4 }, () => mk(ah())), ...Array.from({ length: 4 }, bigGame),
+    ...Array.from({ length: 4 }, (_, i) => G({ lg: 90 + i, single: [0.6, 0.5, 2.0] }))];
+  const p2 = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games: mix }, { now: NOW });
+  const count = k => p2.singles.filter(x => x.lens === k).length;
+  assert.deepEqual([p2.singles.length, count('agree'), count('shots'), count('ours')], [10, 4, 3, 3]);
 });

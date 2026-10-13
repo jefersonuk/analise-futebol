@@ -252,22 +252,22 @@ export function initPlan({ api, openEntry, banca }) {
     const total = stake.reduce((s, [v]) => s + v, 0), pot = stake.reduce((s, [v, o]) => s + (o > 1 ? v * (o - 1) : 0), 0);
     const n = plan.singles.length, budgetOut = (scan.skipped || []).filter(s => /orçamento/.test(s.why || '')).length;
     const head = `<p class="muted"><b>${esc(labelOf(scan))}</b> · análise de ${when}: ${scan.analyzed} jogos analisados de ${scan.fixtures} ${scan.window ? 'na janela' : 'do dia'} · ${scan.requests} requisições.
-      <b>${n} simples (${['ours', 'agree', 'shots'].map(k => [k, plan.singles.filter(x => (x.lens || 'ours') === k).length]).filter(([k, c]) => c || k !== 'shots').map(([k, c]) => `${c} ${LENS[k]}`).join(' · ')})
+      <b>${n} simples (${['agree', 'shots', 'ours'].map(k => [k, plan.singles.filter(x => (x.lens || 'ours') === k).length]).filter(([k, c]) => c || k !== 'shots').map(([k, c]) => `${c} ${LENS[k]}`).join(' · ')})
       · ${plan.multis.length} múltipla${plan.multis.length === 1 ? '' : 's'} · ${plan.sameGame.length} no mesmo jogo</b> · entradas ${brl(total)}
       · <span class="pos">+${brl(pot)} se tudo green</span> <span class="muted">(na odd da Pinnacle)</span>.
       Toque numa entrada para ver o porquê dela.</p>
       ${funnelLine(planFunnel(scan, plan, { exposed: exp }), !!scan.window)}
       ${budgetOut ? `<p class="neg">${budgetOut} jogos com odds ficaram fora da análise pelo limite de requisições (${scan.budget}): aumente o limite na seção de varredura e monte de novo.</p>` : ''}
       ${n < SINGLES[0] ? `<p class="muted">${scan.window ? 'A janela' : 'O dia'} rendeu ${n} simples — menos que 5: melhor poucas do que forçar entrada sem valor.</p>` : ''}`;
-    // simples: as duas frentes; na 🎯 o valor é o nosso (conservador) na odd da Pinnacle; na 🤝 o valor está na casa pagar a mínima
+    // simples: as três frentes; na 🎯 o valor é o nosso (conservador) na odd da Pinnacle; no 🤝 o valor está na casa pagar o alvo
     const lensTag = x => (x.lens === 'shots'
-      ? '<span class="tag" title="a Pinnacle não cota chutes: o preço é só do modelo (âncora: 70%+ e o histórico dos dois times), em liga grande">📊 chutes</span>'
+      ? '<span class="tag" title="a Pinnacle não cota chutes: o preço é só do modelo (sólida ou âncora, com os dois times batendo a linha em 60%+ dos últimos jogos), em liga grande">📊 chutes</span>'
       : x.lens === 'agree'
-      ? '<span class="tag ok" title="o modelo e a Pinnacle concordam; linha consistente (histórico e contexto); o valor está na casa pagar a mínima">🤝 acordo</span>'
+      ? '<span class="tag ok" title="o modelo e a Pinnacle concordam; linha consistente (histórico e contexto); o valor está na casa pagar o alvo (a justa + 2%)">🤝 acordo</span>'
       : `<span class="tag mid" title="a nossa chance (modelo corrigido + cenário) acima da Pinnacle: valor contra ela">🎯 nossa leitura${x.line.contra ? ' · contra a Pinnacle' : ''}</span>`);
     const valueCell = x => (x.lens === 'shots' ? '<span class="muted" title="sem a Pinnacle: a casa precisa pagar a mínima do modelo">casa ≥ mínima (modelo)</span>'
       : x.lens === 'agree'
-      ? `<span class="muted" title="a casa precisa pagar a mínima: ${x.value > 0 ? `${(x.value * 100).toFixed(1).replace('.', ',')}% acima` : 'até'} da odd da Pinnacle">casa ≥ mínima${x.value > 0 ? ` (+${(x.value * 100).toFixed(1).replace('.', ',')}% Pin)` : ''}</span>`
+      ? `<span class="muted" title="a casa precisa pagar o alvo (a justa + 2%): ${x.value > 0 ? `${(x.value * 100).toFixed(1).replace('.', ',')}% acima` : 'até'} da odd da Pinnacle">casa ≥ alvo${x.value > 0 ? ` (+${(x.value * 100).toFixed(1).replace('.', ',')}% Pin)` : ''}</span>`
       : `<span class="pos">+${(x.value * 100).toFixed(1).replace('.', ',')}%</span>`);
     const inSim = simUI.get(simIdOf()), sum = inSim && simReport(inSim).total, sg = x => `${x > 0 ? '+' : ''}${x.toFixed(2).replace('.', ',')}`;
     if (inSim?.bets.some(b => b.odd_src === 'mínima') && !refazendo) repriceSim();
@@ -327,14 +327,17 @@ export function initPlan({ api, openEntry, banca }) {
         comboBody(g, combo), reg(`c:${i}`, has(g.fx.id, g.fx.home.name, g.fx.away.name), g.fx.t))).join('')}`;
     out.innerHTML = `${head}${empty ? '' : simLine}${singles}${multis}${same}${empty}
       <p class="muted small">Como o plano é montado: só os <b>mercados marcados</b> acima e, com "só as grandes", só jogos de liga grande (onde há dados
-      completos e as casas oferecem as linhas — chutes sobretudo). Um jogo entra uma vez só; jogo que já tem entrada fica fora. <b>Simples em três frentes</b>, em rodízio:
-      <b>🎯 nossa leitura</b> — a nossa chance (modelo corrigido + cenário) acima da Pinnacle, com ela pagando de 1,80 a 2,70 e acima da nossa mínima,
-      pelo valor conservador (a nossa chance encolhida pela metade na direção da dela); e <b>🤝 acordo com a Pinnacle</b> — linhas consistentes (âncora
-      ou sólida, 60%+, histórico dos times e contexto que não é contra) em que o modelo não discorda dela: aí o valor está na casa pagar a mínima;
-      e <b>📊 chutes</b> — a Pinnacle não cota, o preço é só do modelo: só âncora (70%+ e o histórico dos dois times) e só em liga grande.
-      No máximo ${PER_LEAGUE} por liga. Fica fora o que depende da escalação — copa (rodízio), time de base/B, dúvida de desfalque, leitura longe da Pinnacle,
-      amostra curta — e o jogo difícil de analisar; no 🤝 e no mesmo jogo a dúvida de desfalque não tira o jogo (o preço é o da Pinnacle, que já embute
-      a notícia). O <b>funil</b> embaixo do resumo diz onde caiu cada jogo analisado. <b>Múltiplas</b> (são bingo: até 2, de odd justa 6 ou mais): over de gols com a linha cotada
+      completos e as casas oferecem as linhas — chutes sobretudo). Um jogo entra uma vez só; jogo que já tem entrada fica fora. <b>Simples em três frentes</b>, em rodízio,
+      as de mais acerto primeiro: <b>🤝 acordo com a Pinnacle</b> — linhas cotadas por ela e consistentes (âncora ou sólida: 60%+, histórico dos times e
+      contexto que não é contra) em que o modelo não discorda dela; o valor está na casa pagar o <b>alvo</b>: a justa da linha + 2% (nunca abaixo de 1,50),
+      que precisa ficar até 8% acima da odd da Pinnacle; <b>📊 chutes</b> — a Pinnacle não cota, o preço é só do modelo: sólida ou âncora com os dois times
+      batendo a linha em 60%+ dos últimos jogos (o que mais acrescentou acerto no teste de 3.002 jogos das ligas grandes), mínima de 1,50 a 3,00 e só em
+      liga grande; e <b>🎯 nossa leitura</b> — a nossa chance (modelo corrigido + cenário) acima da Pinnacle, com ela pagando de 1,80 a 2,70 e acima da
+      nossa mínima, pelo valor conservador (a nossa chance encolhida pela metade na direção da dela).
+      No máximo ${PER_LEAGUE} por liga. Fica fora o que depende da escalação — copa (rodízio), time de base/B, começo de temporada com mudança grande e,
+      na 🎯, dúvida de desfalque, leitura longe da Pinnacle e amostra curta — e o jogo difícil de analisar; no 🤝, no mesmo jogo e nos 📊 a dúvida de
+      desfalque não tira o jogo (no 🤝 e no mesmo jogo o preço é o da Pinnacle, que já embute a notícia; chute é volume do time inteiro).
+      O <b>funil</b> embaixo do resumo diz onde caiu cada jogo analisado. <b>Múltiplas</b> (são bingo: até 2, de odd justa 6 ou mais): over de gols com a linha cotada
       pela Pinnacle — as de mais de 1,5 mais prováveis e, se não chegar a 6, a de 2,5 nos jogos em que ela é mais provável; dá para trocar a linha da perna
       (1,75, 2 e 2,25 perdem só com 0–1 gol, como o 1,5; com 2 gols o 1,75 ganha metade, o 2 devolve, o 2,25 perde metade), tirar e pôr perna.
       <b>No mesmo jogo</b>: a vitória do favorito + mais de 1,5 gols — ou de 2,5, quando a de 1,5 paga menos de 1,60 —, com chance de 50%+

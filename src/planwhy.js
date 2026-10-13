@@ -89,19 +89,23 @@ export function agreeWhy(g, x) {
   const l = x.line, hit = l.hit_rate_last10 ?? null, need = x.value;
   const summary = `${cap(l.tier)}: acerta ${pct(l.p_blend)} — Pinnacle ${pct(l.p_pinnacle)}, modelo ${pct(l.p_model)}${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}; `
     + `o modelo ${l.p_model >= l.p_pinnacle ? 'concorda com' : 'fica perto de'} a Pinnacle${l.context ? ` e o contexto está ${l.context.verdict}` : ''}. `
-    + `A mínima ${n2(l.odd_min)} exige ${pct(1 / l.odd_min)}; ${need > 0 ? `a casa precisa pagar ${pc1(need)} acima da Pinnacle (${n2(l.pinnacle_odd)})` : `a própria Pinnacle já paga ${n2(l.pinnacle_odd)}`}.`;
+    + `O alvo ${n2(l.odd_min)} (a justa da linha + 2%, nunca abaixo de 1,50) exige ${pct(1 / l.odd_min)}; ${need > 0 ? `a casa precisa pagar ${pc1(need)} acima da Pinnacle (${n2(l.pinnacle_odd)})` : `a própria Pinnacle já paga ${n2(l.pinnacle_odd)}`}.`;
   return { summary,
     bars: [['Pinnacle', l.p_pinnacle, false, 'a chance da Pinnacle, sem a margem dela'], ['Modelo', l.p_model, false, 'o nosso modelo de forças'],
       ['Últimos 10 jogos', hit, false, 'quanto a linha teria acertado nos últimos 10 jogos dos dois times'], ['Chance da linha', l.p_blend, true, 'a Pinnacle sem margem com o modelo']],
-    mark: [1 / l.odd_min, `a mínima ${n2(l.odd_min)} exige`],
+    mark: [1 / l.odd_min, `o alvo ${n2(l.odd_min)} exige`],
     reasons: [...checks(l), ...reading(g), ...facts(g, l.market)],
     chartLine: l };
 }
 // 📊 chutes: a Pinnacle não cota — o modelo, o pior cenário dele e o histórico dos dois times
 export function shotsWhy(g, x) {
   const l = x.line, hit = l.hit_rate_last10 ?? null, low = l.p_model_range?.[0] ?? null;
+  const team = (h, n) => (h?.n ? `${n} ${pct(h.wins / h.n)}` : null);
+  const each = [team(l.history?.home, g.fx.home.name), team(l.history?.away, g.fx.away.name)].filter(Boolean);
   const summary = `${cap(l.tier)}: acerta ${pct(l.p_blend)} pelo modelo${low != null ? ` (${pct(low)} no pior cenário dele)` : ''}${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}`
-    + `${l.context ? `; contexto ${l.context.verdict}` : ''}. A Pinnacle não cota chutes: o preço é só do modelo, com margem de 8%. A mínima ${n2(l.odd_min)} exige ${pct(1 / l.odd_min)}.`;
+    + `${each.length ? ` — cada time na linha (pesado pelo papel de hoje): ${each.join(', ')}` : ''}${l.context ? `; contexto ${l.context.verdict}` : ''}. `
+    + `Os dois times batendo a linha em 60%+ é o que mais acrescentou acerto nos chutes no teste de 3.002 jogos das ligas grandes (73,8% de acerto). `
+    + `A Pinnacle não cota chutes: o preço é só do modelo, com margem de 8%. A mínima ${n2(l.odd_min)} exige ${pct(1 / l.odd_min)}.`;
   return { summary,
     bars: [['Pior cenário', low, false, 'o modelo com um erro-padrão contra, em cada time'], ['Últimos 10 jogos', hit, false, 'quanto a linha teria acertado nos últimos 10 jogos dos dois times'],
       ['Modelo', l.p_blend, true, 'o nosso modelo de chutes (a Pinnacle não cota)']],

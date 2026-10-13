@@ -4,7 +4,7 @@ import * as demo from '../src/demo.js';
 import { scanDay } from '../src/scanner.js';
 import { buildPlan } from '../src/plan.js';
 import { multiGames, ticketOf } from '../src/multiple.js';
-import { agreeWhy, chanceChart, comboBody, comboStrip, comboWhy, legWhy, legsBody, oursWhy, singleBody } from '../src/planwhy.js';
+import { agreeWhy, chanceChart, comboBody, comboStrip, comboWhy, legWhy, legsBody, oursWhy, shotsWhy, singleBody } from '../src/planwhy.js';
 
 const DAY = 864e5, T0 = Date.UTC(2026, 9, 10, 18);
 // últimos 10 jogos de um time (o mais recente primeiro), com o placar pró–contra
@@ -53,10 +53,10 @@ test('🎯 nossa leitura: a nossa chance contra a da Pinnacle, de onde vem, o ce
   assert.match(html, /a odd 1,95 exige 51%/);
 });
 
-test('🤝 acordo com a Pinnacle: as fontes juntas, a mínima e as checagens primeiro', () => {
+test('🤝 acordo com a Pinnacle: as fontes juntas, o alvo e as checagens primeiro', () => {
   const g = G(), line = g.lines[0];
   const w = agreeWhy(g, { g, line, lens: 'agree', value: 0.043 });
-  assert.match(w.summary, /^Sólida: acerta 62% — Pinnacle 60%, modelo 64%, últimos 10 dos dois times 65%; o modelo concorda com a Pinnacle e o contexto está a favor\. A mínima 1,69 exige 59%; a casa precisa pagar 4,3% acima da Pinnacle \(1,62\)\.$/);
+  assert.match(w.summary, /^Sólida: acerta 62% — Pinnacle 60%, modelo 64%, últimos 10 dos dois times 65%; o modelo concorda com a Pinnacle e o contexto está a favor\. O alvo 1,69 \(a justa da linha \+ 2%, nunca abaixo de 1,50\) exige 59%; a casa precisa pagar 4,3% acima da Pinnacle \(1,62\)\.$/);
   assert.equal(w.reasons[0].text, 'Mando a favor: Alfa em casa 4/5 · Beta fora 3/5.');
   assert.deepEqual(w.bars.map(b => b[0]), ['Pinnacle', 'Modelo', 'Últimos 10 jogos', 'Chance da linha']);
   assert.match(agreeWhy(g, { g, line: { ...line, odd_min: 1.6 }, lens: 'agree', value: -0.012 }).summary, /a própria Pinnacle já paga 1,62\.$/);
@@ -111,4 +111,12 @@ test('o porquê de todas as entradas do plano da demo sai sem erro, com gráfico
   const legs = multiGames(sc.games, { now: 0 }).map(m => m.best).slice(0, 3);
   if (legs.length >= 2) assert.match(legsBody(sc.games, ticketOf(legs, {})), /class="legwhy"/);
   assert.ok(plan.singles.length + plan.sameGame.length > 0, 'a demo rende alguma entrada');
+});
+
+test('📊 chutes: o modelo, o pior cenário e cada time na linha (o que mais acrescentou acerto no teste)', () => {
+  const g = G(), line = { id: 'shotsO23.5', market: 'Total de chutes', line: 'Mais de 23,5', tier: 'sólida', p_blend: 0.66, p_model_range: [0.58, 0.74], hit_rate_last10: 0.7,
+    odd_min: 1.64, history: { home: { wins: 7, n: 10 }, away: { wins: 6.4, n: 9.6 } }, context: { verdict: 'neutro', signals: [] } };
+  const w = shotsWhy(g, { g, line, lens: 'shots' });
+  assert.match(w.summary, /^Sólida: acerta 66% pelo modelo \(58% no pior cenário dele\), últimos 10 dos dois times 70% — cada time na linha \(pesado pelo papel de hoje\): Alfa 70%, Beta 67%; contexto neutro\./);
+  assert.match(w.summary, /A mínima 1,64 exige 61%\.$/);
 });
