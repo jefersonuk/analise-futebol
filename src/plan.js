@@ -6,18 +6,33 @@
 // - um jogo entra uma vez só no plano (nunca duas entradas no mesmo jogo), e jogo que já tem entrada fica fora;
 // - à noite a escalação ainda não saiu: fica fora tudo o que depende dela ("entrar se…": copa, time de base/B, dúvida,
 //   leitura longe da Pinnacle, amostra curta, começo de temporada com mudança grande) e o jogo difícil de analisar;
-// - simples, em duas frentes — as duas valem, o plano não escolhe uma (pedido do Jeferson, 09/10/2026: "pode ter valor
+// - simples, em três frentes — todas valem, o plano não escolhe uma (pedido do Jeferson, 09/10/2026: "pode ter valor
 //   discordando da Pinnacle, mas também concordando com ela; absorva tudo de melhor"):
+//     🤝 acordo com a Pinnacle: as linhas cotadas por ela e consistentes (âncora ou sólida: 60%+, pior cenário e histórico
+//        dos times; contexto que não é contra) em que o modelo não discorda dela (no máximo 3 pp abaixo). O alvo é a odd
+//        justa da linha + 2% (nunca abaixo de 1,50) e a linha entra quando o alvo fica até 8% acima da odd da Pinnacle;
+//        ordem: contexto a favor, o alvo mais perto da Pinnacle (o mais fácil de achar na casa), consistência;
+//     📊 chutes: a Pinnacle não cota, o preço é só do modelo — sólida ou âncora com os dois times batendo a linha em 60%+
+//        dos últimos jogos, odd mínima de 1,50 a 3,00, só em liga grande;
 //     🎯 nossa leitura: as apostas da nossa análise (odd da Pinnacle de 1,80 a 2,70, pagando a nossa mínima), pelo valor
 //        conservador — a nossa chance encolhida pela metade na direção da Pinnacle, na odd dela;
-//     🤝 acordo com a Pinnacle: as linhas consistentes (âncora ou sólida, 60%+, histórico dos times e contexto que não é
-//        contra, odd da Pinnacle na própria linha) em que o modelo não discorda dela (no máximo 3 pp abaixo); o valor
-//        está na casa pagar a mínima (até 5% acima da Pinnacle); ordem: contexto a favor, âncora, consistência;
-//   uma de cada, alternando, até 10 (de 5 a 10 quando o dia tem; não força), no máximo 5 por liga (eram 3; Jeferson,
-//   12/10/2026: rodada cheia da Championship rende mais de 3);
-// - dúvida de desfalque (jogador "Questionable" na API — basta um, até reserva) barra só a 🎯 e os 📊 chutes: no 🤝 e no
-//   mesmo jogo o preço é o da Pinnacle, que já embute a notícia (Jeferson, 12/10/2026); copa, base/B e começo de temporada
-//   continuam barrando todas as frentes;
+//   em rodízio, as de mais acerto primeiro (🤝, 📊, 🎯), até 10 (de 5 a 10 quando o dia tem; não força), no máximo 5 por
+//   liga (eram 3; Jeferson, 12/10/2026: rodada cheia da Championship rende mais de 3);
+// - revisão das réguas (Jeferson, 13/10/2026: "pouquíssimas oportunidades… a régua alta só se justificaria com alto
+//   índice de acerto, o que não é o caso"). No teste do modelo em 3.002 jogos das ligas grandes (out/2025–out/2026, só com
+//   os jogos de antes de cada um) e nas simulações de 08 a 12/10:
+//     📊 a regra antiga (só âncora — 70%+ — com a mínima do modelo, justa × 1,08, de 1,50 para cima) deixava uma janela de
+//        70% a 72% e achava chute em 15 dos 3.002 jogos; o que acrescenta acerto nos chutes é o histórico dos dois times
+//        na linha (+4 a +8 pp além da chance do modelo): com ele, 64% dos jogos têm candidata e ela acertou 73,8% (o
+//        modelo dizia 70%);
+//     🤝 a régua antiga pedia a mínima do app (justa × 1,03, ou × 1,05 com a odd da Pinnacle de mais de 90 min — o normal:
+//        a API atualiza a cada ~3 h) até 5% acima da Pinnacle; somada à margem da própria Pinnacle nas ligas grandes
+//        (~3,5% no handicap e nos gols, ~6,5% nos escanteios), quase nenhuma linha passava;
+//     🎯 a mais fraca no acerto (nas simulações, 44% na odd média de 2,2, sem vantagem sobre a Pinnacle) e o modelo
+//        subestima o favorito no handicap e no 1X2 — parte do "valor" no azarão vem disso: fica, mas por último no rodízio;
+// - dúvida de desfalque (jogador "Questionable" na API — basta um, até reserva) barra só a 🎯: no 🤝 e no mesmo jogo o
+//   preço é o da Pinnacle, que já embute a notícia (Jeferson, 12/10/2026), e nos 📊 chute é volume do time inteiro;
+//   copa, base/B e começo de temporada continuam barrando todas as frentes;
 // - mesmo jogo: a vitória do favorito + mais de 1,5 gols — ou de 2,5, quando a de 1,5 paga menos de 1,60 — com chance de
 //   50%+ e odd mínima até 2,70, os de maior chance, nos jogos que sobraram (pedido do Jeferson, 09/10/2026: a dupla chance
 //   + gols acerta muito, mas a casa paga bem abaixo de 1,50; a vitória do favorito + gols sai perto de 2);
@@ -29,10 +44,10 @@
 // Mercados e ligas (pedido do Jeferson, 10/10/2026): o operador marca os mercados do plano, como na varredura — o
 // recorte dele: handicap de gols, escanteios e chutes nas simples, o mesmo jogo e as múltiplas — e, marcado "só ligas
 // grandes" (leagues.js), o plano olha só os jogos delas: é onde há dados completos e as casas oferecem as linhas. Chutes
-// formam uma terceira frente nas simples (📊: a Pinnacle não cota, o preço é só do modelo — só âncora) e só em liga grande.
+// formam uma terceira frente nas simples (📊: a Pinnacle não cota, o preço é só do modelo) e só em liga grande.
 
-import { isBet } from './dossier.js';
-import { SHOTS } from './consistency.js';
+import { HIT_MIN, ODD_FLOOR, SHOTS, underOk } from './consistency.js';
+import { politicaE, stakeFor } from './model.js';
 import { isBig } from './leagues.js';
 import { MAX_LEGS, MULTI, TARGET, legOrder, multiGames, ticketOf } from './multiple.js';
 import { isDoubt } from './scenario.js';
@@ -48,7 +63,7 @@ export const PLAN_DEFAULT = ['Handicap asiático', 'Total de escanteios', 'Total
 // a linha está nos mercados marcados (null = todos)? Chutes cobre o total e o no gol
 const inMarkets = (markets, l) => !markets || markets.includes(l.market) || (SHOTS.includes(l.market) && markets.includes(SHOTS_KEY));
 const AGREE_MARKETS = ['Total de gols', 'Handicap asiático', '1X2', 'Total de escanteios', 'Total escanteios 1T'];
-const r3 = x => Math.round(x * 1000) / 1000;
+const r2 = x => Math.round(x * 100) / 100, r3 = x => Math.round(x * 1000) / 1000;
 
 // Valor conservador de uma simples: a nossa chance encolhida pela metade na direção da Pinnacle, na odd dela.
 export const valueOf = l => r3(((l.p_nossa + l.p_pinnacle) / 2) * l.pinnacle_odd - 1);
@@ -60,20 +75,38 @@ const barred = (g, { doubt = true } = {}) => (g.conditions || []).some(c => doub
 const singleOf = (g, markets, loose = false) => (g.hard ? null : (g.scenario || [])
   .filter(l => (l.bet || (loose && l.conditional)) && l.p_pinnacle != null && l.pinnacle_odd >= ODDS[0] && l.pinnacle_odd <= ODDS[1] && inMarkets(markets, l))
   .map(l => ({ l, v: valueOf(l) })).filter(x => x.v > 0).sort((a, b) => b.v - a.v || b.l.p_nossa - a.l.p_nossa)[0] || null);
-// 🤝 a linha consistente do jogo que concorda com a Pinnacle; need: quanto a casa precisa pagar acima da Pinnacle.
-// Como na 🎯, fica fora o jogo que depende da escalação (copa, base/B, começo de temporada com mudança grande) — menos
-// a dúvida de desfalque, que a odd da Pinnacle já embute.
-const agreeOf = (g, markets, loose = false) => (g.hard || (!loose && barred(g, { doubt: false })) ? null : (g.lines || [])
-  .filter(l => AGREE_MARKETS.includes(l.market) && inMarkets(markets, l) && isBet(l) && !l.model_only && !l.derived && l.pinnacle_odd > 1 && l.p_pinnacle != null
-    && l.p_model != null && l.p_model >= l.p_pinnacle - 0.03)
-  .sort((a, b) => (b.context?.verdict === 'a favor') - (a.context?.verdict === 'a favor') || (b.tier === 'âncora') - (a.tier === 'âncora')
-    || b.consistency_score - a.consistency_score || b.p_blend - a.p_blend)[0] || null);
+// 🤝 o alvo (a odd que a casa precisa pagar): a justa da linha (a Pinnacle sem margem com o modelo) + AGREE_EDGE, nunca
+// abaixo do piso do núcleo (1,50); a linha entra quando ele fica até REACH acima da odd da Pinnacle. Não usa a mínima do
+// app (odd_min): ela já leva 3% (5% com a odd da Pinnacle de mais de 90 min) e, somada à margem da Pinnacle, passava de 5%.
+export const AGREE_EDGE = 1.02, REACH = 0.08;
+export const agreeMin = l => r2(Math.max(ODD_FLOOR, AGREE_EDGE / l.p_blend));
 export const needOf = l => r3(l.odd_min / l.pinnacle_odd - 1);
-// 📊 chutes: a Pinnacle não cota, o preço é só do modelo (margem de 8%) — então só âncora (70%+ e o histórico dos dois
-// times), odd mínima 1,50–3,00, em liga grande (as casas só têm a linha nelas) e fora do jogo que depende da escalação
-const shotsOf = (g, loose = false) => (g.hard || (!loose && barred(g)) || !isBig(g.fx.league) ? null : (g.lines || [])
-  .filter(l => SHOTS.includes(l.market) && isBet(l) && l.tier === 'âncora' && l.odd_min >= 1.5 && l.odd_min <= 3)
-  .sort((a, b) => b.consistency_score - a.consistency_score || b.p_blend - a.p_blend)[0] || null);
+// a linha do 🤝 no plano: o alvo no lugar da mínima, e a entrada por ele (¼ Kelly, Política E)
+export const agreeLine = (l, banca = 44000) => { const m = agreeMin(l); return { ...l, odd_min: m, odd_min_vs_pinnacle_pct: r2((m / l.pinnacle_odd - 1) * 100), ...stakeFor(l.p_blend, m, banca) }; };
+// consistente (âncora/sólida), só over, viável, sem bloqueio nem contexto contra, e o alvo ao alcance de uma casa
+const agreeOk = l => l.tier !== 'especulativa' && underOk(l) && !l.inviable && !l.blocked && l.context?.verdict !== 'contra'
+  && agreeMin(l) / l.pinnacle_odd - 1 <= REACH && politicaE(agreeMin(l)).factor > 0;
+// contexto a favor, o alvo mais perto da Pinnacle (o mais fácil de achar), âncora, consistência
+const agreeOrder = (a, b) => (b.context?.verdict === 'a favor') - (a.context?.verdict === 'a favor') || needOf(a) - needOf(b)
+  || (b.tier === 'âncora') - (a.tier === 'âncora') || b.consistency_score - a.consistency_score || b.p_blend - a.p_blend;
+// 🤝 a linha consistente do jogo que concorda com a Pinnacle, já com o alvo (agreeLine). Como na 🎯, fica fora o jogo
+// que depende da escalação (copa, base/B, começo de temporada com mudança grande) — menos a dúvida de desfalque, que a odd
+// da Pinnacle já embute.
+const agreeOf = (g, markets, loose = false, banca = 44000) => (g.hard || (!loose && barred(g, { doubt: false })) ? null : (g.lines || [])
+  .filter(l => AGREE_MARKETS.includes(l.market) && inMarkets(markets, l) && !l.model_only && !l.derived && l.pinnacle_odd > 1 && l.p_pinnacle != null
+    && l.p_blend > 0 && l.p_model != null && l.p_model >= l.p_pinnacle - 0.03 && agreeOk(l))
+  .map(l => agreeLine(l, banca)).sort(agreeOrder)[0] || null);
+// os dois times batendo a linha em 60%+ dos últimos jogos (o acerto pesado pelo papel de hoje, 5+ jogos cada): nos
+// chutes é o que mais acrescenta acerto além da chance do modelo (teste de 13/10/2026, no topo)
+export const bothTeams = l => [l.history?.home, l.history?.away].every(h => h && h.n >= 5 && h.wins / h.n >= HIT_MIN);
+// 📊 chutes: a Pinnacle não cota, o preço é só do modelo (margem de 8%) — sólida ou âncora com os dois times batendo a
+// linha (bothTeams), odd mínima 1,50–3,00, em liga grande (as casas só têm a linha nelas); a dúvida de desfalque não tira
+// o jogo (chute é volume do time inteiro), o resto do que depende da escalação, sim. O total de chutes antes do no gol:
+// no teste, com o histórico dos dois times, acertou 73,8% (o no gol, 70,9%).
+const shotsOf = (g, loose = false) => (g.hard || (!loose && barred(g, { doubt: false })) || !isBig(g.fx.league) ? null : (g.lines || [])
+  .filter(l => SHOTS.includes(l.market) && l.tier !== 'especulativa' && bothTeams(l) && underOk(l) && !l.inviable && !l.blocked
+    && l.context?.verdict !== 'contra' && l.odd_min >= ODD_FLOOR && l.odd_min <= 3)
+  .sort((a, b) => SHOTS.indexOf(a.market) - SHOTS.indexOf(b.market) || b.consistency_score - a.consistency_score || b.p_blend - a.p_blend)[0] || null);
 // mesmo jogo: a vitória do favorito + 1,5 gols; se ela pagar pouco, + 2,5 (fav_combos vem nessa ordem). Como no 🤝,
 // fica fora o jogo que depende da escalação, menos a dúvida de desfalque (o preço sai da matriz da Pinnacle).
 export const comboOk = c => c.p_blend >= COMBO_P && c.odd_min >= COMBO_ODDS[0] && c.odd_min <= COMBO_ODDS[1];
@@ -113,9 +146,11 @@ export function buildPlan(scan, { exposed = null, now = Date.now(), banca = 4400
   const future = scan.games.filter(g => g.fx.t > now + 10 * 60e3), scope = future.filter(g => !big || isBig(g.fx.league));
   const games = scope.filter(g => !exposed?.has(g.fx.id, g.fx.home.name, g.fx.away.name));
   const used = new Set(), perLeague = new Map();
-  // simples: as frentes em rodízio (🎯, 🤝, 📊…), a que tem menos entradas primeiro; acabou uma, as outras completam
+  // simples: as frentes em rodízio, as de mais acerto primeiro (🤝, 📊, 🎯), a que tem menos entradas primeiro; acabou
+  // uma, as outras completam
   const A = games.map(g => ({ g, s: singleOf(g, markets) })).filter(x => x.s).sort((a, b) => b.s.v - a.s.v).map(x => ({ g: x.g, line: x.s.l, value: x.s.v, lens: 'ours' }));
-  const B = games.map(g => ({ g, line: agreeOf(g, markets) })).filter(x => x.line).map(x => ({ ...x, value: needOf(x.line), lens: 'agree' }));
+  const B = games.map(g => ({ g, line: agreeOf(g, markets, false, banca) })).filter(x => x.line).sort((a, b) => agreeOrder(a.line, b.line))
+    .map(x => ({ ...x, value: needOf(x.line), lens: 'agree' }));
   const C = want(SHOTS_KEY) ? games.map(g => ({ g, line: shotsOf(g) })).filter(x => x.line)
     .sort((a, b) => b.line.consistency_score - a.line.consistency_score).map(x => ({ ...x, value: null, lens: 'shots' })) : [];
   const singles = [], take = x => {
@@ -124,7 +159,7 @@ export function buildPlan(scan, { exposed = null, now = Date.now(), banca = 4400
     perLeague.set(lg, n + 1); used.add(x.g.fx.id); singles.push(x);
     return true;
   };
-  const fronts = [A, B, C], at = [0, 0, 0], got = [0, 0, 0];
+  const fronts = [B, C, A], at = [0, 0, 0], got = [0, 0, 0];
   while (singles.length < SINGLES[1]) {
     const open = [0, 1, 2].filter(j => at[j] < fronts[j].length);
     if (!open.length) break;
@@ -188,7 +223,7 @@ export function planFromKeys(scan, keys, { banca = 44000 } = {}) {
   const g = id => scan.games.find(x => x.fx.id === id);
   const opts = new Map(multiGames(scan.games, { now: 0 }).flatMap(m => m.options.map(o => [`${o.fixtureId}:${o.lineId}`, o])));
   const singles = keys.singles.map(([f, id, lens = 'ours']) => {
-    const x = g(f), l = (lens === 'ours' ? x?.scenario : x?.lines)?.find(s => s.id === id);
+    const x = g(f), found = (lens === 'ours' ? x?.scenario : x?.lines)?.find(s => s.id === id), l = found && lens === 'agree' ? agreeLine(found, banca) : found;
     return l && { g: x, line: l, value: lens === 'agree' ? needOf(l) : lens === 'shots' ? null : valueOf(l), lens };
   });
   const sameGame = keys.sameGame.map(([f, id]) => { const x = g(f), c = [...(x?.fav_combos || []), ...(x?.combos || [])].find(s => s.id === id); return c && { g: x, combo: c }; });
