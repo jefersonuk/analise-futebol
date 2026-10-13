@@ -45,6 +45,18 @@ function showQuota() {
   showCloud();
 }
 
+// ---- abas (Jeferson, 13/10/2026: "o app está muito confuso e poluído — separações claras"): Plano do dia, Varredura e
+// Jogo, uma de cada vez; a última aberta volta ao recarregar ----
+const TAB_KEY = 'afTab', TABS = ['plan', 'scan', 'game'];
+function showTab(t) {
+  if (!TABS.includes(t)) t = 'plan';
+  for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== t;
+  for (const b of document.querySelectorAll('#tabs [data-tab]')) { b.classList.toggle('on', b.dataset.tab === t); b.setAttribute('aria-current', b.dataset.tab === t ? 'page' : 'false'); }
+  try { localStorage.setItem(TAB_KEY, t); } catch { /* sem armazenamento */ }
+}
+$('#tabs').onclick = e => { const b = e.target.closest('[data-tab]'); if (b) { showTab(b.dataset.tab); window.scrollTo({ top: 0 }); } };
+showTab((() => { try { return localStorage.getItem(TAB_KEY); } catch { return null; } })() || 'plan');
+
 // ---- chave ----
 $('#btnKey').onclick = () => { $('#keyBox').hidden = !$('#keyBox').hidden; };
 $('#btnSaveKey').onclick = () => {
@@ -233,6 +245,7 @@ async function renderSaved() {
 $('#savedList').onclick = async e => {
   const b = e.target.closest('[data-saved]');
   if (!b || state.running) return;
+  showTab('game');
   startAction();
   const snap = await loadAnalysis(Number(b.dataset.saved));
   if (!snap) { msg('Essa análise não está mais guardada (o jogo já começou?).', true); return renderSaved(); }
@@ -509,6 +522,7 @@ $('#dash').addEventListener('click', e => {
 // ---- varredura do dia ----
 // Analisa um jogo vindo de fora da busca (varredura do dia), pelo mesmo fluxo do botão "Analisar jogo".
 async function analyzeFixture(fx, national) {
+  showTab('game');
   if (state.running) { msg('Espere a análise em andamento terminar.', true); return false; }
   state.teams = [{ id: fx.home.id, name: fx.home.name, national }];
   state.fixtures = [fx];
@@ -519,5 +533,5 @@ async function analyzeFixture(fx, national) {
   return runAnalysis();
 }
 initScan({ api, openEntry, analyzeFixture, banca: BANCA });
-initPlan({ api, openEntry, banca: BANCA });
+initPlan({ api, openEntry, analyzeFixture, banca: BANCA });
 bindSpecialist($('#btnSpec'), () => state.dossier && briefGame(state.dossier));

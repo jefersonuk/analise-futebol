@@ -144,7 +144,10 @@ test('linha do jogo: candidata primeiro, depois a mais consistente; Melhor do jo
   assert.equal(bestLine([sh, L('sotO8.5', 'Total de chutes no gol', 'sólida', 0.7)], { market: 'Chutes' }).id, 'sotO8.5');
   assert.equal(bestLine([L('gU2.5', 'Total de gols', 'âncora', 0.9), o25]).id, 'gO2.5', 'under nunca');
   assert.equal(bestLine([L('chA1.5', 'Handicap de escanteios', 'âncora', 0.9)]), null, 'handicap de escanteios fora');
-  assert.equal(bestLine([L('gO2.5', 'Total de gols', 'âncora', 0.7, { odd_min: 1.4 })]), null, 'odd mínima abaixo de 1,50 fica de fora');
+  assert.equal(bestLine([L('ahA0.5', 'Handicap asiático', 'âncora', 0.7, { odd_min: 1.4 })]), null, 'odd mínima abaixo de 1,50 fica de fora');
+  // total de gols: a partir de 1,30 (Jeferson, 13/10/2026)
+  assert.equal(bestLine([L('gO2.5', 'Total de gols', 'âncora', 0.7, { odd_min: 1.4 })]).id, 'gO2.5', 'gols a 1,40 entra');
+  assert.equal(bestLine([L('gO1.5', 'Total de gols', 'âncora', 0.7, { odd_min: 1.25 })]), null, 'gols abaixo de 1,30 fica de fora');
   assert.equal(bestLine([L('gO2.5', 'Total de gols', 'âncora', 0.7, { odd_min: 3.4, politica_e: 'não entrar' })]), null, 'acima de 3,00 também');
   assert.equal(bestLine([L('gO2.5', 'Total de gols', 'especulativa', 0.5, { p_blend: 0.58 })]), null, 'abaixo de 60% de acerto nem aparece');
 });

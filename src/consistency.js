@@ -32,9 +32,12 @@ export const TIER_ORDER = { 'âncora': 0, 'sólida': 1, 'especulativa': 2 };
 // piso da odd a tomar, não um corte da linha: numa linha de 70%+ a odd justa fica abaixo de 1,43, e a mínima passa a
 // ser o próprio 1,50 (candidata se isso ficar até 5% acima da Pinnacle). Sem a odd dela, a linha ainda é cortada.
 export const ODD_FLOOR = 1.5;
+// Piso por mercado (Jeferson, 13/10/2026: "total de gols a partir de 1,3 de odd"); o resto fica em 1,50.
+export const FLOORS = { 'Total de gols': 1.3 };
+export const floorOf = market => FLOORS[market] ?? ODD_FLOOR;
 // A mínima só está no núcleo por causa do piso e o piso fica mais de 5% acima da Pinnacle: nenhuma casa soft paga
 // (ex.: Menos de 3,5 gols a 80%, Pinnacle 1,24). Não é jogável — nem como alternativa.
-export const floorOutOfReach = l => l.odd_min <= ODD_FLOOR + 1e-9 && l.odd_min_vs_pinnacle_pct > 5;
+export const floorOutOfReach = l => l.odd_min <= floorOf(l.market) + 1e-9 && l.odd_min_vs_pinnacle_pct > 5;
 
 // ---- linhas principais do pré-jogo ----
 // Regra do Jeferson (out/2026): só over — nenhum under — e, nos escanteios, só o over do total (do jogo e do

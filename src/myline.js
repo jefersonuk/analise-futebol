@@ -4,7 +4,7 @@
 
 import { politicaE } from './model.js';
 import { renderDashboard } from './dashboard.js';
-import { HIT_MIN, floorOutOfReach, isCornerSide, isUnder, rankScore, rankTier } from './consistency.js';
+import { HIT_MIN, floorOf, floorOutOfReach, isCornerSide, isUnder, rankScore, rankTier } from './consistency.js';
 import { lineHistory, modelEntry, side, teamNames } from './dossier.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -190,7 +190,7 @@ const RELATED = [
 ];
 
 // jogável: acerto ≥ 60% (piso) e odd mínima na faixa operada, que uma casa soft alcance quando é o próprio piso
-const playable = l => l && !l.inviable && !isUnder(l.id) && !isCornerSide(l.id) && l.p_blend >= HIT_MIN && l.odd_min >= 1.5 && l.odd_min <= 3 && !floorOutOfReach(l);   // só over
+const playable = l => l && !l.inviable && !isUnder(l.id) && !isCornerSide(l.id) && l.p_blend >= HIT_MIN && l.odd_min >= floorOf(l.market) && l.odd_min <= 3 && !floorOutOfReach(l);   // só over
 const better = (a, b) => rankTier(a) - rankTier(b) || a.fragile - b.fragile || rankScore(b) - rankScore(a);
 
 export function alternatives(price, chosen, dossier) {

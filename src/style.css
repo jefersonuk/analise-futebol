@@ -273,3 +273,83 @@ svg.hist.strip { max-width: 300px; margin-top: 2px; }
 .row.markets { gap: 6px 12px; font-size: 13px; }
 .row.markets label.mk { display: inline-flex; align-items: center; gap: 5px; color: var(--text); cursor: pointer; }
 .row.markets label.mk input { width: auto; margin: 0; }
+
+/* ---- layout (Jeferson, 13/10/2026: "o app está muito confuso e poluído — separações claras"): barra do topo com as
+   abas, uma seção de cada vez, cabeçalhos curtos e as explicações recolhidas em "Como funciona" ---- */
+body { max-width: 1040px; padding: 0 16px 48px; }
+header.topbar { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 -16px 16px; padding: 10px 16px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); }
+header.topbar h1 { flex: 0 0 auto; font-size: 18px; }
+nav.tabs { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
+nav.tabs button { border: 0; background: transparent; color: var(--muted); padding: 8px 12px; border-radius: 8px; font-weight: 600; white-space: nowrap; }
+nav.tabs button:hover { color: var(--text); background: rgba(255,255,255,.04); }
+nav.tabs button.on { color: var(--text); background: var(--card); box-shadow: inset 0 -2px 0 var(--accent); }
+header.topbar #quota { font-size: 12px; }
+.pane[hidden] { display: none; }
+.card { border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+.sechead h2 { font-size: 18px; margin: 0 0 2px; }
+.sechead p { margin: 0; }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.toolbar .primary { margin-left: auto; }
+details.howto { margin: 10px 0 0; font-size: 13px; }
+details.howto > summary { cursor: pointer; color: var(--blue); }
+details.howto .howbody { margin-top: 6px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
+details.howto .howbody p { margin: 0 0 8px; }
+details.howto .howbody p:last-child { margin: 0; }
+details.howto b { color: var(--text); }
+.row.markets { padding-top: 10px; margin-top: 12px; border-top: 1px solid var(--line); }
+
+/* plano: cada parte num bloco próprio */
+.pblock { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+header.pblock-h { display: block; margin: 0 0 10px; }
+.pblock-h h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.pblock-h p { margin: 4px 0 0; }
+.count { font-size: 12px; font-weight: 700; background: var(--line); color: var(--text); border-radius: 999px; padding: 1px 9px; }
+.pblock.summary { border-left: 4px solid var(--accent); }
+.sumtop { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+.sumtop h3 { margin: 0 0 2px; font-size: 17px; }
+.sumstake { text-align: right; font-size: 14px; }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 8px; }
+.badge { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+.badge b { margin-left: 2px; }
+.badge.zero { opacity: .45; }
+.badge.sub { color: var(--muted); }
+.pblock .simbar { margin: 8px 0; padding: 8px 10px; background: var(--bg); border-radius: 8px; font-size: 13px; }
+details.funnelbox { font-size: 13px; margin: 6px 0 0; }
+details.funnelbox > summary { cursor: pointer; color: var(--muted); }
+details.funnelbox p.funnel { margin: 6px 0 0; }
+.empty-state { background: var(--card); border: 1px dashed var(--line); border-radius: 12px; padding: 18px; color: var(--muted); margin-bottom: 16px; }
+.empty-state p { margin: 0 0 6px; }
+table.plantab td { vertical-align: middle; }
+table.plantab .game { font-weight: 600; }
+table.plantab tr[data-go] { cursor: pointer; }
+table.plantab tr[data-go]:hover td { background: rgba(255,255,255,.03); }
+table.plantab :is(td, th):is(:nth-child(3), :nth-child(4)) { text-align: left; }
+.pblock .multisum { background: var(--bg); }
+
+/* o porquê de cada entrada e as outras linhas do jogo */
+.whycard { border-top: 1px solid var(--line); padding: 14px 0 6px; }
+.whyhead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.whyhead h4 { margin: 0; font-size: 15px; }
+.whytools { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; margin-top: 8px; }
+details.othlines { flex: 1 1 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+details.othlines > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+table.othtab { font-size: 13px; margin-top: 6px; }
+table.othtab tr.grp td { border-top: 2px solid var(--line); }
+table.othtab td.acts { white-space: nowrap; }
+.othchart { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.othhead { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 14px; margin-bottom: 6px; }
+@media (max-width: 640px) {
+  header.topbar h1 { font-size: 16px; }
+  nav.tabs { order: 3; flex-basis: 100%; }
+  .sumstake { text-align: left; }
+  .toolbar .primary { margin-left: 0; }
+}
+/* a barra do topo é fixa: o que a tela rola até (o porquê de cada entrada, os blocos, a análise do jogo) para abaixo dela */
+:root { --topbar-h: 64px; }
+@media (max-width: 640px) { :root { --topbar-h: 108px; } }
+.pblock, .whycard, details.othlines, .othchart, #out, .card, .simcard { scroll-margin-top: calc(var(--topbar-h) + 8px); }
+/* no celular a tabela das outras linhas rola dentro do quadro, sem esticar o cartão */
+.whytools > *, details.othlines, .othbody, .pblock, .whycard { min-width: 0; }
+details.othlines .scroll { max-width: 100%; }

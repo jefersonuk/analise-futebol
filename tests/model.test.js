@@ -135,7 +135,7 @@ test('escanteios 1º tempo: total ancorado na Pinnacle e handicap coerente', () 
 import { diffDist, impliedCornerDiff, marketSupremacy, CORNERS_PER_GOAL } from '../src/model.js';
 import { inviableReason, priceLines, isCandidate } from '../src/dossier.js';
 import { recentGames } from '../src/insights.js';
-import { isQuarter } from '../src/consistency.js';
+import { isQuarter, floorOf } from '../src/consistency.js';
 
 test('handicap de escanteios da Pinnacle: a diferença implícita volta ao valor que gerou o preço', () => {
   for (const D of [-2.5, -0.8, 0, 1.3, 3]) {
@@ -179,7 +179,7 @@ test('favorito pelo 1X2 leva os escanteios: a divisão segue o mercado, o total 
   assert.ok(res.all.find(l => l.id === 'c1hA1.5').pWin > 0.75, 'e o favorito +1,5 no 1T fica com acerto alto (odd de mercado baixa)');
 });
 
-test('piso de acerto: sólida só com 60%+, âncora com 70%+ e, com odd da Pinnacle, odd mínima nunca abaixo de 1,50', () => {
+test('piso de acerto: sólida só com 60%+, âncora com 70%+ e, com odd da Pinnacle, odd mínima nunca abaixo do piso (1,50; gols 1,30)', () => {
   const ms = cornersLeague(), h = ms[0].h, a = ms[1].a, t = ms[ms.length - 1].t + 864e5;
   const fair = fairOf([...x12(6.302, 5.124, 1.509), ['gO1.5', 0.78], ['gU1.5', 0.22], ['gO2.5', 0.58], ['gU2.5', 0.42]]);
   const odds = new Map([...fair].map(([id, p]) => [id, 1 / (p * 1.03)]));   // Pinnacle com 3% de margem
@@ -187,13 +187,14 @@ test('piso de acerto: sólida só com 60%+, âncora com 70%+ e, com odd da Pinna
   const teams = [['home', h], ['away', a]].map(([role, id]) => ({ role, name: role, games: recentGames(res.prep, id) }));
   const { priced, anchored } = priceLines(res, { odds, fair, alerts: [], teams });
   const all = priced.concat(anchored);
-  assert.ok(all.filter(l => l.priced_by === 'pinnacle').every(l => l.odd_min >= 1.5));
-  assert.ok(all.filter(l => l.odd_min < 1.5).every(l => !isCandidate(l)), 'sem a Pinnacle, justa abaixo de 1,43 continua fora');
+  assert.ok(all.filter(l => l.priced_by === 'pinnacle').every(l => l.odd_min >= floorOf(l.market)));
+  assert.ok(all.filter(l => l.odd_min < floorOf(l.market)).every(l => !isCandidate(l)), 'sem a Pinnacle, justa abaixo do piso continua fora');
   assert.ok(all.every(l => l.tier === 'especulativa' || l.p_blend >= 0.6), 'nada abaixo de 60% passa de especulativa');
   assert.ok(all.every(l => l.tier !== 'âncora' || l.p_blend >= 0.7), 'âncora só com 70%+');
   const o15 = priced.find(l => l.id === 'gO1.5'), o25 = priced.find(l => l.id === 'gO2.5');
-  assert.equal(o15.odd_min, 1.5, 'linha de ~78%: a justa fica perto de 1,28 e a mínima é o piso do núcleo');
-  assert.ok(o15.odd_min_vs_pinnacle_pct > 5 && !isCandidate(o15), 'e 1,50 fica longe demais da Pinnacle (1,25) para ser candidata');
+  // linha de ~78%: a justa fica perto de 1,28; no total de gols o piso é 1,30 (13/10/2026), então a mínima é a justa × 1,03
+  assert.equal(o15.odd_min, Math.round(Math.max(1.3, 1.03 / o15.p_blend) * 100) / 100);
+  assert.ok(o15.odd_min_vs_pinnacle_pct > 5 && !isCandidate(o15), 'e ela fica mais de 5% acima da Pinnacle (1,25): não é candidata');
   assert.ok(o25.p_blend < 0.6 && o25.tier === 'especulativa' && !isCandidate(o25), 'over 2,5 a ~58% fica abaixo do piso');
 });
 

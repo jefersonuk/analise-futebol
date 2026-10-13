@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
-import { ODDS, PER_LEAGUE, SAME_GAME, SINGLES, buildPlan, planFromKeys, planKeys, planText, valueOf } from '../src/plan.js';
+import { PER_LEAGUE, SAME_GAME, SINGLES, buildPlan, planFromKeys, planKeys, planText, valueOf } from '../src/plan.js';
+import { alvoOf } from '../src/scenario.js';
 import { buildPlanSim } from '../src/sim.js';
 import { scanDay } from '../src/scanner.js';
 
@@ -20,7 +21,7 @@ const G = ({ h = 14, lg = 1, single = null, cond = false, combo = null, over = n
     lines: over ? [{ id: 'gO1.5', market: 'Total de gols', line: 'Mais de 1,5', p_blend: over, p_pinnacle: over, pinnacle_odd: +(1 / over / 1.025).toFixed(2), context: { verdict: 'neutro', signals: [] } }] : [] };
 };
 
-test('simples: as apostas da nossa análise pelo valor conservador; fora "entrar se…", jogo difícil e odd fora de 1,80–2,70; até 5 por liga e 10 no total', () => {
+test('simples: as apostas da nossa análise pelo valor conservador; fora "entrar se…", jogo difícil e odd fora da faixa do mercado; até 5 por liga e 10 no total', () => {
   id = 0;
   const games = [
     ...Array.from({ length: 7 }, (_, i) => G({ lg: 1, single: [0.56 + i * 0.01, 0.48, 2.05] })),   // liga 1: sete, só 5 entram
@@ -31,7 +32,7 @@ test('simples: as apostas da nossa análise pelo valor conservador; fora "entrar
   assert.equal(plan.singles.length, SINGLES[1]);
   assert.equal(PER_LEAGUE, 5);
   assert.equal(plan.singles.filter(x => x.g.fx.league.id === 1).length, PER_LEAGUE);
-  assert.ok(plan.singles.every(x => x.line.bet && !x.line.conditional && x.line.pinnacle_odd >= ODDS[0] && x.line.pinnacle_odd <= ODDS[1] && !x.g.hard));
+  assert.ok(plan.singles.every(x => x.line.bet && !x.line.conditional && x.line.pinnacle_odd >= alvoOf(x.line.market)[0] && x.line.pinnacle_odd <= alvoOf(x.line.market)[1] && !x.g.hard));
   assert.ok(plan.singles.slice(1).every((x, i) => x.g.fx.t >= plan.singles[i].g.fx.t), 'em ordem de horário');
   assert.equal(valueOf({ p_nossa: 0.6, p_pinnacle: 0.5, pinnacle_odd: 2 }), 0.1);
 });
@@ -64,7 +65,7 @@ test('um jogo uma vez só; mesmo jogo e múltiplas nos jogos que sobraram; jogo 
   assert.deepEqual(again.sameGame.map(x => x.combo.id), plan.sameGame.map(x => x.combo.id));
   // texto para copiar e a simulação do plano
   const txt = planText(plan, { dateLabel: 'sexta, 09/10' });
-  assert.match(txt, /^PLANO sexta, 09\/10\n\nSIMPLES \(1\)\n1\. .* — F1 \+0,5 · odd ≥ [\d,]+ \(Pinnacle 2,00\) · R\$ 150/);
+  assert.match(txt, /^PLANO sexta, 09\/10 · entrada 10 € em cada\n\nSIMPLES \(1\)\n1\. .* — F1 \+0,5 · odd ≥ [\d,]+ \(Pinnacle 2,00\) · /);
   assert.match(txt, /MÚLTIPLA 1 \(\d pernas\) · odd total ≥ [\d,]+ · acerta tudo \d+%/);
   assert.match(txt, /MESMO JOGO \(5\)/);
   const sim = buildPlanSim(plan);
@@ -242,15 +243,18 @@ test('mercados e ligas marcados: só handicap, escanteios e chutes; chutes como 
     p_model_range: [0.64, 0.78], hit_rate_last10: 0.75, history: { home: { wins: 7, n: 10 }, away: { wins: 6.4, n: 9.6 } }, ...extra });
   const mk = (lg, lines, extra = {}) => { const g = G({ lg }); g.fx.league = lg === 39 ? big : { id: lg, name: `Liga ${lg}` }; g.lines = lines; return Object.assign(g, extra); };
   const games = [
-    mk(39, [line('gO2.5', 'Total de gols')]),                    // gols: desmarcado no padrão
+    mk(39, [line('gO2.5', 'Total de gols')]),                    // gols: marcado no padrão desde 13/10 (🤝)
     mk(39, [line('cornersO9.5', 'Total de escanteios')]),         // escanteios: entra (🤝)
     mk(39, [shots()]),                                            // chutes em liga grande: entra (📊)
     mk(7, [shots()]),                                             // chutes em liga menor: fora
     mk(8, [line('cornersO9.5', 'Total de escanteios')]),          // liga menor: fora com "só as grandes"
   ];
   const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: PLAN_DEFAULT, big: true });
-  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]).sort(), [[2, 'agree'], [3, 'shots']]);
+  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]).sort(), [[1, 'agree'], [2, 'agree'], [3, 'shots']]);
   assert.equal(plan.stats.small, 2, 'dois jogos de ligas menores');
+  // sem gols marcado, o jogo 1 fica fora
+  const noGoals = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: PLAN_DEFAULT.filter(k => k !== 'Total de gols'), big: true });
+  assert.ok(!noGoals.singles.some(x => x.g.fx.id === 1));
   assert.match(LENS.shots, /chutes/);
   // sem "só as grandes": a liga menor entra nos escanteios, mas chutes continuam só em liga grande
   const all = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: PLAN_DEFAULT, big: false });
@@ -260,7 +264,7 @@ test('mercados e ligas marcados: só handicap, escanteios e chutes; chutes como 
   assert.ok(only.singles.every(x => x.line.market === 'Total de escanteios') && !only.sameGame.length && !only.multis.length);
   // guardado e refeito com a frente 📊; na simulação, chutes na justa do modelo com 5% (sem a Pinnacle)
   const back = planFromKeys({ games }, planKeys(plan));
-  assert.deepEqual(back.singles.map(x => x.lens).sort(), ['agree', 'shots']);
+  assert.deepEqual(back.singles.map(x => x.lens).sort(), ['agree', 'agree', 'shots']);
   assert.deepEqual(back.markets, PLAN_DEFAULT); assert.equal(back.big, true);
   const b = buildPlanSim(plan).bets.find(x => x.cat === 'Plano: simples (chutes)');
   assert.equal(b.odd_src, 'modelo est.'); assert.equal(b.odd, Math.round(100 / (0.71 * 1.05)) / 100);
@@ -348,4 +352,20 @@ test('🤝 acordo (revisão de 13/10): alvo = justa + 2% (piso 1,50) até 8% aci
   const p2 = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games: mix }, { now: NOW });
   const count = k => p2.singles.filter(x => x.lens === k).length;
   assert.deepEqual([p2.singles.length, count('agree'), count('shots'), count('ours')], [10, 4, 3, 3]);
+});
+
+test('faixa da 🎯 por mercado (13/10): 1X2 e handicap a partir de 1,70, total de gols a partir de 1,30, teto 2,70', () => {
+  id = 0;
+  assert.deepEqual([alvoOf('1X2'), alvoOf('Handicap asiático'), alvoOf('Total de gols')], [[1.7, 2.7], [1.7, 2.7], [1.3, 2.7]]);
+  const one = (market, lid, odd, p = 0.66) => { const g = G({ lg: 70 + id }); g.scenario = [{ id: lid, market, line: lid, bet: true, conditional: false,
+    p_nossa: p, p_pinnacle: 1 / odd / 1.03, pinnacle_odd: odd, odd_min: 1.05 / p, entry_brl: 100 }]; return g; };
+  const games = [
+    one('Handicap asiático', 'ahA0.5', 1.74),          // 1,74: entra (antes só de 1,80)
+    one('1X2', '1', 1.72),                               // 1X2 a 1,72: entra
+    one('Handicap asiático', 'ahA1', 1.66),             // abaixo de 1,70: fora
+    one('Total de gols', 'gO1.5', 1.36, 0.8),           // gols a 1,36: entra (piso 1,30)
+    one('Total de gols', 'gO1.5', 1.25, 0.86),          // abaixo de 1,30: fora
+  ];
+  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games }, { now: NOW });
+  assert.deepEqual(plan.singles.map(x => x.g.fx.id).sort(), [1, 2, 4]);
 });

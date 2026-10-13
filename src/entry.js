@@ -12,22 +12,27 @@ const BANKS = new Set(['binance', 'pipay', 'metamask', 'nubank', 'inter', 'itaú
 // contas internas do app de apostas ("Em arbitragem", "Em apostas de valor", "Em middles"): não são casas
 const notHouse = name => BANKS.has(name.trim().toLowerCase()) || /^em\s/i.test(name.trim());
 
+import { MAIN_HOUSE, STAKE } from './stake.js';
+
 export const SYMBOL = { BRL: 'R$', USD: 'US$', EUR: '€' };
 const key = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // Casas (sem bancos, carteiras e contas internas), saldo na moeda da casa, cotações (R$ por US$ e por €)
-// e stake do Modelo F (em R$) do app de apostas.
+// e stake do Modelo F (em R$) do app de apostas. A casa principal (stake.js: Sportmarket) vem primeiro — a escolhida ao
+// abrir o formulário —, mesmo antes de ter saldo no app de apostas (aí em €, sem saldo).
+const isMain = name => key(name).startsWith(key(MAIN_HOUSE));
+const withMain = houses => (houses.some(h => isMain(h.name)) ? houses : [{ name: MAIN_HOUSE, value: null, currency: STAKE.cur, limited: false, missing: true }, ...houses]);
 export function betsApp() {
   let st = null;
   try { st = JSON.parse(localStorage.getItem(BETS_KEY)); } catch { /* sem dados */ }
-  if (!st) return { found: false, houses: [], stake: null, rates: { BRL: 1, USD: null, EUR: null } };
+  if (!st) return { found: false, houses: withMain([]), stake: null, rates: { BRL: 1, USD: null, EUR: null } };
   const lim = (st.cfg?.casasLimitadas || []).map(key).filter(Boolean);
   const houses = (st.balances || [])
     .filter(b => b.name && !notHouse(b.name))
     .map(b => ({ name: b.name.trim(), value: Number(b.value) || 0, currency: b.currency || 'BRL',
       limited: lim.some(l => key(b.name) === l || key(b.name).startsWith(l)) }))
-    .sort((a, b) => a.limited - b.limited || b.value - a.value);
-  return { found: true, houses, stake: st.cfg?.modelo?.stake > 0 ? st.cfg.modelo.stake : 300,
+    .sort((a, b) => isMain(b.name) - isMain(a.name) || a.limited - b.limited || b.value - a.value);
+  return { found: true, houses: withMain(houses), stake: st.cfg?.modelo?.stake > 0 ? st.cfg.modelo.stake : 300,
     rates: { BRL: 1, USD: st.usdRate > 0 ? st.usdRate : null, EUR: st.eurRate > 0 ? st.eurRate : null } };
 }
 
@@ -36,7 +41,7 @@ const MARKET = {
   'Ambas marcam': 'Ambas Marcam', 'Total de escanteios': 'Escanteios', 'Escanteios por time': 'Escanteios',
   'Total escanteios 1T': 'Escanteios', 'Handicap escanteios 1T': 'Escanteios', 'Handicap de escanteios': 'Escanteios',
   'Resultado escanteios': 'Escanteios', 'Resultado escanteios 1T': 'Escanteios', 'Corrida de escanteios': 'Escanteios', 'Total de chutes': 'Total de Chutes',
-  'Total de chutes no gol': 'Total de Chutes', Combo: 'Combo (criar aposta)', 'Múltipla': 'Múltipla',
+  'Total de chutes no gol': 'Total de Chutes', Combo: 'Combo (criar aposta)', 'Múltipla': 'Múltipla', 'Resultado 1º tempo': '1X2 / Resultado',
 };
 
 const localStr = t => { const d = new Date(t); return new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 16); };

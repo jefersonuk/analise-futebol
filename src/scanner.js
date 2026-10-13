@@ -29,11 +29,12 @@ import { collect } from './odds.js';
 import { recentGames } from './insights.js';
 import { FRIENDLIES, byConsistency, contraAlert, favorSummary, isBet, priceLines, rolesNow, seasonsFor } from './dossier.js';
 import { favorFor } from './favoritism.js';
-import { GOAL_HANDICAP, HIT_MIN, MAIN_LINES, SHOTS, floorOutOfReach, isMain, isMainLine, underOk } from './consistency.js';
+import { GOAL_HANDICAP, HIT_MIN, MAIN_LINES, SHOTS, floorOf, floorOutOfReach, isMain, isMainLine, underOk } from './consistency.js';
 import { buildContext } from './context.js';
 import { livePlanOf } from './live.js';
 import { hardGame } from './hard.js';
 import { comboLines, favWinCombos } from './combos.js';
+import { favHalfWin } from './favhalf.js';
 import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
 import { loadClubs } from './clubs.js';
 import { MULTI, multiLegs } from './multiple.js';
@@ -93,9 +94,9 @@ async function teamPool(api, fixtures, S, onProgress) {
 const r2 = x => Math.round(x * 100) / 100;
 
 // jogável: acerto ≥ 60% (piso do Jeferson: abaixo disso a linha nem aparece), odd mínima na faixa operada
-// (1,50–3,00) e que uma casa soft alcance quando é o próprio piso, linha que o mercado oferece (não "favorito +x")
-// e nenhum under (só over, regra do Jeferson)
-const playable = l => l.p_blend >= HIT_MIN && l.odd_min >= 1.5 && !floorOutOfReach(l) && politicaE(l.odd_min).factor > 0 && !l.inviable && underOk(l);
+// (1,50–3,00; no total de gols, a partir de 1,30) e que uma casa soft alcance quando é o próprio piso, linha que o
+// mercado oferece (não "favorito +x") e nenhum under (só over, regra do Jeferson)
+const playable = l => l.p_blend >= HIT_MIN && l.odd_min >= floorOf(l.market) && !floorOutOfReach(l) && politicaE(l.odd_min).factor > 0 && !l.inviable && underOk(l);
 // Melhor linha de um jogo: maior chance de ganho — aposta (candidata âncora/sólida, preço que a casa paga, sem
 // contexto contra) primeiro; senão a mais consistente jogável. market: um mercado ou null (todos os da varredura).
 export function bestLine(lines, { market = null, markets = null } = {}) {
@@ -139,6 +140,8 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
   const combos = comboLines({ res, fair, teams, names, banca, hard });
   // e a vitória do favorito + gols, para o "mesmo jogo" do Plano do dia
   const favCombos = favWinCombos({ res, fair, teams, names, banca, hard });
+  // e a vitória do favorito no 1º tempo (jogo de favoritismo alto), para o Plano do dia
+  const favHalf = favHalfWin({ res, fair, odds, teams, names, banca, hard });
   // nossa análise: as linhas de gols da Pinnacle (1X2, handicap, over) pela nossa leitura, com as condições do jogo
   // (entrar se…: escalação de time de base, copa, dúvida); a Pinnacle como segunda opinião
   const conditions = conditionsOf({ fx, hard, injuries: extra.injuries || [], clubs: extra.clubs || null });
@@ -146,7 +149,7 @@ function analyze(fx, matches, oddsP, banca, teamBase = false, favor = null, extr
     { banca, hard, conditions }).slice(0, 6);
   const a = res.anchors, h1 = !noCorners;
   return {
-    fx, teams, lines, best, combos, fav_combos: favCombos, scenario, conditions, injuries: extra.injuries || null, alerts, odds_age_min: ageMin, team_base: teamBase, no_corners: noCorners,
+    fx, teams, lines, best, combos, fav_combos: favCombos, fav_half: favHalf, scenario, conditions, injuries: extra.injuries || null, alerts, odds_age_min: ageMin, team_base: teamBase, no_corners: noCorners,
     favor: res.favor && Object.fromEntries(Object.entries(res.favor).map(([k, v]) => [k, typeof v === 'number' ? r2(v) : v])),
     favor_text: favorSummary(res.favor, names),
     c1_known: teams.map(t => t.games.filter(g => g.c1).length),
@@ -333,6 +336,8 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
     }
     const fp = g => Math.max(0, ...(g.fav_combos || []).map(c => c.p_blend));
     if (want(COMBOS)) for (const g of games.filter(g => g.fav_combos?.length).sort((a, b) => fp(b) - fp(a)).slice(0, top)) keep.add(g);
+    // e os jogos de favoritismo alto com a vitória do favorito no 1º tempo cotada (favhalf.js)
+    if (want(COMBOS)) for (const g of games.filter(g => g.fav_half?.pinnacle_odd).sort((a, b) => b.fav_half.p_fav_ft - a.fav_half.p_fav_ft).slice(0, top)) keep.add(g);
     return keep;
   };
   // 3ª passada: confronto direto em todas as competições (API) dos jogos guardados e clássico (cidade dos dois times,

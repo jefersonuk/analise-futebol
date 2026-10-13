@@ -142,10 +142,10 @@ export function briefMulti(scan, tickets = []) {
 
 // Plano do dia (plan.js): as entradas escolhidas e os jogos delas com o contexto, como na varredura.
 export function briefPlan(scan, plan) {
-  const ids = new Set([...plan.singles.map(x => x.g.fx.id), ...plan.sameGame.map(x => x.g.fx.id), ...plan.multis.flatMap(t => t.legs.map(l => l.fixtureId))]);
+  const ids = new Set([...plan.singles.map(x => x.g.fx.id), ...plan.sameGame.map(x => x.g.fx.id), ...(plan.halves || []).map(x => x.g.fx.id), ...plan.multis.flatMap(t => t.legs.map(l => l.fixtureId))]);
   const base = briefScan(scan, scan.games.filter(g => ids.has(g.fx.id)).sort((a, b) => a.fx.t - b.fx.t).map(g => ({ g, line: null })), { market: 'plano do dia' });
   const jogo = g => `${g.fx.home.name} x ${g.fx.away.name}`, iso = t => new Date(t).toISOString();
-  return { ...base, filter: 'plano do dia (5 a 10 simples, 2 múltiplas, 5 no mesmo jogo; para apostar na noite anterior)',
+  return { ...base, filter: 'plano do dia (5 a 10 simples, até 3 favoritos no 1º tempo, 5 no mesmo jogo, 2 múltiplas; entrada de 10 € em cada; para apostar na noite anterior)',
     plan: {
       mercados: plan.markets || 'todos', ligas: plan.big ? 'só as grandes' : 'todas',
       simples: plan.singles.map(({ g, line, value, lens }) => ({ jogo: jogo(g), kickoff: iso(g.fx.t), competicao: g.fx.league.name, linha: line.line, mercado: line.market,
@@ -157,12 +157,15 @@ export function briefPlan(scan, plan) {
             acerto_mandante_na_linha: line.history?.home?.n ? Math.round(100 * line.history.home.wins / line.history.home.n) / 100 : null,
             acerto_visitante_na_linha: line.history?.away?.n ? Math.round(100 * line.history.away.wins / line.history.away.n) / 100 : null }
           : { valor_conservador: value, de_onde_vem: line.why }),
-        entrada_brl: line.entry_brl })),
+      })),
       multiplas: plan.multis.map((t, i) => ({ bilhete: i + 1, pernas: t.n, p_acertar_todas: t.p_all, p_pinnacle_todas: t.p_pinnacle_all, odd_justa: t.fair,
         odd_minima: t.min, odd_pinnacle: t.odd, legs: t.legs.map(l => ({ jogo: `${l.home} x ${l.away}`, kickoff: iso(l.kickoff), linha: l.line, p: l.p,
           ...(l.asian ? { asiatica: true, p_cheia: l.p_win } : {}), minima: l.min })) })),
       mesmo_jogo: plan.sameGame.map(({ g, combo }) => ({ jogo: jogo(g), kickoff: iso(g.fx.t), competicao: g.fx.league.name, combo: combo.line, p: combo.p_blend,
-        p_pinnacle: combo.p_pinnacle, odd_minima: combo.odd_min, entrada_brl: combo.entry_brl })),
+        p_pinnacle: combo.p_pinnacle, odd_minima: combo.odd_min })),
+      favorito_1_tempo: (plan.halves || []).map(({ g, line }) => ({ jogo: jogo(g), kickoff: iso(g.fx.t), competicao: g.fx.league.name, linha: line.line,
+        p_favorito_vencer_o_jogo: line.p_fav_ft, p: line.p_blend, p_pinnacle: line.p_pinnacle, p_modelo_1t: line.p_model, odd_pinnacle: line.pinnacle_odd,
+        odd_minima: line.odd_min, acerto_ultimos_10: line.hit_rate_last10 })),
     } };
 }
 

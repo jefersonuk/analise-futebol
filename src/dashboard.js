@@ -76,6 +76,13 @@ function spec(id, role, teamName) {
     return { what: `saldo de gols do ${teamName}`, value: gd, calc: diffCalc('goals'), x: v => (same ? v : -v), off: h, threshold: same ? -h : h };
   };
   if ((m = id.match(/^ah([HA])(.+)$/))) return ah(m[1], +m[2]);
+  // resultado do 1º tempo (favhalf.js): pelo saldo do placar do intervalo
+  if ((m = id.match(/^1T([12X])$/))) {
+    const gd1 = g => (g.g1 ? g.g1[0] - g.g1[1] : null), what = `saldo de gols no 1º tempo do ${teamName}`;
+    if (m[1] === 'X') return { what, value: gd1, calc: diffCalc('g1'), x: v => -Math.abs(v), off: 0.5, threshold: 0, rule: 'só com saldo 0 (empate no intervalo)' };
+    const same = (m[1] === '1') === (role === 'home');
+    return { what, value: gd1, calc: diffCalc('g1'), x: v => (same ? v : -v), off: -0.5, threshold: same ? 0.5 : -0.5 };
+  }
   if (id === '1') return ah('H', -0.5);
   if (id === '2') return ah('A', -0.5);
   if (id === 'X') return { what: `saldo de gols do ${teamName}`, value: gd, calc: diffCalc('goals'), x: v => -Math.abs(v), off: 0.5, threshold: 0, rule: 'só com saldo 0 (empate)' };

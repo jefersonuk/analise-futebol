@@ -6,6 +6,8 @@
 //   🤝 acordo           a Pinnacle, o modelo e o histórico juntos, e as checagens da linha (mando, médias, confronto
 //                       direto, tabela, cenário);
 //   mesmo jogo          as pernas, o quanto pagam a mais que a melhor perna sozinha e o combo nos últimos jogos;
+//   ⏱️ favorito 1º tempo o favoritismo no jogo, a chance de vencer o 1º tempo (Pinnacle, modelo, histórico) e o
+//                       resultado do 1º tempo nos últimos jogos de cada time;
 //   perna de múltipla   a chance, o esperado de gols e a linha nos últimos jogos dos dois times.
 // Os motivos vêm com sinal: ＋ a favor, － contra, · fato do jogo. Gráficos: a chance por fonte contra a que a odd
 // exige, e os últimos jogos de cada time na linha (os gráficos da varredura; no combo e na perna, a faixa compacta).
@@ -127,6 +129,26 @@ export function comboWhy(g, c) {
       ['Últimos 10 jogos', hit, false, 'o combo nos últimos 10 jogos dos dois times, com o placar visto como o de hoje'], ['Chance do combo', c.p_blend, true, 'a Pinnacle com 10% do modelo']],
     mark: [1 / c.odd_min, `a mínima ${n2(c.odd_min)} exige`],
     reasons: [...legs, ...reading(g), ...facts(g, 'Total de gols')] };
+}
+// ⏱️ o favorito no 1º tempo: o quanto ele é favorito no jogo e a chance de vencer o 1º tempo por fonte
+export function halfWhy(g, x) {
+  const l = x.line, hit = l.hit_rate_last10 ?? null, fav = l.side === '2' ? g.fx.away.name : g.fx.home.name, need = l.odd_min_vs_pinnacle_pct;
+  const summary = `${fav} vence o jogo em ${pct(l.p_fav_ft)} pela Pinnacle — favoritismo alto, a vitória no jogo paga pouco. No 1º tempo: acerta ${pct(l.p_blend)}`
+    + ` — Pinnacle ${pct(l.p_pinnacle)}${l.p_model != null ? `, nosso modelo do 1º tempo ${pct(l.p_model)}` : ''}${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}. `
+    + `O alvo ${n2(l.odd_min)} (a justa + 2%, nunca abaixo de 1,70) exige ${pct(1 / l.odd_min)}; ${need > 0 ? `a casa precisa pagar ${pc1(need / 100)} acima da Pinnacle (${n2(l.pinnacle_odd)})` : `a própria Pinnacle já paga ${n2(l.pinnacle_odd)}`}.`;
+  const e = g.context?.expected?.goals;
+  return { summary,
+    bars: [['Pinnacle', l.p_pinnacle, false, 'a chance da Pinnacle no resultado do 1º tempo, sem a margem dela'], ['Modelo 1º tempo', l.p_model, false, 'o placar do intervalo pelos gols esperados de cada time no 1º tempo'],
+      ['Últimos 10 jogos', hit, false, 'quanto a aposta teria acertado nos últimos 10 jogos dos dois times'], ['Chance', l.p_blend, true, 'a Pinnacle com 10% do modelo']],
+    mark: [1 / l.odd_min, `o alvo ${n2(l.odd_min)} exige`],
+    reasons: [...(e?.total != null ? [R(0, `Esperado no jogo: ${n1(e.total)} gols (${g.fx.home.name} ${n1(e.home)} x ${n1(e.away)} ${g.fx.away.name}).`)] : []),
+      ...reading(g), ...facts(g, 'Total de gols')],
+    chartLine: l };
+}
+export function halfBody(g, x) {
+  const w = halfWhy(g, x);
+  return `<p class="whysum">${esc(w.summary)}</p><div class="whygrid">${chanceChart(w.bars, w.mark)}${reasonsHtml(w.reasons)}</div>
+    ${g.teams?.length ? `<div class="teams">${teamCharts(w.chartLine, g.teams)}</div>` : ''}`;
 }
 // o combo nos últimos jogos de um time, com o placar visto como o de hoje (o time no lado em que joga hoje)
 export function comboStrip(c, t, names) {
