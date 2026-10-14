@@ -16,8 +16,8 @@
 // justa abaixo de 1,43 (a dupla chance do favorito + mais de 1,5, ~1,25) não aparece — "impossível achar a 1,50"
 // (Jeferson, 09/10/2026); antes o piso de 1,50 o mostrava como aposta.
 //
-// Para o Plano do dia (favWinCombos): a vitória do favorito + mais de 1,5 ou de 2,5 gols, com a chance que tiver (fica
-// perto de 2, onde a casa paga).
+// Para o Plano do dia (favWinCombos): a vitória do favorito + mais de 1,5, 2,5 ou 3,5 gols, com a chance que tiver (fica
+// perto de 2, onde a casa paga; o + 3,5 só sai a preço jogável com favorito muito forte em jogo de muitos gols).
 
 import { SCENARIOS, impliedTotal, marketSupremacy, politicaE, roleOf, scoreGrid, stakeFor } from './model.js';
 import { HIT_MIN, ODD_FLOOR, consistency } from './consistency.js';
@@ -149,13 +149,13 @@ export function comboLines({ res, fair, teams, names, banca = 44000, hard = null
   return out.sort((a, b) => TIER[a.tier] - TIER[b.tier] || b.consistency_score - a.consistency_score || b.odd_min - a.odd_min).slice(0, KEEP);
 }
 
-// A vitória do favorito (pelo 1X2 da Pinnacle) + mais de 1,5 e + mais de 2,5 gols, com a chance que tiverem: o "mesmo
-// jogo" do Plano do dia escolhe entre eles (plan.js). fav: true.
+// A vitória do favorito (pelo 1X2 da Pinnacle) + mais de 1,5, 2,5 e 3,5 gols, com a chance que tiverem, do mais provável
+// ao menos: o "mesmo jogo" do Plano do dia escolhe entre eles (plan.js). fav: true.
 export function favWinCombos({ res, fair, teams, names, banca = 44000, hard = null }) {
   const grids = gridsOf({ res, fair, hard });
   if (!grids) return [];
   const fav = fair.get('1') >= fair.get('2') ? '1' : '2';
-  return [1.5, 2.5].map(L => comboAt(grids, fav, L, { teams, names, banca })).filter(Boolean).map(c => ({ ...c, fav: true }));
+  return GOALS.map(L => comboAt(grids, fav, L, { teams, names, banca })).filter(Boolean).map(c => ({ ...c, fav: true }));
 }
 
 // Liquidação no placar final: 'A' (as duas ganharam), 'RED', ou manual quando o empate anula volta e a de gols ganha.

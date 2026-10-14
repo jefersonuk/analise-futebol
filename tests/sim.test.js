@@ -9,7 +9,8 @@ const L = (id, market, extra = {}) => ({ id, market, line: id, tier: 'âncora', 
   odd_min_vs_pinnacle_pct: 0, p_blend: 0.7, p_pinnacle: 0.68, entry_brl: 200, context: { verdict: 'neutro', signals: [] }, ...extra });
 const G = (id, extra = {}) => ({ fx: { id, t: T0 + H, home: { id: id * 10, name: `C${id}` }, away: { id: id * 10 + 1, name: `F${id}` }, league: { name: 'Liga' } }, lines: [], ...extra });
 const scan = { generated_at: new Date(T0).toISOString(), games: [
-  G(1, { scenario: [{ id: 'ahA0.5', market: 'Handicap asiático', line: 'F1 +0,5', bet: true, p_nossa: 0.55, p_blend: 0.55, p_pinnacle: 0.48, pinnacle_odd: 2.05, entry_brl: 150 }],
+  // nossa leitura 7 pp acima da Pinnacle: contra ela (metade da entrada)
+  G(1, { scenario: [{ id: 'ahA0.5', market: 'Handicap asiático', line: 'F1 +0,5', bet: true, contra: true, p_nossa: 0.55, p_blend: 0.55, p_pinnacle: 0.48, pinnacle_odd: 2.05, entry_brl: 150 }],
     // gols: a Pinnacle cota (1,42 a 68%: margem de 3,6%); escanteios: derivada do total dela; chutes: só do modelo
     lines: [L('gO2.5', 'Total de gols', { pinnacle_odd: 1.42 }), L('cornersO9.5', 'Total de escanteios', { derived: true, pinnacle_odd: null, p_pinnacle: 0.6 }),
       L('shotsO24.5', 'Total de chutes', { model_only: true, p_pinnacle: null })] }),
@@ -29,13 +30,16 @@ test('entradas: o que cada aba propôs, na odd da Pinnacle (onde ela não cota, 
   // chutes (a Pinnacle não cota): a justa do nosso modelo (70%) com a margem de uma casa, 5% — abaixo da mínima (1,60)
   assert.equal(by('Chutes|1').odd_src, 'modelo est.'); assert.equal(by('Chutes|1').odd, 1.36);
   // combo: a justa pela chance da Pinnacle (68%) com a margem dela nas duas pernas (sem linha cotada no jogo: 3%)
-  assert.equal(by('Combo|2').odd, 1.39); assert.equal(by('Combo|2').odd_src, 'pinnacle est.'); assert.equal(by('nossa análise: entrar se…|2').stake_brl, 10, 'a entrada padrão (10 €), não a do app');
+  assert.equal(by('Combo|2').odd, 1.39); assert.equal(by('Combo|2').odd_src, 'pinnacle est.');
+  // a entrada (stake.js), não a do app: 20 € a favor da Pinnacle, 10 € contra
+  assert.equal(by('nossa análise: entrar se…|2').stake_brl, 20); assert.equal(by('nossa análise: aposta|1').stake_brl, 10, 'contra a Pinnacle: metade');
+  assert.equal(by('Gols|1').stake_brl, 20); assert.equal(by('Chutes|1').stake_brl, 20, 'chutes: a Pinnacle não cota, entrada cheia'); assert.equal(by('Combo|2').stake_brl, 20);
   assert.equal(buildSim(scan).cur, 'EUR');
   assert.ok(!sim.bets.some(b => b.fixtureId === 3), 'especulativa não é proposta');
   assert.equal(sim.id, String(T0));
 });
 
-test('liquidação: resultados, unidades, dinheiro (10 € por entrada), CLV; aberto até o jogo acabar; cancelado anula', async () => {
+test('liquidação: resultados, unidades, dinheiro (20 € a favor da Pinnacle, 10 € contra), CLV; aberto até o jogo acabar; cancelado anula', async () => {
   const sim = buildSim(scan);
   const fixtures = new Map([[1, { finished: true, score: 'C1 1–1 F1', game: {} }], [2, { finished: false, long: 'Second Half' }]]);
   const RESULT = { 'ahA0.5': 'A', 'gO2.5': 'RED', 'cornersO9.5': 'A', 'shotsO24.5': 'RED' };
@@ -44,7 +48,8 @@ test('liquidação: resultados, unidades, dinheiro (10 € por entrada), CLV; ab
   const r = await settleSim(sim, io);
   assert.deepEqual(r, { settled: 4, pending: 2 });
   const b = k => sim.bets.find(x => x.key.startsWith(k));
-  assert.equal(b('nossa análise: aposta|1').profit_u, 1.05); assert.equal(b('nossa análise: aposta|1').profit_brl, 10.5);
+  assert.equal(b('nossa análise: aposta|1').profit_u, 1.05); assert.equal(b('nossa análise: aposta|1').profit_brl, 10.5, '10 € (contra) × 1,05');
+  assert.equal(b('Gols|1').profit_brl, -20, '20 € a favor da Pinnacle, perdidos');
   assert.equal(b('nossa análise: aposta|1').clv, 0.066, '2,05 contra a justa 1/0,52');
   assert.equal(b('Gols|1').profit_u, -1); assert.equal(b('Escanteios|1').clv, null, 'odd estimada: sem CLV');
   assert.equal(b('Combo|2').status, 'aberta'); assert.equal(b('Combo|2').detail, 'Second Half');

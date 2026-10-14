@@ -38,6 +38,7 @@ import { favHalfWin } from './favhalf.js';
 import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
 import { loadClubs } from './clubs.js';
 import { MULTI, multiLegs } from './multiple.js';
+import { comboOk } from './plan.js';
 
 export { GOAL_HANDICAP, SHOTS };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
@@ -334,8 +335,10 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
       const ids = new Set(multiLegs(games, { now }).filter(l => l.quoted).slice(0, top).map(l => l.fixtureId));
       for (const g of games) if (ids.has(g.fx.id)) keep.add(g);
     }
-    const fp = g => Math.max(0, ...(g.fav_combos || []).map(c => c.p_blend));
-    if (want(COMBOS)) for (const g of games.filter(g => g.fav_combos?.length).sort((a, b) => fp(b) - fp(a)).slice(0, top)) keep.add(g);
+    // (o combo que o plano aceita: chance e faixa de odd do mesmo jogo, plan.js comboOk; antes, a maior chance de qualquer
+    // combo, que punha na frente o favorito de + 1,5 a 1,30 e deixava de fora o de 1,65 a 2,30)
+    const fp = g => Math.max(0, ...(g.fav_combos || []).filter(comboOk).map(c => c.p_blend));
+    if (want(COMBOS)) for (const g of games.filter(g => fp(g) > 0).sort((a, b) => fp(b) - fp(a)).slice(0, top)) keep.add(g);
     // e os jogos de favoritismo alto com a vitória do favorito no 1º tempo cotada (favhalf.js)
     if (want(COMBOS)) for (const g of games.filter(g => g.fav_half?.pinnacle_odd).sort((a, b) => b.fav_half.p_fav_ft - a.fav_half.p_fav_ft).slice(0, top)) keep.add(g);
     return keep;
