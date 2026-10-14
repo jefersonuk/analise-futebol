@@ -1,7 +1,8 @@
 // Formulário "➕ Entrar": escolhe a casa e manda a aposta para o app de apostas de valor. A stake é
 // digitada na moeda da casa (R$, US$ ou €, como está no app de apostas) e enviada também em R$, que é
-// como o app de apostas guarda. Stake sugerida: a entrada padrão (stake.js: 10 €, Jeferson, 13/10/2026) convertida para
-// a moeda da casa pela cotação do app de apostas; a casa principal (Sportmarket) vem primeiro e escolhida.
+// como o app de apostas guarda. Stake sugerida: a entrada da aposta (stake.js: 20 € a favor da Pinnacle e 10 € contra,
+// Jeferson, 14/10/2026) convertida para a moeda da casa pela cotação do app de apostas; a casa principal (Sportmarket)
+// vem primeiro e escolhida.
 //
 // Entrada manual (✍️, ou "Minha análise" marcado no formulário): a sua análise, registrada sem as regras do
 // app (piso de 60%, odd mínima, jogo difícil). Serve para um jogo da busca ou digitado e para qualquer linha
@@ -10,7 +11,7 @@
 
 import { BETS_URL, SYMBOL, betsApp, buildEntry, retryCloud, sendEntry, sentRecently } from './entry.js';
 import { HIT_IDEAL, HIT_MIN, floorOf } from './consistency.js';
-import { STAKE, money } from './stake.js';
+import { CONTRA_SHARE, STAKE, isContra, money, stakeOf } from './stake.js';
 import { marketOfId, parseLine } from './myline.js';
 
 const $ = s => document.querySelector(s);
@@ -61,15 +62,16 @@ export function initEntry({ getLine, getFixture }) {
   const curLine = () => (entry.typedLine ? manualLine($('#enLine').value, curFx()) : manual() ? { ...entry.line, manual: true } : entry.line);
   const autoCheck = (fx, line) => !!(fx?.id && line?.id);
 
-  // A entrada padrão (10 €) na moeda da casa: pela cotação do app de apostas (R$ por € e por US$); sem a cotação do euro,
-  // numa casa que não é em euro, a stake do Modelo F convertida (como antes).
+  // A entrada da aposta (20 € a favor da Pinnacle, 10 € contra) na moeda da casa: pela cotação do app de apostas (R$ por € e
+  // por US$); sem a cotação do euro, numa casa que não é em euro, a stake do Modelo F convertida (como antes; metade contra).
   const stakeIn = cur => {
-    if (cur === STAKE.cur) return STAKE.value;
+    const line = curLine(), v0 = stakeOf(line);
+    if (cur === STAKE.cur) return v0;
     const rs = rateOf(STAKE.cur), r = rateOf(cur);
-    if (rs && r) { const v = STAKE.value * rs / r; return cur === 'BRL' ? Math.round(v) : Math.round(v * 100) / 100; }
-    return r ? Math.round(entry.stakeBRL / r) : '';
+    if (rs && r) { const v = v0 * rs / r; return cur === 'BRL' ? Math.round(v) : Math.round(v * 100) / 100; }
+    return r ? Math.round(entry.stakeBRL * (isContra(line) ? CONTRA_SHARE : 1) / r) : '';
   };
-  // Moeda do formulário segue a casa; a stake sugerida é a entrada padrão convertida para ela.
+  // Moeda do formulário segue a casa; a stake sugerida é a entrada da aposta convertida para ela.
   function syncCurrency(resetStake) {
     const h = house(), cur = h?.currency || 'BRL';
     $('#enCurWrap').hidden = $('#enHouse').value !== 'other';
@@ -112,7 +114,8 @@ export function initEntry({ getLine, getFixture }) {
     }
     if (stake > 0 && cur !== 'BRL') out.push(r ? `<span class="muted">= ${cash(stake * r)} na cotação do app de apostas (${cash(r)} por ${SYMBOL[cur]})</span>`
       : `<span class="neg">Sem cotação de ${cur} no app de apostas: abra o app de apostas uma vez para ele buscar.</span>`);
-    out.push(`<span class="muted">Entrada padrão: ${money(STAKE.value)}${cur !== STAKE.cur && rateOf(STAKE.cur) && r ? ` = ${cash(STAKE.value * rateOf(STAKE.cur) / r, cur)}` : ''}${cur !== STAKE.cur && !rateOf(STAKE.cur) ? ' (sem a cotação do euro no app de apostas: a sugestão é a stake do Modelo F)' : ''}.</span>`);
+    const v0 = stakeOf(line);
+    out.push(`<span class="muted">${isContra(line) ? `Entrada: ${money(v0)} — metade, a aposta é contra a Pinnacle` : `Entrada cheia: ${money(v0)} (contra a Pinnacle seria a metade)`}${cur !== STAKE.cur && rateOf(STAKE.cur) && r ? ` = ${cash(v0 * rateOf(STAKE.cur) / r, cur)}` : ''}${cur !== STAKE.cur && !rateOf(STAKE.cur) ? ' (sem a cotação do euro no app de apostas: a sugestão é a stake do Modelo F)' : ''}.</span>`);
     if (h?.value != null && stake > h.value) out.push(`<span class="neg">Stake maior que o saldo da casa (${cash(h.value, cur)}).</span>`);
     if (h?.limited) out.push('<span class="neg">Casa marcada como limitada no app de apostas.</span>');
     if (h?.name && autoCheck(fx, line) && sentRecently(fx.id, line.id, h.name)) out.push('<span class="neg">Você já enviou esta linha nesta casa há pouco. Enviar de novo registra outra aposta.</span>');

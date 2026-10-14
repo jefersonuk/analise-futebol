@@ -94,13 +94,13 @@ test('varredura: filtro Combos com os melhores combos, aposta primeiro; v 11', a
   for (let i = 1; i < r.length; i++) assert.ok(isBet(r[i - 1].line) >= isBet(r[i].line), 'apostas primeiro');
   assert.ok(pickGames(scan.games, { market: COMBOS, top: 3 }).length <= 3);
   assert.ok(scan.games.filter(g => g.hard).every(g => !g.combos.length), 'jogo difícil sem combos');
-  // a vitória do favorito + gols (para o plano): 1,5 e 2,5, do mandante ou do visitante, guardados com o jogo
+  // a vitória do favorito + gols (para o plano): 1,5, 2,5 e 3,5, do mandante ou do visitante, guardados com o jogo
   const fc = scan.games.filter(g => g.fav_combos?.length);
   assert.ok(fc.length, 'algum jogo com a vitória do favorito + gols');
-  for (const g of fc) assert.ok(g.fav_combos.every(c => c.fav && /^cb:[12]\+gO(1\.5|2\.5)$/.test(c.id)), g.fav_combos.map(c => c.id).join());
+  for (const g of fc) assert.ok(g.fav_combos.every(c => c.fav && /^cb:[12]\+gO(1\.5|2\.5|3\.5)$/.test(c.id)), g.fav_combos.map(c => c.id).join());
 });
 
-test('vitória do favorito + gols: 1,5 e 2,5 do favorito do 1X2; a dupla chance + 1,5 de justa ~1,25 não aparece mais a 1,50', async () => {
+test('vitória do favorito + gols: 1,5, 2,5 e 3,5 do favorito do 1X2; a dupla chance + 1,5 de justa ~1,25 não aparece mais a 1,50', async () => {
   const { analyzeMatch } = await import('../src/model.js');
   const { recentGames } = await import('../src/insights.js');
   const { rolesNow } = await import('../src/dossier.js');
@@ -111,8 +111,9 @@ test('vitória do favorito + gols: 1,5 e 2,5 do favorito do 1X2; a dupla chance 
   const nm = { home: fx.home.name, away: fx.away.name };
   const fav = favWinCombos({ res, fair, teams, names: nm });
   assert.equal(fav[0].id, 'cb:1+gO1.5', 'o mandante é o favorito');
-  // o 2,5 acerta menos e paga mais; sai da lista quando a mínima passa de 3,00 (Política E: não entrar)
-  if (fav[1]) assert.ok(fav[1].id === 'cb:1+gO2.5' && fav[0].p_blend > fav[1].p_blend && fav[0].odd_min < fav[1].odd_min);
+  // o 2,5 e o 3,5 acertam menos e pagam mais, nessa ordem; saem da lista quando a mínima passa de 3,00 (Política E: não entrar)
+  assert.deepEqual(fav.map(c => c.id), ['cb:1+gO1.5', 'cb:1+gO2.5', 'cb:1+gO3.5'].slice(0, fav.length));
+  for (let i = 1; i < fav.length; i++) assert.ok(fav[i - 1].p_blend > fav[i].p_blend && fav[i - 1].odd_min < fav[i].odd_min);
   assert.ok(fav.every(c => c.odd_min <= 3), 'até 3,00');
   assert.ok(fav.every(c => Math.abs(c.odd_min - c.fair_odd_blend * 1.05) < 0.02), 'mínima = justa × 1,05, sem piso');
   assert.ok(fav[0].p_blend < fair.get('1') + 1e-9, 'nunca acima da chance da vitória sozinha');

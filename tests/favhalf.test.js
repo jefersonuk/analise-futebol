@@ -71,9 +71,9 @@ test('plano: até 3 favoritos no 1º tempo, nos jogos que sobraram, de 1,70 a 2,
   // desmarcado, some; guardado e refeito; texto; simulação na odd da Pinnacle
   assert.equal(buildPlan(scan, { now: NOW, markets: ['Handicap asiático'] }).halves.length, 0);
   assert.deepEqual(planFromKeys(scan, planKeys(plan)).halves.map(x => x.g.fx.id), plan.halves.map(x => x.g.fx.id));
-  assert.match(planText(plan), /FAVORITO NO 1º TEMPO \(3\)\n1\. .* — Forte \d vence o 1º tempo · odd ≥ [\d,]+ \(Pinnacle 2,10\)/);
+  assert.match(planText(plan), /FAVORITO NO 1º TEMPO \(3\)\n1\. .* — Forte \d vence o 1º tempo · odd ≥ [\d,]+ \(Pinnacle 2,10\) · 20 €\n/);
   const sim = buildPlanSim(plan).bets.filter(b => b.cat === 'Plano: favorito 1º tempo');
-  assert.equal(sim.length, 3); assert.ok(sim.every(b => b.odd === 2.1 && b.odd_src === 'pinnacle' && b.lineId === '1T1' && b.stake_brl === 10));
+  assert.equal(sim.length, 3); assert.ok(sim.every(b => b.odd === 2.1 && b.odd_src === 'pinnacle' && b.lineId === '1T1' && b.stake_brl === 20), 'a favor da Pinnacle: entrada cheia');
   // funil: os 3 no bloco, os outros com o motivo
   assert.equal(planFunnel(scan, plan).half, 3);
 });

@@ -14,15 +14,16 @@
 // margem dela no jogo em cada perna (odd_src = 'pinnacle est.'). Sem nenhuma chance da Pinnacle (linha só do modelo:
 // chutes), a justa do nosso modelo com a margem de uma casa, 5% (odd_src = 'modelo est.') — abaixo da nossa mínima (8%).
 // Simulações antigas podem ter odd_src = 'mínima' (a odd mínima do app, antes desta regra).
-// Lucro em unidades (stake fixa de 1) e em dinheiro: a entrada padrão (stake.js: 10 €, desde 13/10/2026) — sim.cur diz a
-// moeda; as simulações de antes não têm cur e estão em R$ (a entrada que o app propunha). stake_brl e profit_brl guardam o
-// valor na moeda da simulação (o nome ficou do tempo em que era só real).
+// Lucro em unidades (stake fixa de 1) e em dinheiro: a entrada de cada aposta (stake.js: desde 14/10/2026, 20 € a favor
+// da Pinnacle e 10 € contra; de 13/10, 10 € em tudo) — sim.cur diz a moeda; as simulações de antes não têm cur e estão em
+// R$ (a entrada que o app propunha). stake_brl e profit_brl guardam o valor na moeda da simulação (o nome ficou do tempo
+// em que era só real).
 
 import { CENARIO, COMBOS, FILTER_KEYS, bestLine } from './scanner.js';
 import { isBet } from './dossier.js';
 import { MULTI, TARGET, bandTickets, multiLegs, settleMulti, ticketOf } from './multiple.js';
 import { pinMargin } from './odds.js';
-import { STAKE } from './stake.js';
+import { STAKE, stakeOf } from './stake.js';
 
 export const CATS = ['Plano: simples (nossa leitura)', 'Plano: simples (acordo com a Pinnacle)', 'Plano: simples (chutes)', 'Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo', 'Plano: favorito 1º tempo', 'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T',
   'Handicap gols', '1X2', 'Escanteios', 'Escanteios 1T', 'Chutes', 'Combo', 'Múltipla'];
@@ -64,7 +65,7 @@ export function buildSim(scan, { banca = 44000 } = {}) {
   for (const g of scan.games) {
     // nossa análise: a aposta do jogo; sem ela, a "entrar se…"
     const sc = want(CENARIO) && ((g.scenario || []).find(l => l.bet) || (g.scenario || []).find(l => l.conditional));
-    if (sc?.pinnacle_odd > 1) bets.push(base(g, sc, sc.bet ? 'nossa análise: aposta' : 'nossa análise: entrar se…', sc.pinnacle_odd, 'pinnacle', STAKE.value));
+    if (sc?.pinnacle_odd > 1) bets.push(base(g, sc, sc.bet ? 'nossa análise: aposta' : 'nossa análise: entrar se…', sc.pinnacle_odd, 'pinnacle', stakeOf(sc)));
     // linhas principais: a linha do jogo em cada aba de mercado, quando é aposta
     const seen = new Set();
     for (const m of FILTER_KEYS.filter(k => k !== COMBOS && want(k))) {
@@ -72,11 +73,11 @@ export function buildSim(scan, { banca = 44000 } = {}) {
       if (!l || !isBet(l) || seen.has(l.id)) continue;
       seen.add(l.id);
       const [odd, src] = linePin(l, g);
-      if (odd) bets.push(base(g, l, CAT_OF[l.market] || l.market, odd, src, STAKE.value));
+      if (odd) bets.push(base(g, l, CAT_OF[l.market] || l.market, odd, src, stakeOf(l)));
     }
     // combo: o do jogo na aba Combos (a Pinnacle não cota combo: a odd que ela pagaria)
     const cb = want(COMBOS) && (g.combos || []).find(isBet), [co, cs] = cb ? comboPin(cb, g) : [];
-    if (co) bets.push(base(g, cb, 'Combo', co, cs, STAKE.value));
+    if (co) bets.push(base(g, cb, 'Combo', co, cs, stakeOf(cb)));
   }
   // múltipla: os bilhetes por faixa de horário, como a aba montava na hora da varredura (só linha cotada)
   if (want(MULTI)) for (const legs of bandTickets(multiLegs(scan.games, { now: at }).filter(l => l.quoted), { target: TARGET })) { const b = multiBet(legs, banca, 'Múltipla'); if (b) bets.push(b); }
@@ -93,8 +94,8 @@ function multiBet(legs, banca, cat) {
   return { key: `${cat}|${legs.map(l => l.key).join(',')}`, cat, fixtureId: null, kickoff: Math.min(...legs.map(l => l.kickoff)),
     home: `Múltipla (${legs.length})`, away: '', competition: [...new Set(legs.map(l => l.competition))].join(', '), lineId: 'multi', market: 'Múltipla',
     line: legs.map(l => `${l.home} x ${l.away} ${l.line}`).join(' · '), odd: r2(odd), odd_src: src, p: t.p_all, p_pinnacle: t.p_pinnacle_all,
-    // entrada: a padrão (stake.js)
-    stake_brl: STAKE.value, legs: legs.map(l => ({ fixtureId: l.fixtureId, lineId: l.lineId, home: l.home, away: l.away, line: l.line, odd: r2(legPin(l)) })),
+    // entrada: a cheia (stake.js; as pernas têm o preço da Pinnacle)
+    stake_brl: stakeOf(t), legs: legs.map(l => ({ fixtureId: l.fixtureId, lineId: l.lineId, home: l.home, away: l.away, line: l.line, odd: r2(legPin(l)) })),
     status: 'aberta', winner: null, profit_u: null, profit_brl: null, clv: null, detail: null };
 }
 
@@ -105,12 +106,12 @@ export function buildPlanSim(plan, { banca = 44000, id = `plano-${plan.date}`, w
   const bets = [
     ...plan.singles.flatMap(({ g, line, lens }) => {
       const [odd, src] = linePin(line, g), cat = { agree: 'Plano: simples (acordo com a Pinnacle)', shots: 'Plano: simples (chutes)' }[lens] || 'Plano: simples (nossa leitura)';
-      return odd ? [base(g, line, cat, odd, src, STAKE.value)] : [];
+      return odd ? [base(g, line, cat, odd, src, stakeOf(line))] : [];
     }),
     ...plan.multis.map(t => multiBet(t.legs, banca, 'Plano: múltipla')).filter(Boolean),
-    ...plan.sameGame.flatMap(({ g, combo }) => { const [odd, src] = comboPin(combo, g); return odd ? [base(g, combo, 'Plano: mesmo jogo', odd, src, STAKE.value)] : []; }),
+    ...plan.sameGame.flatMap(({ g, combo }) => { const [odd, src] = comboPin(combo, g); return odd ? [base(g, combo, 'Plano: mesmo jogo', odd, src, stakeOf(combo))] : []; }),
     // favorito no 1º tempo: na odd da Pinnacle (o resultado do 1º tempo ou o handicap do 1º tempo −0,5, a mesma aposta)
-    ...(plan.halves || []).flatMap(({ g, line }) => { const [odd, src] = linePin(line, g); return odd ? [base(g, line, 'Plano: favorito 1º tempo', odd, src, STAKE.value)] : []; }),
+    ...(plan.halves || []).flatMap(({ g, line }) => { const [odd, src] = linePin(line, g); return odd ? [base(g, line, 'Plano: favorito 1º tempo', odd, src, stakeOf(line))] : []; }),
   ];
   const now = new Date().toISOString();
   return { id, plan: true, win, label, date: plan.date, scan_at: plan.scan_at, created_at: now, updated_at: now, window: null, cur: STAKE.cur, bets };
