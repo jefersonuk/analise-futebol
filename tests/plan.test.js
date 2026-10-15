@@ -377,3 +377,22 @@ test('faixa da 🎯 por mercado (13/10): 1X2 e handicap a partir de 1,70, total 
   const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games }, { now: NOW });
   assert.deepEqual(plan.singles.map(x => x.g.fx.id).sort(), [1, 2, 4]);
 });
+
+test('simulação → linha do ➕: a do plano (🤝 com o alvo, 1º tempo com a mínima dele, combo e nossa leitura como estão); sem a análise, a da simulação', async () => {
+  const { agreeMin, halfMin, lineOfBet, simLine } = await import('../src/plan.js');
+  const ag = { id: 'ahH0.5', market: 'Handicap asiático', line: 'C +0,5', tier: 'âncora', p_model: 0.66, p_blend: 0.65, p_pinnacle: 0.65, pinnacle_odd: 1.5, odd_min: 1.58 };
+  const sc = { id: '1', market: '1X2', line: 'C vence', scenario: true, p_nossa: 0.55, p_pinnacle: 0.48, pinnacle_odd: 2.05, odd_min: 1.91, contra: true };
+  const cb = { id: 'cb:1+gO1.5', market: 'Combo', line: 'C vence + Mais de 1,5', combo: true, fav: true, p_blend: 0.55, odd_min: 1.91 };
+  const half = { id: '1T1', market: 'Resultado 1º tempo', line: 'C vence o 1º tempo', fav: true, p_blend: 0.47, p_pinnacle: 0.46, pinnacle_odd: 2.1, odd_min: 2.19 };
+  const g = { fx: { id: 7 }, lines: [ag], scenario: [sc], fav_combos: [cb], fav_half: half };
+  const b = (cat, lineId) => ({ cat, lineId });
+  const a = lineOfBet(g, b('Plano: simples (acordo com a Pinnacle)', 'ahH0.5'));
+  assert.equal(a.odd_min, agreeMin(ag), 'o alvo do 🤝, não a mínima do app');
+  assert.equal(lineOfBet(g, b('Plano: favorito 1º tempo', '1T1')).odd_min, halfMin(half));
+  assert.equal(lineOfBet(g, b('Plano: simples (nossa leitura)', '1')), sc);
+  assert.equal(lineOfBet(g, b('Plano: mesmo jogo', 'cb:1+gO1.5')), cb);
+  assert.equal(lineOfBet(g, b('Gols', 'gO9.5')), null, 'a análise não tem a linha');
+  const s = simLine({ lineId: 'cb:1+gO2.5', market: 'Combo', line: 'C vence + Mais de 2,5 gols', p: 0.5, p_pinnacle: 0.49, odd: 2.1, odd_src: 'pinnacle est.' });
+  assert.deepEqual([s.from_sim, s.combo, s.p_blend, s.fair_odd_blend, s.odd_min, s.pinnacle_odd, s.priced_by], [true, true, 0.5, 2, null, null, 'simulação']);
+  assert.equal(simLine({ lineId: 'gO2.5', p: 0.6, odd: 1.7, odd_src: 'pinnacle' }).priced_by, 'pinnacle', 'na odd da Pinnacle: o CLV é medido');
+});

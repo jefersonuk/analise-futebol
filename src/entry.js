@@ -42,6 +42,7 @@ const MARKET = {
   'Total escanteios 1T': 'Escanteios', 'Handicap escanteios 1T': 'Escanteios', 'Handicap de escanteios': 'Escanteios',
   'Resultado escanteios': 'Escanteios', 'Resultado escanteios 1T': 'Escanteios', 'Corrida de escanteios': 'Escanteios', 'Total de chutes': 'Total de Chutes',
   'Total de chutes no gol': 'Total de Chutes', Combo: 'Combo (criar aposta)', 'Múltipla': 'Múltipla', 'Resultado 1º tempo': '1X2 / Resultado',
+  'Dupla chance': 'Dupla Chance', 'Gols por time': 'Total de Gols',
 };
 
 const localStr = t => { const d = new Date(t); return new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 16); };

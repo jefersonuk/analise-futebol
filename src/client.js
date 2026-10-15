@@ -241,6 +241,16 @@ export function makeClient({ get: rawGet, load, save }) {
     // Jogos de uma data (fuso de Brasília) que ainda não começaram. Validade de 30 min.
     dayFixtures: date => cached(`af:day:${date}`, 30 * 60e3, async () =>
       (await get('/fixtures', { date, timezone: TZ })).filter(f => f.fixture.status.short === 'NS').map(fixtureOut)),
+    // Todos os jogos de uma data, com a situação (status: NS, 1H, FT…), para a aposta manual achar o jogo de cada perna —
+    // inclusive o que já começou. Validade de 10 min.
+    dayAll: date => cached(`af:dayall:${date}`, 10 * 60e3, async () =>
+      (await get('/fixtures', { date, timezone: TZ })).map(f => ({ ...fixtureOut(f), status: f.fixture.status.short }))),
+    // Jogos pelo id (até 20 por requisição), com a situação.
+    fixturesById: async ids => {
+      const out = [];
+      for (let i = 0; i < ids.length; i += 20) out.push(...(await get('/fixtures', { ids: ids.slice(i, i + 20).join('-') })).map(f => ({ ...fixtureOut(f), status: f.fixture.status.short })));
+      return out;
+    },
 
     // Odds da Pinnacle de todos os jogos de uma data (paginado, 10 jogos por página): de um mercado (bet) ou,
     // sem bet, de todos os mercados que o app lê (BETS) — o mesmo que fixtureOdds daria jogo a jogo.
