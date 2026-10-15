@@ -13,7 +13,7 @@ import { BETS_URL, SYMBOL, betsApp, buildEntry, retryCloud, sendEntry, sentRecen
 import { HIT_IDEAL, HIT_MIN, floorOf } from './consistency.js';
 import { CONTRA_SHARE, STAKE, isContra, money, stakeOf } from './stake.js';
 import { marketOfId, parseLine } from './myline.js';
-import { buildTicket, gameKey, legOf, pickMatches, quickLines, splitLegs, ticketKind } from './ticket.js';
+import { buildTicket, gameKey, legOf, legsOdd, pickMatches, quickLines, splitLegs, ticketKind } from './ticket.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -107,11 +107,14 @@ export function initEntry({ getLine, getFixture, dayAll = null }) {
     const cur = h?.currency || 'BRL', r = rateOf(cur), out = [];
     if (entry.ticket) {
       lineMsg();
-      const legs = entry.legs, auto = legs.filter(l => l.auto).length, kind = ticketKind(legs);
+      const legs = entry.legs, auto = legs.filter(l => l.auto).length, kind = ticketKind(legs), prod = legsOdd(legs);
       if (!legs.length) out.push('<span class="muted">Escolha o jogo, escreva a linha (ou toque nos atalhos) e toque em <b>Pôr no bilhete</b>; repita para cada perna.</span>');
       else out.push(`<span class="muted"><b>${kind === 'simples' ? 'Simples' : kind === 'mesmo jogo' ? `No mesmo jogo: ${legs.length} linhas` : `Múltipla: ${legs.length} pernas em ${new Set(legs.map(gameKey)).size} jogos`}</b> · `
         + (auto === legs.length ? 'o app de apostas confere o resultado sozinho e acompanha ao vivo.'
           : `${legs.length - auto} perna${legs.length - auto > 1 ? 's' : ''} sem conferência automática (jogo fora da lista ou linha não reconhecida): o resultado ${auto ? 'dessas pernas ' : ''}é marcado à mão no app de apostas.`) + '</span>');
+      // a odd total pelas pernas (o produto) e o retorno
+      if (prod && legs.length > 1) out.push(`<span class="muted">Odd das pernas: ${legs.map(l => num(l.odd_casa)).join(' × ')} = <b>${num(prod)}</b>${odd > 1 && Math.abs(odd - prod) > 0.011 ? ` <span class="neg">(a odd total digitada é ${num(odd)})</span>` : ''}</span>`);
+      if (odd > 1 && stake > 0) out.push(`<span class="muted">Se der green: <b class="pos">${cash(stake * odd, cur)}</b> (lucro ${cash(stake * (odd - 1), cur)})</span>`);
       moneyChecks(out, { stake, cur, r, h });
       $('#enCheck').innerHTML = out.join('<br>');
       return;
@@ -210,7 +213,7 @@ export function initEntry({ getLine, getFixture, dayAll = null }) {
     const legs = entry.legs;
     $('#enLegs').innerHTML = legs.length ? `<div class="leghead">Bilhete · ${legs.length} perna${legs.length > 1 ? 's' : ''}</div>${legs.map((l, i) => `<div class="legrow">
       <span class="legn">${i + 1}</span>
-      <span class="legtxt"><b>${esc(l.linha)}</b> <span class="muted small">${esc(l.mercado)}</span><br><span class="muted small">${hour(Date.parse(l.kickoff))} · ${esc(l.home)} x ${esc(l.away)}</span></span>
+      <span class="legtxt"><b>${esc(l.linha)}</b>${l.odd_casa ? ` <span class="legodd">@ ${num(l.odd_casa)}</span>` : ''} <span class="muted small">${esc(l.mercado)}</span><br><span class="muted small">${hour(Date.parse(l.kickoff))} · ${esc(l.home)} x ${esc(l.away)}</span></span>
       <span class="small ${l.auto ? 'pos' : 'neg'}" title="${l.auto ? 'o app de apostas confere o resultado sozinho e acompanha ao vivo' : esc(l.error || 'jogo fora da lista da API: o resultado é marcado à mão')}">${l.auto ? '✓ automática' : '✍️ à mão'}</span>
       <button type="button" class="ghost mini" data-legx="${i}" title="Tirar a perna">✕</button></div>`).join('')}` : '';
     $('#enTitle').textContent = `✍️ Aposta manual${legs.length ? ` · ${KIND[ticketKind(legs)]}` : ''}`;
@@ -253,17 +256,23 @@ export function initEntry({ getLine, getFixture, dayAll = null }) {
     const parts = splitLegs($('#enLine').value), g = entry?.game;
     if (!parts.length) { $('#enLineMsg').innerHTML = g ? 'Escreva como na casa ou toque nos atalhos; várias linhas do mesmo jogo com " + ".' : ''; return; }
     if (!g) { $('#enLineMsg').innerHTML = '<span class="neg">Escolha o jogo da perna.</span>'; return; }
-    $('#enLineMsg').innerHTML = parts.map(t => { const l = legOf(g, t); return l.lineId ? `✓ <b>${esc(l.mercado)}</b>: ${esc(t)}`
+    $('#enLineMsg').innerHTML = parts.map(t => { const l = legOf(g, t); return l.lineId ? `✓ <b>${esc(l.mercado)}</b>: ${esc(l.linha)}${l.odd_casa ? ` @ ${num(l.odd_casa)}` : ''}`
       : `<span class="neg">⚠ "${esc(t)}": ${esc(l.error || 'não reconhecida')} — vai como texto e o resultado é marcado à mão</span>`; }).join('<br>');
   }
+  // a odd total segue o produto das odds das pernas (quando todas têm), até você digitar outra
+  function syncTotal() {
+    const o = legsOdd(entry.legs);
+    if (o && !entry.oddTouched) $('#enOdd').value = o.toFixed(2);
+  }
   function addLegs() {
-    const parts = splitLegs($('#enLine').value);
+    const parts = splitLegs($('#enLine').value), odd = parseFloat($('#enLegOdd').value);
     if (!entry.game) { say('Escolha o jogo da perna.', true); return false; }
     if (!parts.length) { say('Escreva a linha da perna.', true); return false; }
-    entry.legs.push(...parts.map(t => legOf(entry.game, t)));
-    $('#enLine').value = '';
+    // a odd da perna vale para uma linha só (várias do mesmo jogo: a casa dá a odd do combo, que vai na odd total)
+    entry.legs.push(...parts.map(t => legOf(entry.game, t, parts.length === 1 && odd > 1 ? odd : null)));
+    $('#enLine').value = ''; $('#enLegOdd').value = '';
     $('#enMsg').hidden = true;
-    renderLegs(); check();
+    renderLegs(); syncTotal(); check();
     $('#enLine').focus();
     return true;
   }
@@ -271,7 +280,7 @@ export function initEntry({ getLine, getFixture, dayAll = null }) {
   function openManual({ fx = null, legs = [] } = {}) {
     const app = betsApp();
     entry = { line: null, fx: null, houses: app.houses, rates: app.rates, stakeBRL: app.stake ?? 300, btn: null, confirmDup: false, confirmOff: false,
-      ticket: true, legs: [...legs], game: null };
+      ticket: true, legs: [...legs], game: null, oddTouched: false };
     $('#enGame').textContent = 'Simples, múltipla de vários jogos ou várias linhas no mesmo jogo: escolha o jogo, escreva a linha e ponha no bilhete.';
     $('#enFacts').hidden = true;
     $('#enManualWrap').hidden = true;
@@ -282,10 +291,10 @@ export function initEntry({ getLine, getFixture, dayAll = null }) {
     }).join('');
     for (const k of ['#enHome', '#enAway', '#enComp']) $(k).value = '';
     $('#enWhen').value = localInput(Date.now());
-    $('#enLine').value = '';
+    $('#enLine').value = ''; $('#enLegOdd').value = '';
     renderLegs();
     setGame(fx);
-    show(app, null);
+    show(app, legsOdd(entry.legs));
     if (fx) $('#enLine').focus(); else openPicker();
   }
 
@@ -295,6 +304,7 @@ export function initEntry({ getLine, getFixture, dayAll = null }) {
   // outra odd: a confirmação de "fora da regra" vale só para a odd que foi mostrada
   $('#enOdd').oninput = () => {
     if (entry.confirmOff) { entry.confirmOff = false; syncSend(); }
+    if (entry.ticket) entry.oddTouched = !!$('#enOdd').value;   // apagou: volta a seguir as pernas
     check();
   };
   $('#enManual').onchange = () => { entry.confirmOff = false; syncSend(); check(); };
@@ -314,6 +324,7 @@ export function initEntry({ getLine, getFixture, dayAll = null }) {
   };
   $('#enLine').oninput = lineMsg;
   $('#enLine').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addLegs(); } };
+  $('#enLegOdd').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addLegs(); } };
   $('#enChips').onclick = e => {
     const c = e.target.closest('[data-chip]');
     if (!c) return;
@@ -322,7 +333,7 @@ export function initEntry({ getLine, getFixture, dayAll = null }) {
     lineMsg();
   };
   $('#enAddLeg').onclick = addLegs;
-  $('#enLegs').onclick = e => { const x = e.target.closest('[data-legx]'); if (x) { entry.legs.splice(Number(x.dataset.legx), 1); renderLegs(); check(); } };
+  $('#enLegs').onclick = e => { const x = e.target.closest('[data-legx]'); if (x) { entry.legs.splice(Number(x.dataset.legx), 1); renderLegs(); syncTotal(); check(); } };
 
   // o bilhete manual: a linha escrita e não posta no bilhete entra junto
   async function sendTicket() {
