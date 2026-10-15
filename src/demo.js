@@ -79,6 +79,14 @@ export const hasLeague = () => true;
 // que começa em menos de 10 minutos; sem a folga, a demo ficaria vazia nesses minutos da semana).
 const nextRound = () => { const f = schedule(SEASON()).filter(g => g.t > Date.now() + 15 * 60e3); return f.filter(g => g.t === f[0]?.t); };
 export const dayFixtures = () => nextRound().map(g => out(g, SEASON()));
+// a aposta manual: os jogos da data (no fuso de Brasília), com a situação; sem jogo na data, a próxima rodada
+const dayOf = t => new Date(t).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+const withStatus = g => ({ ...out(g, SEASON()), status: g.t > Date.now() ? 'NS' : g.t > Date.now() - 2 * 3600e3 ? '2H' : 'FT' });
+export function dayAll(date) {
+  const day = schedule(SEASON()).filter(g => dayOf(g.t) === date);
+  return (day.length ? day : nextRound()).map(withStatus);
+}
+export const fixturesById = ids => schedule(SEASON()).filter(g => ids.includes(g.id)).map(withStatus);
 export const dayOdds = () => nextRound().map(g => { const o = fixtureOdds(g.id);
   return { fixture: g.id, league: { ...LEAGUE, season: SEASON() }, updatedAt: o.updatedAt, bookmakers: o.bookmakers }; });
 export const teamMatches = (teamId, season) => leagueMatches(1, season).filter(m => m.h === teamId || m.a === teamId);

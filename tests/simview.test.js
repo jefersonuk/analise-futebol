@@ -45,3 +45,26 @@ test('plano montado de novo na mesma janela antes de começar substitui o anteri
   await plan.add(d, drop(d)); await plan.add(e, drop(e));
   assert.deepEqual(api.m.get('af:simidx'), ['plano-5', 'plano-4', 'plano-3'], 'com jogo já começado, o plano anterior fica para medir');
 });
+
+test('com o ➕ ligado (tools): ➕ e 🔎 na entrada aberta, ✓ no jogo que já tem aposta, nada na encerrada; 🔎 não no bilhete', async () => {
+  const api = store(), e = el(), soon = Date.now() + 3600e3;
+  globalThis.localStorage = { getItem: k => (k === 'apostasValor_v1' ? JSON.stringify({ surebets: [{ analise: { fixtureId: 2, home: 'C', away: 'D', kickoff: new Date(soon).toISOString() } }] }) : null) };
+  const panel = simPanel({ api, el: e, mine: id => String(id).startsWith('plano-'), title: 'Planos', intro: '', tools: { openEntry: () => {}, analyzeFixture: null, banca: 44000 } });
+  await tick();
+  await panel.add({ id: 'plano-9', plan: true, win: 'h4', label: 'x', date: '2026-10-15', scan_at: new Date().toISOString(), bets: [
+    bet('Plano: mesmo jogo', { key: 'a', fixtureId: 1, lineId: 'cb:1+gO1.5' }),
+    bet('Plano: simples (acordo com a Pinnacle)', { key: 'b', fixtureId: 2, home: 'C', away: 'D', lineId: 'ahH0.5' }),
+    bet('Plano: simples (chutes)', { key: 'c', fixtureId: 3, status: 'encerrada', winner: 'A', profit_u: 1 }),
+    bet('Plano: múltipla', { key: 'd', fixtureId: null, lineId: 'multi', legs: [{ fixtureId: 4, lineId: 'gO1.5', home: 'E', away: 'F' }, { fixtureId: 5, lineId: 'gO1.5', home: 'G', away: 'H' }] }),
+  ] });
+  const h = e.innerHTML;
+  assert.deepEqual((h.match(/data-simadd="plano-9\|(\d)"/g) || []).map(x => x.match(/\|(\d)/)[1]), ['0', '3'], '➕ no combo e no bilhete');
+  assert.match(h, /title="já tem aposta neste jogo no app de apostas">✓/, 'o jogo 2 já tem aposta');
+  assert.deepEqual((h.match(/data-simoth="plano-9\|(\d)"/g) || []).map(x => x.match(/\|(\d)/)[1]), ['0', '1', '2'], '🔎 em cada jogo, não no bilhete');
+  assert.match(h, /➕ registra no app de apostas a que você não fez/);
+  // sem tools (a tabela só de leitura): nada disso
+  const ro = el(), p2 = simPanel({ api, el: ro, mine: id => String(id).startsWith('plano-'), title: 'Planos', intro: '' });
+  await tick(); await p2.add({ id: 'plano-10', plan: true, win: 'h2', date: '2026-10-15', scan_at: new Date().toISOString(), bets: [bet('Plano: mesmo jogo')] });
+  assert.doesNotMatch(ro.innerHTML, /data-simadd|data-simoth/);
+  delete globalThis.localStorage;
+});

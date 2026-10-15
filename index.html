@@ -15,6 +15,7 @@
     <button data-tab="game">⚽ Jogo</button>
   </nav>
   <span id="quota" class="muted"></span>
+  <button id="btnManualTop" class="ghost" title="✍️ Aposta manual: registre no app de apostas uma aposta feita fora da análise (simples, múltipla ou no mesmo jogo) para ele acompanhar e conferir">✍️</button>
   <button id="btnKey" class="ghost" title="Chave da API e cache na nuvem">⚙️</button>
 </header>
 
@@ -93,7 +94,7 @@
   <select id="teamSel" hidden></select>
   <select id="fixSel" hidden></select>
   <div class="row">
-    <button id="btnManual" class="ghost" title="Registre no app de apostas uma entrada da sua análise, sem as regras do app">✍️ Entrada manual</button>
+    <button id="btnManual" class="ghost" title="Registre no app de apostas uma aposta feita fora da análise — simples, múltipla de vários jogos ou no mesmo jogo — para ele acompanhar e conferir o resultado">✍️ Aposta manual</button>
     <button id="btnRun" class="primary" disabled>Analisar jogo</button>
   </div>
   <p id="msg" class="msg" hidden></p>
@@ -160,21 +161,38 @@
     <h2 id="enTitle"></h2>
     <p id="enGame" class="muted"></p>
     <div id="enFacts" class="facts"></div>
-    <label class="chk" for="enManual"><input id="enManual" type="checkbox"> Minha análise: registrar sem as regras do app (piso de 60%, odd mínima, jogo difícil)</label>
-    <div id="enFree" hidden>
-      <div class="grid2">
-        <div><label for="enHome">Mandante</label><input id="enHome" type="text" autocomplete="off"></div>
-        <div><label for="enAway">Visitante</label><input id="enAway" type="text" autocomplete="off"></div>
+    <label class="chk" for="enManual" id="enManualWrap"><input id="enManual" type="checkbox"> Minha análise: registrar sem as regras do app (piso de 60%, odd mínima, jogo difícil)</label>
+    <!-- ✍️ aposta manual: o bilhete em pernas (entryview.js + ticket.js) -->
+    <div id="enTicket" class="ticket" hidden>
+      <div id="enLegs" class="legs"></div>
+      <div class="legedit">
+        <div class="gamenow"><span class="muted">Jogo da perna:</span> <b id="enGameNow">escolha o jogo</b> <button type="button" class="ghost mini" id="enPickToggle">trocar</button></div>
+        <div id="enPick" class="pick" hidden>
+          <div class="grid2">
+            <div><label for="enPickDate">Data</label><select id="enPickDate"></select></div>
+            <div><label for="enPickQ">Time</label><input id="enPickQ" type="search" autocomplete="off" placeholder="3 letras do mandante ou do visitante"></div>
+          </div>
+          <div id="enPickList" class="picklist"></div>
+          <button type="button" class="ghost mini" id="enTypeGame">O jogo não está na lista: digitar</button>
+          <div id="enFree" hidden>
+            <div class="grid2">
+              <div><label for="enHome">Mandante</label><input id="enHome" type="text" autocomplete="off"></div>
+              <div><label for="enAway">Visitante</label><input id="enAway" type="text" autocomplete="off"></div>
+            </div>
+            <div class="grid2">
+              <div><label for="enComp">Competição</label><input id="enComp" type="text" autocomplete="off"></div>
+              <div><label for="enWhen">Data e hora do jogo</label><input id="enWhen" type="datetime-local"></div>
+            </div>
+            <button type="button" class="ghost mini" id="enFreeOk">Usar este jogo</button>
+            <p class="muted small">Jogo digitado não está na API: o resultado da perna é marcado à mão no app de apostas.</p>
+          </div>
+        </div>
+        <label for="enLine">Linha</label>
+        <input id="enLine" type="text" autocomplete="off" placeholder="Ex.: Flamengo vence · Mais de 2,5 · Ambas marcam · 1X · Flamengo +1,5 · Mais de 9,5 escanteios">
+        <div id="enChips" class="chips"></div>
+        <p id="enLineMsg" class="muted small"></p>
+        <button type="button" class="ghost" id="enAddLeg">➕ Pôr no bilhete</button>
       </div>
-      <div class="grid2">
-        <div><label for="enComp">Competição</label><input id="enComp" type="text" autocomplete="off"></div>
-        <div><label for="enWhen">Data e hora do jogo</label><input id="enWhen" type="datetime-local"></div>
-      </div>
-    </div>
-    <div id="enLineWrap" hidden>
-      <label for="enLine">Linha</label>
-      <input id="enLine" type="text" autocomplete="off" placeholder="Ex.: Mais de 9,5 escanteios · Acima 2.5 · H1(-1) · Abaixo 4.5 1º período - escanteios">
-      <p id="enLineMsg" class="muted"></p>
     </div>
     <label for="enHouse">Casa</label>
     <select id="enHouse"></select>
@@ -182,7 +200,7 @@
     <div id="enCurWrap" hidden><label for="enCur">Moeda da casa</label>
       <select id="enCur"><option value="BRL">R$ (real)</option><option value="USD">US$ (dólar / USDT)</option><option value="EUR">€ (euro)</option></select></div>
     <div class="grid2">
-      <div><label for="enOdd">Odd que você pegou</label><input id="enOdd" type="number" step="0.01" min="1.01" inputmode="decimal" required></div>
+      <div><label for="enOdd" id="enOddLabel">Odd que você pegou</label><input id="enOdd" type="number" step="0.01" min="1.01" inputmode="decimal" required></div>
       <div><label for="enStake" id="enStakeLabel">Stake (R$)</label><input id="enStake" type="number" step="0.01" min="0.01" inputmode="decimal" required></div>
     </div>
     <p id="enCheck" class="check"></p>

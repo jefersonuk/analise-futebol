@@ -33,9 +33,43 @@ const MARKET_HINT = {
 const SIDE = '(casa|fora|mandante|visitante)';
 const sideOf = w => (['casa', 'mandante', '1'].includes(w) ? 'H' : 'A');
 
+// O que só a aposta manual reconhece (parseLine settle): dupla chance e linha de um time (gols ou escanteios), com o time
+// no começo ("casa mais de 1.5") ou no fim ("mais de 1.5 gols da casa"). Devolve { id }, { error } ou null (segue a regra
+// geral).
+const OU_WORD = '(acima|mais de|mais|over|abaixo|menos de|menos|under)';
+function settleOnly(s, { half, metric }) {
+  let m;
+  if (metric === 'goals' && !half) {
+    if (/^(dupla chance )?(1x|x1)\b|^(casa|mandante) ou empate\b|^empate ou (casa|mandante)\b/.test(s)) return { id: '1X' };
+    if (/^(dupla chance )?(x2|2x)\b|^(fora|visitante) ou empate\b|^empate ou (fora|visitante)\b/.test(s)) return { id: 'X2' };
+    if (/^(dupla chance )?12\b|^(casa|mandante) ou (fora|visitante)\b|^(fora|visitante) ou (casa|mandante)\b/.test(s)) return { id: '12' };
+    if ((m = s.match(/^vitoria (?:do |da |de )?(casa|fora|mandante|visitante)\b/))) return { id: sideOf(m[1]) === 'H' ? '1' : '2' };
+    // "Flamengo marca" (um gol ou mais); "marca primeiro" e afins não: são outros mercados
+    if ((m = s.match(new RegExp(`^${SIDE} (nao )?(?:marca|faz gol)(?: (?:um |1 )?gols?)?$`)))) return { id: `g${sideOf(m[1])}${m[2] ? 'U' : 'O'}0.5` };
+  }
+  // resultado do 1º tempo ("Flamengo vence o 1º tempo", "1º tempo: empate"): liquida pelo placar do intervalo. Sem o
+  // 1º tempo no texto, só o time e "vence" (ou o empate) — "vence o 1º tempo e o jogo" é outro mercado
+  if (metric === 'goals' && half) {
+    const t = s.replace(/\b(?:no |o )?(?:1o? ?(?:tempo|periodo)|primeiro tempo|1t|1st half|first half|ht)\b:?/g, ' ').replace(/\s+/g, ' ').trim();
+    if ((m = t.match(new RegExp(`^(?:vitoria (?:do |da |de )?)?${SIDE}(?: vence)?$`)))) return { id: `1T${sideOf(m[1]) === 'H' ? '1' : '2'}` };
+    if (t === 'empate') return { id: '1TX' };
+  }
+  const team = s.match(new RegExp(`^${SIDE}\\s*:?\\s*${OU_WORD}\\s*\\(?\\s*${NUM}`)) || s.match(new RegExp(`^${OU_WORD}\\s*\\(?\\s*${NUM}.*\\b(?:do|da|de|o|a)? ?${SIDE}$`));
+  if (!team) return null;
+  const [w, ou, L] = /^\(?(casa|fora|mandante|visitante)/.test(team[1]) ? [team[1], team[2], team[3]] : [team[3], team[1], team[2]];
+  const S = sideOf(w), OU = /acima|mais|over/.test(ou) ? 'O' : 'U';
+  if (half) return { error: 'Linha de um time no 1º tempo: a conferência não cobre.' };
+  if (metric === 'corners') return { id: `c${S}${OU}${+L}` };
+  if (metric === 'goals') return { id: `g${S}${OU}${+L}` };
+  return { error: 'Chutes de um time: a conferência não cobre.' };
+}
+
 // names: { home, away } do jogo — "CRB −2,5" vira "fora −2,5" quando o CRB é o visitante.
 // market: o mercado da linha, quando se sabe (linha vinda do app: rótulo + mercado).
-export function parseLine(text, { names = null, market = null } = {}) {
+// settle: true (aposta manual, edição no app de apostas): reconhece também o que a conferência liquida mas o modelo não
+// calcula — dupla chance ("Flamengo ou empate", "1X") e gols ou escanteios de um time ("Flamengo mais de 1,5", "Flamengo
+// marca") —, que sem a opção cairia no total do jogo.
+export function parseLine(text, { names = null, market = null, settle = false } = {}) {
   let s = norm(text);
   if (names?.home && names?.away) {
     const [h, a] = [norm(names.home), norm(names.away)];
@@ -53,6 +87,7 @@ export function parseLine(text, { names = null, market = null } = {}) {
   let m;
 
   if (/ambas|both teams|btts/.test(s)) return { id: /\bnao\b|\bno\b/.test(s) ? 'bttsN' : 'bttsY' };
+  if (settle) { const x = settleOnly(s, { half, metric }); if (x) return x; }
   if ((m = s.match(/ninguem\D*(\d+)/))) {
     if (metric !== 'corners' || half) return { error: 'Corrida só existe para escanteios do jogo inteiro.' };
     return { id: `crN${m[1]}` };
@@ -100,7 +135,8 @@ export function parseLine(text, { names = null, market = null } = {}) {
 
 // Mercado de uma linha pelo id (para a entrada manual: a linha digitada vira id e mercado do app).
 export function marketOfId(id) {
-  const tests = [[/^[12X]$/, '1X2'], [/^ah[HA]/, 'Handicap asiático'], [/^g1[OU]/, 'Total de gols 1T'], [/^g[OU]/, 'Total de gols'],
+  const tests = [[/^[12X]$/, '1X2'], [/^(1X|X2|12)$/, 'Dupla chance'], [/^ah[HA]/, 'Handicap asiático'], [/^g1[OU]/, 'Total de gols 1T'], [/^g[OU]/, 'Total de gols'],
+    [/^g[HA][OU]/, 'Gols por time'], [/^1T[12X]$/, 'Resultado 1º tempo'],
     [/^btts/, 'Ambas marcam'], [/^c1h[HA]/, 'Handicap escanteios 1T'], [/^c1x/, 'Resultado escanteios 1T'], [/^c1[OU]/, 'Total escanteios 1T'],
     [/^ch[HA]/, 'Handicap de escanteios'], [/^cx/, 'Resultado escanteios'], [/^cr[HAN]/, 'Corrida de escanteios'],
     [/^cb:/, 'Combo'], [/^c[HA][OU]/, 'Escanteios por time'], [/^corners[OU]/, 'Total de escanteios'], [/^shots[OU]/, 'Total de chutes'], [/^sot[OU]/, 'Total de chutes no gol']];

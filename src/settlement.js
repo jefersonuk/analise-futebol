@@ -44,18 +44,30 @@ export function settleLine(lineId, game, homeName = 'Mandante') {
   return bar ? { winner: WINNER[bar.res], value: bar.v, what: h.what, threshold: h.threshold } : null;
 }
 
-// Múltipla (multiple.js): os jogos das pernas numa requisição; uma perna perdida perde o bilhete (mesmo com jogos
-// por terminar); todas ganhas ganha. CLV: a odd tomada contra o produto das justas de fechamento da Pinnacle.
+// Múltipla (multiple.js; e a aposta manual em pernas, ticket.js): os jogos das pernas numa requisição (o mesmo jogo uma vez
+// só: a múltipla no mesmo jogo); uma perna perdida perde o bilhete (mesmo com jogos por terminar); todas ganhas ganha. Perna
+// sem jogo da API ou com a linha não reconhecida fica para marcar à mão. CLV: a odd tomada contra o produto das justas de
+// fechamento da Pinnacle — não na múltipla no mesmo jogo, em que as pernas andam juntas e o produto não é a justa.
 async function checkMulti(meta, oddTaken) {
-  const legs = meta.legs || [], fs = new Map();
-  for (let i = 0; i < legs.length; i += 20) for (const f of await get('/fixtures', { ids: legs.slice(i, i + 20).map(l => l.fixtureId).join('-') })) fs.set(f.fixture.id, f);
+  const legs = meta.legs || [], fs = new Map(), ids = [...new Set(legs.map(l => l.fixtureId).filter(Boolean))];
+  for (let i = 0; i < ids.length; i += 20) for (const f of await get('/fixtures', { ids: ids.slice(i, i + 20).join('-') })) fs.set(f.fixture.id, f);
+  const c1 = new Map();   // escanteios do 1º tempo dos jogos encerrados com perna de 1º tempo (1 requisição por jogo)
+  for (const id of new Set(legs.filter(l => /^c1/.test(l.lineId || '') && FINISHED.has(fs.get(l.fixtureId)?.fixture.status.short)).map(l => l.fixtureId))) {
+    try {
+      const s = await get('/fixtures/statistics', { fixture: id, half: 'true' }), f = fs.get(id);
+      const by = Object.fromEntries(s.map(t => [t.team.id, t.statistics_1h || []]));
+      const c = t => Number(by[t]?.find(x => x.type === 'Corner Kicks')?.value) || 0;
+      if (s.some(t => t.statistics_1h?.length)) c1.set(id, [c(f.teams.home.id), c(f.teams.away.id)]);
+    } catch { /* sem a estatística por tempo: a perna espera */ }
+  }
   const res = legs.map(l => {
+    if (!l.fixtureId || !l.lineId) return { l, r: null, txt: `${l.home} x ${l.away} ${l.linha || ''}: marcar à mão` };
     const f = fs.get(l.fixtureId);
     if (!f) return { l, r: null, txt: `${l.home} x ${l.away}: não encontrado` };
     const st = f.fixture.status.short;
     if (NO_MATCH.has(st)) return { l, r: 'VOID', txt: `${l.home} x ${l.away}: não disputado` };
     if (!FINISHED.has(st)) return { l, r: null, txt: `${l.home} x ${l.away}: ${f.fixture.status.long}` };
-    const g = gameOf(f), x = settleLine(l.lineId, g, f.teams.home.name);
+    const g = gameOf(f, c1.get(l.fixtureId) ?? null), x = settleLine(l.lineId, g, f.teams.home.name);
     return { l, r: x?.winner ?? null, txt: `${f.teams.home.name} ${g.gf}–${g.ga} ${f.teams.away.name} ${{ A: '✅', HW: '½✅', VOID: '↩', HL: '½❌', RED: '❌' }[x?.winner] || '?'}` };
   });
   const s = settleMulti(res.map(x => x.r), legs.map(l => l.odd_casa)), detail = `múltipla ${res.filter(x => x.r === 'A').length}/${legs.length}: ${res.map(x => x.txt).join(' · ')}`;
@@ -63,7 +75,8 @@ async function checkMulti(meta, oddTaken) {
   // devolução ou meia numa perna (jogo cancelado, linha asiática com 2 gols): a casa recalcula a odd
   if (s.manual) return { status: 'manual', detail: `${detail} — perna com devolução ou meia: a casa recalcula a odd${s.mult != null ? ` (pelas odds das pernas, o bilhete paga ${s.mult.toFixed(2).replace('.', ',')} × a entrada)` : ''}; confira o valor pago e marque à mão` };
   let clv = null, closingFair = null;
-  if (s.winner === 'A' || legs.every(l => fs.get(l.fixtureId) && FINISHED.has(fs.get(l.fixtureId).fixture.status.short))) {
+  const noClv = ids.length < legs.length;   // pernas no mesmo jogo ou fora da API
+  if (!noClv && (s.winner === 'A' || legs.every(l => fs.get(l.fixtureId) && FINISHED.has(fs.get(l.fixtureId).fixture.status.short)))) {
     try {
       let prod = 1;
       for (const l of legs) {
@@ -212,7 +225,7 @@ export function liveLine(lineId, info) {
   const h = history(lineId, 'home', info.home, [info.game]), bar = h?.bars[0];
   if (!bar) return null;
   const now = WINNER[bar.res], firstHalf = /^(g1|c1|1T)/.test(lineId);
-  const over = /^(g|g1|corners|c1|c[HA]|shots|sot)O/.test(lineId), under = /^(g|g1|corners|c1|c[HA]|shots|sot)U/.test(lineId);
+  const over = /^(g|g1|g[HA]|corners|c1|c[HA]|shots|sot)O/.test(lineId), under = /^(g|g1|g[HA]|corners|c1|c[HA]|shots|sot)U/.test(lineId);
   const decided = info.finished || (firstHalf && (info.status === 'HT' || PAST_HT.has(info.status)));
   const locked = decided || (over && now === 'A') || (under && now === 'RED');
   const need = over && !locked ? Math.floor(h.threshold) + 1 - bar.v : null;

@@ -306,12 +306,13 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   // parte (af:sim:<id>, índice af:simidx) — nunca vai para o app de apostas. O painel (simview.js) mostra as das
   // varreduras; as dos planos ficam no Plano do dia ----
   simUI = simPanel({ api, el: $('#simOut'), mine: id => !String(id).startsWith('plano-'), title: '🧪 Simulações das varreduras', onChange: () => render(),
+    tools: { openEntry, analyzeFixture, banca },
     intro: `Como se tivéssemos entrado em tudo o que cada varredura propôs: nossa análise (aposta e, à parte, "entrar se…" sem conferir),
       a linha de aposta de cada aba de mercado, o combo e a múltipla automática. Sempre no pior cenário: odd de entrada = a da Pinnacle na hora
       da varredura ("Pin"), não a odd mínima — a casa pagando mais é bônus. Onde ela não cota a aposta (linha derivada do total, combo), a odd que
       ela pagaria: a justa pelas chances dela, com a margem dela ("Pin est."); linha só do modelo, sem chance da Pinnacle, fica fora. Lucro em
       unidades (stake 1 em tudo) e em R$ (a entrada que o app propôs). CLV = odd de entrada contra a justa de fechamento da Pinnacle. Combo com devolução numa perna conta como anulada; múltipla com
-      devolução ou meia numa perna paga o produto do que cada perna pagou. As simulações dos planos ficam no Plano do dia. Nada daqui entra no app de apostas.` });
+      devolução ou meia numa perna paga o produto do que cada perna pagou. As simulações dos planos ficam no Plano do dia. A simulação não entra no app de apostas: em cada entrada aberta, o ➕ registra lá a aposta que você fizer e o 🔎 mostra as outras linhas do jogo.` });
   async function runSim() {
     if (!scan?.games.length) return;
     const sim = buildSim(scan, { banca });

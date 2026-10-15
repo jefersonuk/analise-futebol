@@ -119,6 +119,23 @@ dialog#entryDlg .facts b { font-weight: 600; }
 dialog#entryDlg .check { font-size: 13px; margin: 10px 0 0; line-height: 1.5; }
 dialog#entryDlg .row.end { justify-content: flex-end; margin-top: 14px; }
 dialog#entryDlg .row.end .primary { margin-left: 0; }
+dialog#entryDlg [hidden] { display: none !important; }
+/* ✍️ aposta manual: o bilhete em pernas */
+dialog#entryDlg { max-height: calc(100vh - 32px); overflow-y: auto; }
+dialog#entryDlg .legs { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; margin: 10px 0; }
+dialog#entryDlg .legs:empty { display: none; }
+dialog#entryDlg .leghead { font-size: 12px; color: var(--muted); padding: 4px 0; }
+dialog#entryDlg .legrow { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+dialog#entryDlg .legn { color: var(--muted); font-size: 12px; text-align: right; }
+dialog#entryDlg .legtxt { overflow-wrap: anywhere; }
+dialog#entryDlg .legedit { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 10px; }
+dialog#entryDlg .gamenow { font-size: 13px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+dialog#entryDlg .pick { margin: 4px 0 6px; }
+dialog#entryDlg .picklist { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; max-height: 240px; overflow-y: auto; }
+dialog#entryDlg .picklist:empty { display: none; }
+dialog#entryDlg .pickfx { text-align: left; width: 100%; padding: 7px 10px; font-size: 13px; }
+dialog#entryDlg .chips { margin: 8px 0 0; }
+dialog#entryDlg #enAddLeg { margin-top: 8px; width: 100%; }
 
 #myText { width: 100%; }
 #myMarket, #myLine { flex: 1; min-width: 160px; }
@@ -235,6 +252,8 @@ details.sims { border: 1px dashed var(--line); border-radius: 10px; padding: 8px
 details.sims > summary { font-weight: 700; cursor: pointer; }
 .simcard { border-top: 1px solid var(--line); padding: 8px 0; }
 table.simtab td, table.simtab th { white-space: nowrap; }
+table.simtab td.acts .mini + .mini { margin-left: 4px; }
+table.simtab tr.othrow > td { white-space: normal; background: var(--bg); padding: 8px 10px; }
 
 /* plano do dia */
 #planSec h3 { margin: 14px 0 6px; font-size: 15px; }

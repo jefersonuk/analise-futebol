@@ -14,8 +14,9 @@ import { BIG_LEAGUES, isBig } from './leagues.js';
 import { buildPlanSim, comboPin, simReport, ticketPin } from './sim.js';
 import { simPanel } from './simview.js';
 import { bindSpecialist, briefPlan } from './brief.js';
-import { bindTooltips, chartLegend, teamCharts } from './dashboard.js';
-import { chanceChart, comboBody, halfBody, legsBody, singleBody } from './planwhy.js';
+import { bindTooltips, chartLegend } from './dashboard.js';
+import { comboBody, halfBody, legsBody, singleBody } from './planwhy.js';
+import { SHORT, bindOthers } from './otherlines.js';
 import { CONTRA_SHARE, STAKE, isContra, money, stakeOf } from './stake.js';
 
 const $ = s => document.querySelector(s);
@@ -32,8 +33,6 @@ const BUDGET_KEY = 'afScanBudget', WIN_KEY = 'afPlanWin', MARKETS_KEY = 'afPlanM
 const HOURS = [1, 2, 3, 4, 6, 8, 12, 24];
 const isHours = w => /^h\d+$/.test(w);
 const keyOf = w => (isHours(w) ? `plano-${w}` : dayStr(Number(w.slice(1))));   // onde a varredura e o plano ficam guardados
-const SHORT = { 'Handicap asiático': 'Handicap', 'Total de gols': 'Gols', '1X2': '1X2', 'Total de escanteios': 'Escanteios', 'Total escanteios 1T': 'Escanteios 1T',
-  'Total de chutes': 'Chutes', 'Total de chutes no gol': 'Chutes no gol', 'Resultado 1º tempo': '1º tempo', 'Total de gols 1T': 'Gols 1T', Combo: 'Mesmo jogo' };
 
 // O funil do plano (plan.js planFunnel) numa linha: dos jogos da janela aos analisados, e onde caiu cada analisado.
 function funnelLine(f, inWindow = false) {
@@ -135,14 +134,14 @@ export function initPlan({ api, openEntry, analyzeFixture = null, banca }) {
   }
   // as simulações dos planos (simview.js): todos os planos montados, o mais novo primeiro
   const simUI = simPanel({ api, el: $('#planSimOut'), mine: id => String(id).startsWith('plano-'), title: '🧪 Simulação dos planos',
-    cat: c => c.replace(/^Plano: /, ''), onChange: () => render(),
+    cat: c => c.replace(/^Plano: /, ''), onChange: () => render(), tools: { openEntry, analyzeFixture, banca },
     intro: `Cada plano montado entra aqui sozinho, como se tivéssemos feito todas as entradas dele, sempre no pior cenário: na odd da Pinnacle
       da hora do plano ("Pin"), não na odd mínima — a casa pagando mais é bônus. Combo e perna asiática, que ela não cota, na odd que ela pagaria:
       a justa pelas chances dela, com a margem dela em cada perna ("Pin est."); a múltipla no produto das pernas. Montar de novo a mesma
       janela antes de qualquer jogo começar substitui o plano anterior. O resultado sai por frente (🎯 nossa leitura, 🤝 acordo com a Pinnacle),
       múltipla e mesmo jogo, em unidades (stake 1 em tudo) e em dinheiro (a entrada proposta: ${money(STAKE.value)} a favor da Pinnacle,
       ${money(STAKE.value * CONTRA_SHARE)} contra; antes de 14/10, 10 € em tudo); CLV = a odd de entrada contra a justa de fechamento
-      da Pinnacle. Os resultados entram com 🔄 Conferir resultados depois dos jogos (e sozinhos com a página aberta). Nada daqui entra no app de apostas.` });
+      da Pinnacle. Os resultados entram com 🔄 Conferir resultados depois dos jogos (e sozinhos com a página aberta). A simulação não entra no app de apostas: em cada entrada aberta, o ➕ registra lá a aposta que você fizer e o 🔎 mostra as outras linhas do jogo.` });
   $('#planOut').addEventListener('click', async e => {
     if (e.target.closest('#planSimRun') && plan) {
       const ok = await simPlan();
@@ -380,75 +379,8 @@ export function initPlan({ api, openEntry, analyzeFixture = null, banca }) {
     bindTooltips(out);
   }
 
-  // ---- outras linhas de um jogo do plano (pedido do Jeferson, 13/10/2026: "nos jogos do plano, me dê opção de analisar
-  // outras linhas"): as linhas que a análise do plano já tem do jogo — sem gastar requisição —, por mercado, com a chance,
-  // a Pinnacle e a mínima; 📈 abre o porquê da linha (a chance por fonte e os últimos jogos de cada time), ➕ registra. ----
-  const OTHER = ['Handicap asiático', 'Total de gols', '1X2', 'Resultado 1º tempo', 'Total de gols 1T', 'Total de escanteios', 'Total escanteios 1T', 'Total de chutes', 'Total de chutes no gol', 'Combo'];
-  function linesOf(g) {
-    const ours = new Map((g.scenario || []).map(l => [l.id, l]));
-    const all = [...(g.lines || []).filter(l => OTHER.includes(l.market) && !/^(g|g1|corners|c1|shots|sot)U/.test(l.id) && l.p_blend >= 0.35 && l.p_blend <= 0.92),
-      ...(g.scenario || []).filter(l => !(g.lines || []).some(x => x.id === l.id)), ...(g.fav_half ? [g.fav_half] : []), ...(g.fav_combos || [])];
-    const per = new Map();
-    for (const l of all.sort((a, b) => OTHER.indexOf(a.market) - OTHER.indexOf(b.market) || (b.p_blend ?? b.p_nossa) - (a.p_blend ?? a.p_nossa))) {
-      const k = l.market, xs = per.get(k) || [];
-      if (xs.length < 6) xs.push({ l, ours: ours.get(l.id) || null });
-      per.set(k, xs);
-    }
-    return [...per.entries()];
-  }
-  const findLine = (g, id) => [...(g.lines || []), ...(g.scenario || []), ...(g.fav_half ? [g.fav_half] : []), ...(g.fav_combos || [])].find(l => l.id === id);
-  function othersHtml(g) {
-    const groups = linesOf(g);
-    if (!groups.length) return '<p class="muted small">A análise do plano não guardou outras linhas deste jogo — abra a análise completa.</p>';
-    const tag = (l, o) => (o?.bet ? '<span class="tag mid">🎯 aposta</span>' : o?.conditional ? '<span class="tag">🎯 entrar se…</span>'
-      : l.tier && l.tier !== 'especulativa' ? `<span class="tag ok">${esc(l.tier)}</span>` : '<span class="muted small">—</span>');
-    return `<div class="scroll"><table class="othtab"><tr><th>Mercado</th><th>Linha</th><th>Chance</th><th>Nossa leitura</th><th>Pinnacle</th><th>Odd mínima</th><th>Nível</th><th></th></tr>
-      ${groups.map(([m, xs]) => xs.map(({ l, ours: o }, i) => `<tr${i === 0 ? ' class="grp"' : ''}><td class="muted">${i === 0 ? esc(SHORT[m] || m) : ''}</td><td><b>${esc(l.line)}</b></td>
-        <td>${pct(l.p_blend ?? l.p_nossa)}</td><td>${o ? pct(o.p_nossa) : '<span class="muted">—</span>'}</td>
-        <td>${l.p_pinnacle != null ? `${pct(l.p_pinnacle)}${l.pinnacle_odd ? ` · ${n2(l.pinnacle_odd)}` : ''}` : '<span class="muted">não cota</span>'}</td>
-        <td><b>${n2(l.odd_min)}</b></td><td>${tag(l, o)}</td>
-        <td class="acts">${/^cb:/.test(l.id) ? '' : `<button class="ghost mini" data-olc="${g.fx.id}|${esc(l.id)}" title="Ver o porquê desta linha">📈</button>`}
-          <button class="enter mini" data-ole="${g.fx.id}|${esc(l.id)}" title="Registrar esta linha">➕</button></td></tr>`).join('')).join('')}</table></div>
-      <div class="othchart" hidden></div>`;
-  }
-  function othChart(g, l) {
-    const p = l.p_blend ?? l.p_nossa, bars = [['Pinnacle', l.p_pinnacle ?? null, false, 'a chance da Pinnacle, sem a margem dela'], ['Modelo', l.p_model ?? null, false, 'o nosso modelo'],
-      ['Últimos 10 jogos', l.hit_rate_last10 ?? null, false, 'quanto a linha teria acertado nos últimos 10 jogos dos dois times'], ['Chance', p, true, 'a chance que o app usa']];
-    return `<div class="othhead"><b>${esc(SHORT[l.market] || l.market)}: ${esc(l.line)}</b> · chance ${pct(p)} · odd mínima <b>${n2(l.odd_min)}</b>${l.pinnacle_odd ? ` · Pinnacle ${n2(l.pinnacle_odd)}` : ''}
-      <button class="ghost mini" data-olx title="Fechar">✕</button></div>
-      <div class="whygrid">${chanceChart(bars, l.odd_min > 1 ? [1 / l.odd_min, `a mínima ${n2(l.odd_min)} exige`] : null)}<div></div></div>
-      ${g.teams?.length ? `<div class="teams">${teamCharts(l, g.teams)}</div>` : ''}`;
-  }
-  $('#planOut').addEventListener('toggle', e => {
-    const d = e.target.closest?.('details.othlines');
-    if (!d || !d.open || d.dataset.ready) return;
-    const g = scan?.games.find(x => x.fx.id === Number(d.dataset.others));
-    if (!g) return;
-    d.querySelector('.othbody').innerHTML = othersHtml(g);
-    d.dataset.ready = '1';
-  }, true);
-  $('#planOut').addEventListener('click', async e => {
-    const c = e.target.closest('[data-olc]'), en = e.target.closest('[data-ole]'), x = e.target.closest('[data-olx]'), full = e.target.closest('[data-full]');
-    if (x) { const box = x.closest('.othchart'); box.hidden = true; box.innerHTML = ''; return; }
-    if (c || en) {
-      const [f, id] = (c || en).dataset[c ? 'olc' : 'ole'].split('|'), g = scan?.games.find(y => y.fx.id === Number(f)), l = g && findLine(g, id);
-      if (!l) return;
-      if (en) { openEntry(l.id, null, { line: l, fx: g.fx, btn: en }); return; }
-      const box = c.closest('.othbody').querySelector('.othchart');
-      box.innerHTML = othChart(g, l); box.hidden = false; bindTooltips(box);
-      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      return;
-    }
-    if (full && analyzeFixture) {
-      const g = scan?.games.find(y => y.fx.id === Number(full.dataset.full));
-      if (!g) return;
-      full.disabled = true;
-      let national = false;
-      try { national = !!(await api.teamInfo?.(g.fx.home.id))?.national; } catch { /* segue como clube */ }
-      await analyzeFixture(g.fx, national);
-      full.disabled = false;
-    }
-  });
+  // outras linhas de cada jogo do plano (otherlines.js): da análise do plano, sem gastar requisição
+  bindOthers($('#planOut'), { getGame: id => scan?.games.find(x => x.fx.id === id) || null, openEntry, analyzeFixture, api });
 
   renderMarkets();
   show();

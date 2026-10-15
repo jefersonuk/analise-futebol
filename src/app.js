@@ -508,12 +508,15 @@ function renderGames() {
 }
 
 // ---- entrar numa linha: manda a aposta para o app de apostas de valor (entryview.js) ----
-const openEntry = initEntry({ getLine: id => state.price?.(id) || null, getFixture: () => state.fixture });
-// ✍️ Entrada manual: o jogo escolhido na busca (ou o da análise aberta); sem jogo, ele é digitado no formulário.
+const openEntry = initEntry({ getLine: id => state.price?.(id) || null, getFixture: () => state.fixture, dayAll: api.dayAll });
+// ✍️ Aposta manual: o jogo escolhido na busca (ou o da análise aberta) vem como o da primeira perna; sem jogo, a busca na
+// lista do dia.
 $('#btnManual').onclick = () => {
   const picked = !$('#fixSel').hidden ? state.fixtures[Number($('#fixSel').value)] : null;
   openEntry.manual({ fx: picked || state.fixture || null });
 };
+// e na barra do topo, de qualquer aba: sem jogo, começa pela busca na lista do dia
+$('#btnManualTop').onclick = () => openEntry.manual();
 $('#dash').addEventListener('click', e => {
   const b = e.target.closest('[data-enter]');
   if (b) openEntry(b.dataset.enter);

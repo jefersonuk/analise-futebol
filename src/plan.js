@@ -256,6 +256,21 @@ export function planFromKeys(scan, keys, { banca = 44000 } = {}) {
   return { date: keys.date, scan_at: keys.scan_at, made_at: keys.made_at ?? null, target: keys.target, markets: keys.markets ?? null, big: !!keys.big, singles, sameGame, halves, multis, stats: null };
 }
 
+// A linha de uma entrada da simulação (sim.js) no jogo da varredura guardada, como o plano a montou (🤝 com o alvo, 1º tempo
+// com a mínima dele), para o ➕ da simulação; null quando a análise do jogo não tem mais a linha.
+export function lineOfBet(g, b, banca = 44000) {
+  const id = b.lineId, inList = xs => (xs || []).find(l => l.id === id) || null;
+  if (b.cat === 'Plano: simples (acordo com a Pinnacle)') { const l = inList(g.lines); return l && agreeLine(l, banca); }
+  if (b.cat === 'Plano: favorito 1º tempo') return g.fav_half?.id === id ? halfLine(g.fav_half, banca) : null;
+  if (/nossa leitura|nossa análise/.test(b.cat)) return inList(g.scenario);
+  return inList(g.lines) || inList(g.scenario) || inList(g.fav_combos) || inList(g.combos) || (g.fav_half?.id === id ? g.fav_half : null);
+}
+// Sem a análise guardada: a linha com o que a simulação tem (a chance da hora do plano) — o formulário a registra sem a
+// regra do piso (entryview.js from_sim) e o app de apostas confere o resultado pelo id.
+export const simLine = b => ({ id: b.lineId, market: b.market, line: b.line, p_blend: b.p ?? null, p_model: null, p_pinnacle: b.p_pinnacle ?? null,
+  pinnacle_odd: b.odd_src === 'pinnacle' ? b.odd : null, fair_odd_blend: b.p > 0 ? r2(1 / b.p) : null, odd_min: null, tier: 'da simulação',
+  priced_by: b.odd_src === 'pinnacle' ? 'pinnacle' : 'simulação', fragile: false, from_sim: true, ...(/^cb:/.test(b.lineId || '') ? { combo: true } : {}) });
+
 // A entrada de cada aposta do plano, na ordem dos blocos (simples, 1º tempo, mesmo jogo, múltiplas): 20 € a favor da
 // Pinnacle, 10 € contra (stake.js).
 export const planStakes = plan => [...plan.singles.map(x => stakeOf(x.line)), ...(plan.halves || []).map(x => stakeOf(x.line)),

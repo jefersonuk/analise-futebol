@@ -85,6 +85,15 @@ function spec(id, role, teamName) {
   }
   if (id === '1') return ah('H', -0.5);
   if (id === '2') return ah('A', -0.5);
+  // dupla chance (aposta manual): o lado +0,5; 12 = sem empate
+  if (id === '1X') return ah('H', 0.5);
+  if (id === 'X2') return ah('A', 0.5);
+  if (id === '12') return { what: `saldo de gols do ${teamName}`, value: gd, calc: diffCalc('goals'), x: v => Math.abs(v), off: -0.5, threshold: 0.5, rule: 'sem empate' };
+  // gols de um time (aposta manual: "Flamengo mais de 1,5", "Flamengo marca")
+  if ((m = id.match(/^g([HA])([OU])(.+)$/))) {
+    const own = (m[1] === 'H') === (role === 'home');
+    return { what: own ? `gols do ${teamName}` : `gols sofridos pelo ${teamName}`, value: g => (own ? g.gf : g.ga), ...ou(m[2], +m[3]) };
+  }
   if (id === 'X') return { what: `saldo de gols do ${teamName}`, value: gd, calc: diffCalc('goals'), x: v => -Math.abs(v), off: 0.5, threshold: 0, rule: 'só com saldo 0 (empate)' };
   if (id === 'bttsY' || id === 'bttsN') {
     const yes = id === 'bttsY';
