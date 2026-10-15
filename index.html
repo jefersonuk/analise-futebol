@@ -188,17 +188,20 @@
           </div>
         </div>
         <label for="enLine">Linha</label>
-        <input id="enLine" type="text" autocomplete="off" placeholder="Ex.: Flamengo vence · Mais de 2,5 · Ambas marcam · 1X · Flamengo +1,5 · Mais de 9,5 escanteios">
+        <input id="enLine" type="text" autocomplete="off" placeholder="Ex.: Flamengo (vencedor) · Mais de 2,5 · Ambas marcam · 1X · Flamengo +1,5 · Mais de 9,5 escanteios">
         <div id="enChips" class="chips"></div>
         <p id="enLineMsg" class="muted small"></p>
-        <button type="button" class="ghost" id="enAddLeg">➕ Pôr no bilhete</button>
+        <div class="legadd">
+          <div><label for="enLegOdd">Odd da perna <span class="muted">(opcional)</span></label><input id="enLegOdd" type="number" step="0.01" min="1.01" inputmode="decimal" placeholder="ex.: 1,58"></div>
+          <button type="button" class="ghost" id="enAddLeg">➕ Pôr no bilhete</button>
+        </div>
       </div>
     </div>
     <label for="enHouse">Casa</label>
     <select id="enHouse"></select>
     <input id="enHouseOther" type="text" placeholder="Nome da casa" hidden>
     <div id="enCurWrap" hidden><label for="enCur">Moeda da casa</label>
-      <select id="enCur"><option value="BRL">R$ (real)</option><option value="USD">US$ (dólar / USDT)</option><option value="EUR">€ (euro)</option></select></div>
+      <select id="enCur"><option value="BRL">R$ (real)</option><option value="USD">US$ (dólar / USDT / USDC)</option><option value="EUR">€ (euro)</option></select></div>
     <div class="grid2">
       <div><label for="enOdd" id="enOddLabel">Odd que você pegou</label><input id="enOdd" type="number" step="0.01" min="1.01" inputmode="decimal" required></div>
       <div><label for="enStake" id="enStakeLabel">Stake (R$)</label><input id="enStake" type="number" step="0.01" min="0.01" inputmode="decimal" required></div>

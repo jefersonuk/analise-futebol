@@ -517,6 +517,10 @@ $('#btnManual').onclick = () => {
 };
 // e na barra do topo, de qualquer aba: sem jogo, começa pela busca na lista do dia
 $('#btnManualTop').onclick = () => openEntry.manual();
+// aberto pelo app de apostas com #manual ("✍️ Aposta manual" da aba Análise de lá): já com o bilhete na tela
+const manualHash = () => { if (location.hash !== '#manual') return; history.replaceState(null, '', location.pathname + location.search); openEntry.manual(); };
+window.addEventListener('hashchange', manualHash);
+manualHash();
 $('#dash').addEventListener('click', e => {
   const b = e.target.closest('[data-enter]');
   if (b) openEntry(b.dataset.enter);

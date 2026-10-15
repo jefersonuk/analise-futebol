@@ -40,6 +40,11 @@ const OU_WORD = '(acima|mais de|mais|over|abaixo|menos de|menos|under)';
 function settleOnly(s, { half, metric }) {
   let m;
   if (metric === 'goals' && !half) {
+    // "Vencedor" (como nos bilhetes das casas): o time sozinho, "Vencedor: Flamengo", "Flamengo (vencedor)", "Flamengo ML"
+    // → a vitória dele; "Vencedor: Empate" → o empate
+    const v = s.replace(/^(?:vencedor|resultado final|resultado|1x2|moneyline|ml)\s*:?\s*/, '').replace(/\s*\((?:vencedor|vence|ml)\)$|\s+(?:ml|to win)$/, '').trim();
+    if ((m = v.match(new RegExp(`^${SIDE}$`)))) return { id: sideOf(m[1]) === 'H' ? '1' : '2' };
+    if (v === 'empate' && v !== s) return { id: 'X' };
     if (/^(dupla chance )?(1x|x1)\b|^(casa|mandante) ou empate\b|^empate ou (casa|mandante)\b/.test(s)) return { id: '1X' };
     if (/^(dupla chance )?(x2|2x)\b|^(fora|visitante) ou empate\b|^empate ou (fora|visitante)\b/.test(s)) return { id: 'X2' };
     if (/^(dupla chance )?12\b|^(casa|mandante) ou (fora|visitante)\b|^(fora|visitante) ou (casa|mandante)\b/.test(s)) return { id: '12' };

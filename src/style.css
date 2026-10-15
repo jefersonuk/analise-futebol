@@ -135,7 +135,10 @@ dialog#entryDlg .picklist { display: flex; flex-direction: column; gap: 4px; mar
 dialog#entryDlg .picklist:empty { display: none; }
 dialog#entryDlg .pickfx { text-align: left; width: 100%; padding: 7px 10px; font-size: 13px; }
 dialog#entryDlg .chips { margin: 8px 0 0; }
-dialog#entryDlg #enAddLeg { margin-top: 8px; width: 100%; }
+dialog#entryDlg .legadd { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
+dialog#entryDlg .legadd label { margin-top: 4px; }
+dialog#entryDlg #enAddLeg { width: 100%; }
+dialog#entryDlg .legodd { font-weight: 600; color: var(--blue); white-space: nowrap; }
 
 #myText { width: 100%; }
 #myMarket, #myLine { flex: 1; min-width: 160px; }

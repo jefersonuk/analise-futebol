@@ -16,12 +16,20 @@ const localStr = t => { const d = new Date(t); return new Date(d - d.getTimezone
 // "Flamengo vence + Mais de 2,5 gols" -> duas linhas (o "+" com espaço dos dois lados: "+1,5" é handicap)
 export const splitLegs = text => String(text || '').split(/\s\+\s/).map(s => s.trim()).filter(Boolean);
 
-// Uma perna: fx = o jogo (da API, com id; digitado, id null) e a linha escrita. auto: o app de apostas confere sozinho.
-export function legOf(fx, text) {
-  const linha = String(text || '').trim(), p = parseLine(linha, { names: { home: fx.home.name, away: fx.away.name }, settle: true });
-  const lineId = p.id || null;
+// Uma perna: fx = o jogo (da API, com id; digitado, id null), a linha escrita e a odd da perna na casa (opcional; também
+// no fim do texto: "Khon Kaen United @ 1,58"). auto: o app de apostas confere sozinho.
+const ODD_AT = /\s*@\s*(\d+(?:[.,]\d+)?)\s*$/;
+export function legOf(fx, text, odd = null) {
+  let linha = String(text || '').trim(), o = odd;
+  const at = linha.match(ODD_AT);
+  if (at) { o = o ?? parseFloat(at[1].replace(',', '.')); linha = linha.replace(ODD_AT, '').trim(); }
+  const p = parseLine(linha, { names: { home: fx.home.name, away: fx.away.name }, settle: true }), lineId = p.id || null;
+  // o resultado com o nome do time ("Vencedor: Flamengo" → "Flamengo vence"); as outras linhas ficam como escritas
+  linha = { 1: `${fx.home.name} vence`, 2: `${fx.away.name} vence`, X: 'Empate', '1X': `${fx.home.name} ou empate`, X2: `${fx.away.name} ou empate`,
+    12: `${fx.home.name} ou ${fx.away.name}` }[lineId] || linha;
   return { fixtureId: fx.id || null, kickoff: new Date(fx.t).toISOString(), home: fx.home.name, away: fx.away.name,
     competition: fx.league?.name || 'Entrada manual', lineId, linha, mercado: (lineId && marketOfId(lineId)) || 'Entrada manual',
+    odd_casa: o > 1 ? Math.round(o * 100) / 100 : null,
     auto: !!(fx.id && lineId), error: lineId ? null : p.error && !/^Não reconheci/.test(p.error) ? p.error : 'linha não reconhecida' };
 }
 
@@ -31,6 +39,13 @@ export const gameKey = l => (l.fixtureId ? `id${l.fixtureId}` : `${norm(l.home)}
 export function ticketKind(legs) {
   if (legs.length < 2) return 'simples';
   return new Set(legs.map(gameKey)).size === 1 ? 'mesmo jogo' : 'múltipla';
+}
+
+// A odd total pelas odds das pernas (o produto), quando todas têm odd e cada uma é de um jogo — no mesmo jogo a casa
+// precifica o combo, e o produto não é a odd dele.
+export function legsOdd(legs) {
+  if (!legs.length || !legs.every(l => l.odd_casa > 1) || new Set(legs.map(gameKey)).size < legs.length) return null;
+  return Math.round(legs.reduce((t, l) => t * l.odd_casa, 1) * 100) / 100;
 }
 
 // Os atalhos de linha do jogo: [rótulo, texto] (o texto vai para o campo; dois atalhos seguidos fazem o mesmo jogo)
@@ -69,7 +84,7 @@ export function buildTicket({ legs, casa, currency, odd, stake, stakeNat = null 
     date: localStr(first), oddMkt: null, prob: null,
     analise: {
       manual: true, multi: true, ...(same ? { same_game: true, home: g.home, away: g.away } : {}),
-      legs: legs.map(({ auto, error, ...l }) => ({ ...l, odd_casa: null })),
+      legs: legs.map(({ auto, error, ...l }) => ({ ...l, odd_casa: l.odd_casa ?? null })),
       fixtureId: lastApi?.fixtureId ?? null, lineId: 'multi', kickoff: last.kickoff, first_kickoff: new Date(first).toISOString(),
       competition: [...new Set(legs.map(l => l.competition))].join(', '), mercado: same ? 'Mesmo jogo' : 'Múltipla',
       linha: same ? lines : `${legs.length} pernas`, tier: 'manual',

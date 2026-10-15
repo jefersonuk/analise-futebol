@@ -109,3 +109,21 @@ test('conferência do bilhete manual: o mesmo jogo pedido uma vez, sem CLV; pern
   assert.equal(o.status, 'pendente');
   assert.match(o.detail, /Time A x Time B Gol olímpico: marcar à mão/);
 });
+
+test('o bilhete como o da casa: "Vencedor" pelo nome do time, a odd de cada perna e a cota total pelo produto', async () => {
+  const { legsOdd } = await import('../src/ticket.js');
+  const live = (id, h, a) => ({ id, t: Date.UTC(2026, 9, 15, 11, 30), home: { name: h }, away: { name: a }, league: { name: 'AFC' } });
+  const k = live(1, 'Khon Kaen United', 'Chainat Hornbill FC'), c = live(2, 'Kuching City', 'Kitchee SC'), m = live(3, 'Tampines Rovers', 'FC Machida Zelvia');
+  const legs = [legOf(k, 'Khon Kaen United @ 1,58'), legOf(c, 'Vencedor: Kuching City', 1.6), legOf(m, 'FC Machida Zelvia (vencedor) @1.27')];
+  assert.deepEqual(legs.map(l => [l.lineId, l.linha, l.odd_casa, l.auto]), [['1', 'Khon Kaen United vence', 1.58, true], ['1', 'Kuching City vence', 1.6, true], ['2', 'FC Machida Zelvia vence', 1.27, true]]);
+  assert.equal(legsOdd(legs), 3.21, 'a cota total do bilhete');
+  const it = buildTicket({ legs, casa: 'Overtime', currency: 'USD', odd: 3.21, stake: 108, stakeNat: 20 });
+  assert.deepEqual(it.analise.legs.map(l => l.odd_casa), [1.58, 1.6, 1.27], 'a odd de cada perna vai junto (a casa recalcula com ela se uma perna devolver)');
+  assert.deepEqual([it.market, it.odd, it.cur, it.stakeNat], ['Múltipla', 3.21, 'USD', 20]);
+  // empate e dupla chance também com o nome dos times; no mesmo jogo, sem produto (a casa dá a odd do combo)
+  assert.equal(legOf(k, 'Vencedor: Empate').lineId, 'X');
+  assert.equal(legOf(k, 'Chainat Hornbill FC ou empate').linha, 'Chainat Hornbill FC ou empate');
+  assert.equal(legsOdd([legOf(k, 'Khon Kaen United @ 1,58'), legOf(k, 'Mais de 1,5 @ 1,30')]), null);
+  assert.equal(legsOdd([legOf(k, 'Khon Kaen United @ 1,58'), legOf(c, 'Kuching City')]), null, 'falta a odd de uma perna');
+  assert.equal(legsOdd([legOf(k, 'Khon Kaen United @ 1,58')]), 1.58, 'simples: a odd da perna');
+});
