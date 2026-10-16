@@ -1,6 +1,6 @@
 // Simulação: registra como se tivéssemos entrado em TUDO o que uma varredura propôs, com a odd da Pinnacle da hora da
 // varredura como odd de entrada, e liquida pelos resultados da API — para medir lucro e prejuízo de cada lente sem
-// mexer nas apostas reais (fica guardada à parte: af:sim:<id>; nunca vai para o app de apostas).
+// mexer nas apostas reais (fica guardada à parte: af:sim:v2:<id>; nunca vai para o app de apostas).
 //
 // O que entra (o que cada aba da varredura marca como entrada):
 //   nossa análise   a linha com status "aposta" de cada jogo; sem aposta, a "entrar se…" (marcada à parte: sem conferir)
@@ -24,9 +24,10 @@ import { isBet } from './dossier.js';
 import { MULTI, TARGET, bandTickets, multiLegs, settleMulti, ticketOf } from './multiple.js';
 import { pinMargin } from './odds.js';
 import { STAKE, stakeOf } from './stake.js';
+import { SIM_CAT } from './plan.js';
 
-export const CATS = ['Plano: simples (nossa leitura)', 'Plano: simples (acordo com a Pinnacle)', 'Plano: simples (chutes)', 'Plano: simples', 'Plano: múltipla', 'Plano: mesmo jogo', 'Plano: favorito 1º tempo', 'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T',
-  'Handicap gols', '1X2', 'Escanteios', 'Escanteios 1T', 'Chutes', 'Combo', 'Múltipla'];
+export const CATS = ['Plano: mesmo jogo', 'Plano: total de gols (nossa leitura)', 'Plano: total de gols (acordo com a Pinnacle)', 'Plano: vitória do favorito', 'Plano: favorito 1º tempo',
+  'nossa análise: aposta', 'nossa análise: entrar se…', 'Gols', 'Gols 1T', 'Handicap gols', '1X2', 'Escanteios', 'Escanteios 1T', 'Chutes', 'Combo', 'Múltipla'];
 const CAT_OF = { 'Total de gols': 'Gols', 'Total de gols 1T': 'Gols 1T', 'Handicap asiático': 'Handicap gols', '1X2': '1X2', 'Total de escanteios': 'Escanteios',
   'Total escanteios 1T': 'Escanteios 1T', 'Total de chutes': 'Chutes', 'Total de chutes no gol': 'Chutes' };
 const r2 = x => Math.round(x * 100) / 100, r3 = x => Math.round(x * 1000) / 1000;
@@ -99,19 +100,17 @@ function multiBet(legs, banca, cat) {
     status: 'aberta', winner: null, profit_u: null, profit_brl: null, clv: null, detail: null };
 }
 
-// O Plano do dia (plan.js) na simulação, na odd da Pinnacle da hora do plano: as simples na dela, os combos e as pernas
-// asiáticas na que ela pagaria, as múltiplas no produto. id: um por montagem (planview: plano-<hora da varredura>);
-// win: a janela escolhida (h4, d1…); label: o nome do plano no painel.
-export function buildPlanSim(plan, { banca = 44000, id = `plano-${plan.date}`, win = null, label = null } = {}) {
+// O Plano do dia (plan.js) na simulação, na odd da Pinnacle da hora do plano: as linhas na dela, os combos na que ela
+// pagaria. Uma categoria por bloco (o total de gols separado pela frente: nossa leitura × acordo com a Pinnacle).
+// id: um por montagem (planview: plano-<hora da varredura>); win: a janela escolhida (h4, d1…); label: o nome no painel.
+export function buildPlanSim(plan, { id = `plano-${plan.date}`, win = null, label = null } = {}) {
+  const one = (g, line, cat) => { const [odd, src] = linePin(line, g); return odd ? [base(g, line, cat, odd, src, stakeOf(line))] : []; };
   const bets = [
-    ...plan.singles.flatMap(({ g, line, lens }) => {
-      const [odd, src] = linePin(line, g), cat = { agree: 'Plano: simples (acordo com a Pinnacle)', shots: 'Plano: simples (chutes)' }[lens] || 'Plano: simples (nossa leitura)';
-      return odd ? [base(g, line, cat, odd, src, stakeOf(line))] : [];
-    }),
-    ...plan.multis.map(t => multiBet(t.legs, banca, 'Plano: múltipla')).filter(Boolean),
-    ...plan.sameGame.flatMap(({ g, combo }) => { const [odd, src] = comboPin(combo, g); return odd ? [base(g, combo, 'Plano: mesmo jogo', odd, src, stakeOf(combo))] : []; }),
+    ...plan.sameGame.flatMap(({ g, combo }) => { const [odd, src] = comboPin(combo, g); return odd ? [base(g, combo, SIM_CAT.combos, odd, src, stakeOf(combo))] : []; }),
+    ...plan.goals.flatMap(({ g, line, lens }) => one(g, line, SIM_CAT[lens])),
+    ...plan.fav.flatMap(({ g, line }) => one(g, line, SIM_CAT.favorito)),
     // favorito no 1º tempo: na odd da Pinnacle (o resultado do 1º tempo ou o handicap do 1º tempo −0,5, a mesma aposta)
-    ...(plan.halves || []).flatMap(({ g, line }) => { const [odd, src] = linePin(line, g); return odd ? [base(g, line, 'Plano: favorito 1º tempo', odd, src, stakeOf(line))] : []; }),
+    ...plan.halves.flatMap(({ g, line }) => one(g, line, SIM_CAT.fav1t)),
   ];
   const now = new Date().toISOString();
   return { id, plan: true, win, label, date: plan.date, scan_at: plan.scan_at, created_at: now, updated_at: now, window: null, cur: STAKE.cur, bets };

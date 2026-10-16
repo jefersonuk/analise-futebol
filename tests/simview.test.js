@@ -23,10 +23,10 @@ test('dois painéis no mesmo índice: cada tela mostra as suas, e gravar ou apag
   await plan.add(planSim('plano-1', 'h4'));
   await scan.add(scanSim('200'));
   await tick();
-  assert.deepEqual(api.m.get('af:simidx'), ['200', 'plano-1', '100']);
+  assert.deepEqual(api.m.get('af:simidx2'), ['200', 'plano-1', '100']);
   assert.ok(plan.has('plano-1') && !plan.has('100') && scan.has('100') && !scan.has('plano-1'));
   await scan.remove('100');
-  assert.deepEqual(api.m.get('af:simidx'), ['200', 'plano-1'], 'apagar uma da varredura mantém a do plano');
+  assert.deepEqual(api.m.get('af:simidx2'), ['200', 'plano-1'], 'apagar uma da varredura mantém a do plano');
   assert.match(ePlan.innerHTML, /📋 Plano plano plano-1/);
   assert.match(ePlan.innerHTML, /simples \(nossa leitura\)/);
   assert.doesNotMatch(ePlan.innerHTML, /Plano: simples|sem repetir a mesma linha|entrar se…/, 'no plano: lente sem o prefixo, só "Total"');
@@ -39,11 +39,11 @@ test('plano montado de novo na mesma janela antes de começar substitui o anteri
   const drop = sim => old => old.win === sim.win && old.bets.every(b => b.status === 'aberta' && b.kickoff > Date.now());
   const a = planSim('plano-1', 'h4'), b = planSim('plano-2', 'h4'), c = planSim('plano-3', 'd1');
   await plan.add(a); await plan.add(b, drop(b)); await plan.add(c, drop(c));
-  assert.deepEqual(api.m.get('af:simidx'), ['plano-3', 'plano-2'], 'o plano-1 (mesma janela, nada começou) saiu; o da outra janela fica');
-  assert.ok(!api.m.has('af:sim:plano-1'));
+  assert.deepEqual(api.m.get('af:simidx2'), ['plano-3', 'plano-2'], 'o plano-1 (mesma janela, nada começou) saiu; o da outra janela fica');
+  assert.ok(!api.m.has('af:sim:v2:plano-1'));
   const d = planSim('plano-4', 'h4', { kickoff: Date.now() - 3600e3 }), e = planSim('plano-5', 'h4');
   await plan.add(d, drop(d)); await plan.add(e, drop(e));
-  assert.deepEqual(api.m.get('af:simidx'), ['plano-5', 'plano-4', 'plano-3'], 'com jogo já começado, o plano anterior fica para medir');
+  assert.deepEqual(api.m.get('af:simidx2'), ['plano-5', 'plano-4', 'plano-3'], 'com jogo já começado, o plano anterior fica para medir');
 });
 
 test('com o ➕ ligado (tools): ➕ e 🔎 na entrada aberta, ✓ no jogo que já tem aposta, nada na encerrada; 🔎 não no bilhete', async () => {
@@ -66,5 +66,19 @@ test('com o ➕ ligado (tools): ➕ e 🔎 na entrada aberta, ✓ no jogo que j�
   const ro = el(), p2 = simPanel({ api, el: ro, mine: id => String(id).startsWith('plano-'), title: 'Planos', intro: '' });
   await tick(); await p2.add({ id: 'plano-10', plan: true, win: 'h2', date: '2026-10-15', scan_at: new Date().toISOString(), bets: [bet('Plano: mesmo jogo')] });
   assert.doesNotMatch(ro.innerHTML, /data-simadd|data-simoth/);
+  delete globalThis.localStorage;
+});
+
+test('recomeço: as simulações de antes (af:sim:<id>, af:simidx) são apagadas uma vez, e o painel lê só as novas', async () => {
+  const { purgeOldSims } = await import('../src/simview.js');
+  const api = store(), removed = [];
+  api.m.set('af:simidx', ['plano-1', '200']); api.m.set('af:sim:plano-1', { id: 'plano-1' }); api.m.set('af:sim:200', { id: '200' });
+  api.m.set('af:simidx2', ['plano-9']); api.m.set('af:sim:v2:plano-9', { id: 'plano-9', bets: [] });
+  const rm = api.removeDoc; api.removeDoc = async k => { removed.push(k); return rm(k); };
+  const ls = new Map(); globalThis.localStorage = { getItem: k => ls.get(k) ?? null, setItem: (k, v) => ls.set(k, String(v)), removeItem: k => ls.delete(k) };
+  // o recomeço roda uma vez por aparelho (o primeiro painel que abre); aqui, chamado direto
+  assert.equal(await purgeOldSims(api), 2);
+  assert.deepEqual(removed.sort(), ['af:sim:200', 'af:sim:plano-1', 'af:simidx']);
+  assert.ok(api.m.has('af:sim:v2:plano-9') && api.m.has('af:simidx2'), 'as novas ficam');
   delete globalThis.localStorage;
 });

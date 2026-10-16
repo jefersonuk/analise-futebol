@@ -38,7 +38,7 @@ import { favHalfWin } from './favhalf.js';
 import { conditionsOf, derbyOf, scenarioLines } from './scenario.js';
 import { loadClubs } from './clubs.js';
 import { MULTI, multiLegs } from './multiple.js';
-import { comboOk } from './plan.js';
+import { comboOk, planChance } from './plan.js';
 
 export { GOAL_HANDICAP, SHOTS };
 export const MAIN_MARKETS = Object.keys(MAIN_LINES);   // escanteios 1T, escanteios do jogo, gols 1T, gols do jogo
@@ -52,6 +52,7 @@ const GROUPS = { [SHOTS_FILTER]: SHOTS };
 export const LIVE_1H = 'live1h';   // filtro da tela: jogos para a entrada ao vivo nos escanteios do 1º tempo
 export const COMBOS = 'combos';    // filtro da tela: combos de duas pernas no mesmo jogo (combos.js)
 export const CENARIO = 'cenario';  // filtro da tela: apostas de cenário com odd perto de 2 (scenario.js)
+export const PLAN_SCAN = 'plano';   // a varredura do Plano do dia: guarda os jogos com candidato nos blocos dele (plan.js)
 export const FILTER_KEYS = [...MAIN_MARKETS, GOAL_HANDICAP, SHOTS_FILTER, '1X2', COMBOS];
 export const BEST = 'melhor';      // "Melhor do jogo" (handicap de gols, gols e 1X2) na escolha das linhas
 // As linhas que a varredura busca e traz no relatório (escolha do operador na tela; null = todas): as abas da tela.
@@ -341,6 +342,9 @@ export async function scanDay(api, { date = null, hours = null, now = Date.now()
     if (want(COMBOS)) for (const g of games.filter(g => fp(g) > 0).sort((a, b) => fp(b) - fp(a)).slice(0, top)) keep.add(g);
     // e os jogos de favoritismo alto com a vitória do favorito no 1º tempo cotada (favhalf.js)
     if (want(COMBOS)) for (const g of games.filter(g => g.fav_half?.pinnacle_odd).sort((a, b) => b.fav_half.p_fav_ft - a.fav_half.p_fav_ft).slice(0, top)) keep.add(g);
+    // o Plano do dia: os jogos com candidato em algum bloco dele (mesmo jogo, gols, vitória do favorito, 1º tempo), os de
+    // maior chance primeiro — a 3ª passada (contexto da API) vai só para eles
+    if (want(PLAN_SCAN)) for (const [g] of games.map(g => [g, planChance(g)]).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).slice(0, top)) keep.add(g);
     return keep;
   };
   // 3ª passada: confronto direto em todas as competições (API) dos jogos guardados e clássico (cidade dos dois times,

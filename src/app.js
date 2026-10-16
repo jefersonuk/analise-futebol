@@ -45,9 +45,10 @@ function showQuota() {
   showCloud();
 }
 
-// ---- abas (Jeferson, 13/10/2026: "o app está muito confuso e poluído — separações claras"): Plano do dia, Varredura e
-// Jogo, uma de cada vez; a última aberta volta ao recarregar ----
-const TAB_KEY = 'afTab', TABS = ['plan', 'scan', 'game'];
+// ---- abas (Jeferson, 13/10/2026: "o app está muito confuso e poluído — separações claras"): Plano do dia e Jogo, uma
+// de cada vez; a última aberta volta ao recarregar. A Varredura saiu da tela no foco de 16/10 (o plano cobre as janelas
+// de horas); o painel dela segue no código, escondido — guardada como a última aberta, volta ao plano ----
+const TAB_KEY = 'afTab', TABS = ['plan', 'game'];
 function showTab(t) {
   if (!TABS.includes(t)) t = 'plan';
   for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== t;

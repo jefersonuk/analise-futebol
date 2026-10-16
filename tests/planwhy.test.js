@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
 import { scanDay } from '../src/scanner.js';
-import { buildPlan } from '../src/plan.js';
+import { buildPlan, favLine } from '../src/plan.js';
 import { multiGames, ticketOf } from '../src/multiple.js';
-import { agreeWhy, chanceChart, comboBody, comboStrip, comboWhy, legWhy, legsBody, oursWhy, shotsWhy, singleBody } from '../src/planwhy.js';
+import { agreeWhy, chanceChart, comboBody, comboStrip, comboWhy, favBody, favWhy, halfBody, legWhy, legsBody, oursWhy, shotsWhy, singleBody } from '../src/planwhy.js';
 
 const DAY = 864e5, T0 = Date.UTC(2026, 9, 10, 18);
 // últimos 10 jogos de um time (o mais recente primeiro), com o placar pró–contra
@@ -56,7 +56,7 @@ test('🎯 nossa leitura: a nossa chance contra a da Pinnacle, de onde vem, o ce
 test('🤝 acordo com a Pinnacle: as fontes juntas, o alvo e as checagens primeiro', () => {
   const g = G(), line = g.lines[0];
   const w = agreeWhy(g, { g, line, lens: 'agree', value: 0.043 });
-  assert.match(w.summary, /^Sólida: acerta 62% — Pinnacle 60%, modelo 64%, últimos 10 dos dois times 65%; o modelo concorda com a Pinnacle e o contexto está a favor\. O alvo 1,69 \(a justa da linha \+ 2%, nunca abaixo de 1,50\) exige 59%; a casa precisa pagar 4,3% acima da Pinnacle \(1,62\)\.$/);
+  assert.match(w.summary, /^Sólida: acerta 62% — Pinnacle 60%, modelo 64%, últimos 10 dos dois times 65%; o modelo concorda com a Pinnacle e o contexto está a favor\. O alvo 1,69 \(a justa da linha \+ 2%, nunca abaixo de 1,30\) exige 59%; a casa precisa pagar 4,3% acima da Pinnacle \(1,62\)\.$/);
   assert.equal(w.reasons[0].text, 'Mando a favor: Alfa em casa 4/5 · Beta fora 3/5.');
   assert.deepEqual(w.bars.map(b => b[0]), ['Pinnacle', 'Modelo', 'Últimos 10 jogos', 'Chance da linha']);
   assert.match(agreeWhy(g, { g, line: { ...line, odd_min: 1.6 }, lens: 'agree', value: -0.012 }).summary, /a própria Pinnacle já paga 1,62\.$/);
@@ -103,14 +103,32 @@ test('gráfico da chance: barra por fonte, a que manda em destaque, a linha da c
   assert.equal(chanceChart([['Pinnacle', null]]), '');
 });
 
+test('🏆 vitória do favorito: a chance da Pinnacle é o preço; o modelo, a nossa leitura e o histórico ao lado; as checagens da linha', () => {
+  const g = G(), raw = { id: '1', market: '1X2', line: 'Casa vence', tier: 'sólida', p_model: 0.52, p_blend: 0.57, p_pinnacle: 0.58, pinnacle_odd: 1.67, hit_rate_last10: 0.6,
+    context: { verdict: 'a favor', signals: [{ kind: 'tabela', verdict: 'a favor', text: 'Alfa 3º contra o 15º' }] } };
+  g.scenario = [{ id: '1', market: '1X2', line: 'Alfa vence', p_nossa: 0.61, p_pinnacle: 0.58, pinnacle_odd: 1.67, why: 'modelo +2 · cenário +1' }];
+  const line = favLine(raw), w = favWhy(g, { g, line, value: null });
+  assert.equal(line.odd_min, 1.76);
+  assert.match(w.summary, /^Favorito pela Pinnacle: 58% de vencer — o modelo 52%, a nossa leitura 61%, últimos 10 dos dois times 60%\. O preço segue a Pinnacle .* O alvo 1,76 \(a justa dela \+ 2%, nunca abaixo de 1,50\) exige 57%; a casa precisa pagar 5,4% acima da Pinnacle \(1,67\)\.$/);
+  assert.deepEqual(w.bars.map(b => [b[0], b[2]]), [['Modelo', false], ['Nossa leitura', false], ['Últimos 10 jogos', false], ['Pinnacle', true]]);
+  assert.equal(w.reasons[0].text, 'Tabela a favor: Alfa 3º contra o 15º.');
+  assert.ok(w.reasons.some(r => /^Cenário: Alfa em casa contra times fracos/.test(r.text)), 'com a nossa leitura, o cenário dos dois times');
+  const html = favBody(g, { g, line, value: null });
+  assert.match(html, /class="chance"/); assert.equal((html.match(/class="histbox"/g) || []).length, 2);
+  // sem a nossa leitura da linha: só o modelo, o histórico e a Pinnacle
+  assert.deepEqual(favWhy({ ...g, scenario: [] }, { line, value: null }).bars.map(b => b[0]), ['Modelo', 'Últimos 10 jogos', 'Pinnacle']);
+});
+
 test('o porquê de todas as entradas do plano da demo sai sem erro, com gráfico', async () => {
-  const sc = await scanDay({ ...demo, stats: () => ({ api: 0, cache: 0 }) }, { date: '2026-10-01', top: 30, half: false });
+  const sc = await scanDay({ ...demo, stats: () => ({ api: 0, cache: 0 }) }, { date: '2026-10-01', top: 60, half: false, markets: ['plano'] });
   const plan = buildPlan(sc, { now: 0 });
-  for (const x of plan.singles) assert.match(singleBody(x.g, x), /class="chance"/);
   for (const { g, combo } of plan.sameGame) assert.match(comboBody(g, combo), /class="chance"/);
+  for (const x of plan.goals) assert.match(singleBody(x.g, x), /class="chance"/);
+  for (const x of plan.fav) assert.match(favBody(x.g, x), /class="chance"/);
+  for (const x of plan.halves) assert.match(halfBody(x.g, x), /class="chance"/);
   const legs = multiGames(sc.games, { now: 0 }).map(m => m.best).slice(0, 3);
   if (legs.length >= 2) assert.match(legsBody(sc.games, ticketOf(legs, {})), /class="legwhy"/);
-  assert.ok(plan.singles.length + plan.sameGame.length > 0, 'a demo rende alguma entrada');
+  assert.ok(plan.sameGame.length + plan.goals.length + plan.fav.length + plan.halves.length > 0, 'a demo rende alguma entrada');
 });
 
 test('📊 chutes: o modelo, o pior cenário e cada time na linha (o que mais acrescentou acerto no teste)', () => {

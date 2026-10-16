@@ -1,4 +1,4 @@
-// O painel da 🧪 simulação (sim.js) numa tela: as simulações guardadas (af:sim:<id>; índice af:simidx, a mais nova
+// O painel da 🧪 simulação (sim.js) numa tela: as simulações guardadas (af:sim:v2:<id>; índice af:simidx2, a mais nova
 // primeiro) que a tela mostra, cada uma com o resultado por lente, as entradas e a conferência dos resultados — sozinha
 // ao abrir e a cada 15 min com a página aberta. Duas telas usam: a varredura (as simulações das varreduras, id = a hora
 // da varredura) e o Plano do dia (as dos planos, id plano-…). A simulação em si nunca vai para o app de apostas; em cada
@@ -27,7 +27,27 @@ const RES = { A: '✅', HW: '½✅', VOID: '↩', HL: '½❌', RED: '❌' };
 const SRC = { pinnacle: ['Pin', 'a odd da Pinnacle na hora'], 'pinnacle est.': ['Pin est.', 'a odd que a Pinnacle pagaria: a justa pelas chances dela, com a margem dela'],
   'modelo est.': ['mod. est.', 'sem a Pinnacle (chutes): a justa do nosso modelo com a margem de uma casa (5%)'],
   'mínima': ['mín.', 'a odd mínima do app (simulada antes da regra: na odd da Pinnacle)'] };
-const IDX = 'af:simidx', DOC = id => `af:sim:${id}`;
+const IDX = 'af:simidx2', DOC = id => `af:sim:v2:${id}`;
+// O recomeço (Jeferson, 16/10/2026: "pode limpar todas as simulações que foram feitas"; o plano passou a ser só mesmo
+// jogo, gols, vitória do favorito e 1º tempo): as de antes ficavam em af:sim:<id> (índice af:simidx) e são apagadas uma
+// vez em cada aparelho, aqui e na nuvem; as novas vão para chaves novas, e uma cópia antiga num aparelho que ainda não
+// abriu esta versão não as traz de volta (o índice na nuvem é a união dos aparelhos).
+const OLD_IDX = 'af:simidx', PURGED = 'afSimPurge1';
+const purges = new WeakMap();   // uma vez por api (as duas telas usam a mesma)
+export function purgeOldSims(api) {
+  if (!purges.has(api)) purges.set(api, (async () => {
+    try { if (localStorage.getItem(PURGED)) return 0; } catch { return 0; }
+    const ids = (await api.loadDoc(OLD_IDX).catch(() => null)) || [];
+    const { keys } = await import('./store.js');
+    const local = (await keys().catch(() => [])).filter(k => /^af:sim:(?!v2:)/.test(k));
+    const all = [...new Set([...ids.map(id => `af:sim:${id}`), ...local])];
+    for (const k of all) await api.removeDoc(k).catch(() => {});
+    await api.removeDoc(OLD_IDX).catch(() => {});
+    try { localStorage.setItem(PURGED, new Date().toISOString()); } catch { /* sem armazenamento */ }
+    return all.length;
+  })());
+  return purges.get(api);
+}
 // algum jogo da simulação já deve ter terminado e ela ainda tem entrada aberta
 const due = sim => sim.bets.some(b => b.status === 'aberta' && Date.now() > b.kickoff + 110 * 60e3);
 // avisa as outras telas que o índice mudou (from: quem mudou, que não precisa recarregar)
@@ -45,6 +65,7 @@ export function simPanel({ api, el, mine, title, intro, cat = c => c, onChange =
   const IN_TAG = '<span class="tag ok" title="já tem aposta neste jogo no app de apostas">✓</span>';
   const readIdx = async () => (await api.loadDoc(IDX).catch(() => null)) || [];
   async function load(force = false) {
+    await purgeOldSims(api);
     st.ids = (await readIdx()).filter(mine);
     for (const id of st.ids) if (force || !st.list.has(id)) { const x = await api.loadDoc(DOC(id)).catch(() => null); if (x) st.list.set(id, x); }
     render(); onChange();

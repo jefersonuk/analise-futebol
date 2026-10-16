@@ -157,7 +157,7 @@ table.alts td.why { white-space: normal; min-width: 160px; text-align: left; }
 label.gap { display: block; margin-top: 14px; }
 #ghRepo { flex: 1; min-width: 200px; } #ghToken { flex: 2; min-width: 200px; }
 #cloudInfo.err { color: var(--bad); }
-#scanBudget { width: 100px; }
+#scanBudget, #planBudget { width: 100px; }
 table.scanrank tr[data-go] { cursor: pointer; }
 table.scanrank tr[data-go]:hover td { background: rgba(255,255,255,.03); }
 table.scanrank tr.weak td, table.mainlines tr.weak td { opacity: .5; }

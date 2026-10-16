@@ -48,32 +48,35 @@ test('liquidação pelo placar do intervalo', () => {
   assert.equal(settleLine('1T1', { home: true, opp: 'Fraco', gf: 1, ga: 0, g1: null }, 'Forte'), null, 'sem o placar do intervalo: sem resultado');
 });
 
-test('plano: até 3 favoritos no 1º tempo, nos jogos que sobraram, de 1,70 a 2,70, com o modelo de acordo e o alvo ao alcance', () => {
+test('plano: até 5 favoritos no 1º tempo, de 1,70 a 2,70, pelo preço da Pinnacle (o modelo do 1º tempo não filtra) e o alvo ao alcance', () => {
   const NOW = Date.UTC(2026, 9, 14, 0), H = 3600e3;
   let id = 0;
   const G = (half, extra = {}) => { const f = ++id;
-    return { fx: { id: f, t: NOW + (10 + f) * H, home: { id: f * 10, name: `Forte ${f}` }, away: { id: f * 10 + 1, name: `Fraco ${f}` }, league: { id: 100 + f, name: `Liga ${f}` } },
+    return { fx: { id: f, t: NOW + (10 + f) * H, home: { id: f * 10, name: `Forte ${f}` }, away: { id: f * 10 + 1, name: `Fraco ${f}` }, league: { id: 9100 + f, name: `Liga ${f}` } },
       lines: [], scenario: [], fav_combos: [], fav_half: half && { id: '1T1', market: 'Resultado 1º tempo', line: `Forte ${f} vence o 1º tempo`, fav: true, half: true, side: '1',
         p_fav_ft: 0.7, p_model: 0.47, p_pinnacle: 0.46, pinnacle_odd: 2.1, p_blend: 0.461, priced_by: 'pinnacle', tier: 'especulativa', ...half }, ...extra }; };
-  const games = [G({}), G({ p_blend: 0.48 }), G({ p_blend: 0.47 }), G({ p_blend: 0.465 }),          // 4 candidatos: entram os 3 mais prováveis
+  const games = [G({}), G({ p_blend: 0.48 }), G({ p_blend: 0.47 }), G({ p_blend: 0.465 }),          // candidatos
     G({ pinnacle_odd: 1.6 }),                                                                        // abaixo de 1,70: fora
-    G({ p_model: 0.4 }),                                                                             // o modelo 6 pp abaixo: fora
-    G({ p_blend: 0.38, p_pinnacle: 0.38, pinnacle_odd: 2.5 }),                                     // alvo 2,68: 7% acima — entra na conta
-    G(null)];
+    G({ p_model: 0.4 }),                                                                             // o modelo 6 pp abaixo: entra (ele comprime o favorito)
+    G({ p_blend: 0.38, p_pinnacle: 0.38, pinnacle_odd: 2.5 }),                                     // alvo 2,68: 7% acima — entraria, mas é copa
+    G(null), G({ p_blend: 0.49 }), G({ p_blend: 0.455 }),                                           // mais dois candidatos: 7, entram os 5 mais prováveis
+    G({ p_pinnacle: 0.44, pinnacle_odd: 2.05 })];                                                   // alvo 2,32: 13% acima da Pinnacle — fora
   games[6].conditions = ['copa: risco de rodízio — confirmar a escalação'];                       // copa: fora
   const scan = { generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games };
   const plan = buildPlan(scan, { now: NOW });
+  assert.equal(HALF_MAX, 5);
   assert.equal(plan.halves.length, HALF_MAX);
-  assert.deepEqual(plan.halves.map(x => x.g.fx.id).sort(), [2, 3, 4]);
+  assert.deepEqual(plan.halves.map(x => x.g.fx.id).sort((a, b) => a - b), [1, 2, 3, 4, 9]);
   const h = plan.halves.find(x => x.g.fx.id === 2);
-  assert.equal(h.line.odd_min, halfMin(h.line)); assert.equal(halfMin({ p_blend: 0.48 }), Math.round(100 * 1.02 / 0.48) / 100);
+  assert.equal(h.line.odd_min, halfMin(h.line)); assert.equal(h.line.odd_min, Math.round(100 * 1.02 / 0.46) / 100, 'pela chance da Pinnacle');
   assert.equal(halfMin({ p_blend: 0.62 }), 1.7, 'nunca abaixo de 1,70 (a faixa do 1X2)');
   // desmarcado, some; guardado e refeito; texto; simulação na odd da Pinnacle
-  assert.equal(buildPlan(scan, { now: NOW, markets: ['Handicap asiático'] }).halves.length, 0);
+  assert.equal(buildPlan(scan, { now: NOW, markets: ['gols', 'favorito'] }).halves.length, 0);
   assert.deepEqual(planFromKeys(scan, planKeys(plan)).halves.map(x => x.g.fx.id), plan.halves.map(x => x.g.fx.id));
-  assert.match(planText(plan), /FAVORITO NO 1º TEMPO \(3\)\n1\. .* — Forte \d vence o 1º tempo · odd ≥ [\d,]+ \(Pinnacle 2,10\) · 20 €\n/);
+  assert.match(planText(plan), /FAVORITO NO 1º TEMPO \(5\)\n1\. .* — Forte \d vence o 1º tempo · odd ≥ [\d,]+ \(Pinnacle 2,10\) · 20 €\n/);
   const sim = buildPlanSim(plan).bets.filter(b => b.cat === 'Plano: favorito 1º tempo');
-  assert.equal(sim.length, 3); assert.ok(sim.every(b => b.odd === 2.1 && b.odd_src === 'pinnacle' && b.lineId === '1T1' && b.stake_brl === 20), 'a favor da Pinnacle: entrada cheia');
-  // funil: os 3 no bloco, os outros com o motivo
-  assert.equal(planFunnel(scan, plan).half, 3);
+  assert.equal(sim.length, 5); assert.ok(sim.every(b => b.odd === 2.1 && b.odd_src === 'pinnacle' && b.lineId === '1T1' && b.stake_brl === 20), 'a favor da Pinnacle: entrada cheia');
+  // funil: os 5 no bloco, os outros dois no bloco cheio
+  const f = planFunnel(scan, plan);
+  assert.deepEqual([f.half, f.full], [5, 2]);
 });

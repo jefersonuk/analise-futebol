@@ -6,6 +6,8 @@
 //   🤝 acordo           a Pinnacle, o modelo e o histórico juntos, e as checagens da linha (mando, médias, confronto
 //                       direto, tabela, cenário);
 //   mesmo jogo          as pernas, o quanto pagam a mais que a melhor perna sozinha e o combo nos últimos jogos;
+//   🏆 vitória do favorito a chance da Pinnacle (o preço), o modelo, a nossa leitura e o histórico ao lado, e as
+//                       checagens da linha;
 //   ⏱️ favorito 1º tempo o favoritismo no jogo, a chance de vencer o 1º tempo (Pinnacle, modelo, histórico) e o
 //                       resultado do 1º tempo nos últimos jogos de cada time;
 //   perna de múltipla   a chance, o esperado de gols e a linha nos últimos jogos dos dois times.
@@ -91,7 +93,7 @@ export function agreeWhy(g, x) {
   const l = x.line, hit = l.hit_rate_last10 ?? null, need = x.value;
   const summary = `${cap(l.tier)}: acerta ${pct(l.p_blend)} — Pinnacle ${pct(l.p_pinnacle)}, modelo ${pct(l.p_model)}${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}; `
     + `o modelo ${l.p_model >= l.p_pinnacle ? 'concorda com' : 'fica perto de'} a Pinnacle${l.context ? ` e o contexto está ${l.context.verdict}` : ''}. `
-    + `O alvo ${n2(l.odd_min)} (a justa da linha + 2%, nunca abaixo de 1,50) exige ${pct(1 / l.odd_min)}; ${need > 0 ? `a casa precisa pagar ${pc1(need)} acima da Pinnacle (${n2(l.pinnacle_odd)})` : `a própria Pinnacle já paga ${n2(l.pinnacle_odd)}`}.`;
+    + `O alvo ${n2(l.odd_min)} (a justa da linha + 2%, nunca abaixo de 1,30) exige ${pct(1 / l.odd_min)}; ${need > 0 ? `a casa precisa pagar ${pc1(need)} acima da Pinnacle (${n2(l.pinnacle_odd)})` : `a própria Pinnacle já paga ${n2(l.pinnacle_odd)}`}.`;
   return { summary,
     bars: [['Pinnacle', l.p_pinnacle, false, 'a chance da Pinnacle, sem a margem dela'], ['Modelo', l.p_model, false, 'o nosso modelo de forças'],
       ['Últimos 10 jogos', hit, false, 'quanto a linha teria acertado nos últimos 10 jogos dos dois times'], ['Chance da linha', l.p_blend, true, 'a Pinnacle sem margem com o modelo']],
@@ -133,17 +135,36 @@ export function comboWhy(g, c) {
 // ⏱️ o favorito no 1º tempo: o quanto ele é favorito no jogo e a chance de vencer o 1º tempo por fonte
 export function halfWhy(g, x) {
   const l = x.line, hit = l.hit_rate_last10 ?? null, fav = l.side === '2' ? g.fx.away.name : g.fx.home.name, need = l.odd_min_vs_pinnacle_pct;
-  const summary = `${fav} vence o jogo em ${pct(l.p_fav_ft)} pela Pinnacle — favoritismo alto, a vitória no jogo paga pouco. No 1º tempo: acerta ${pct(l.p_blend)}`
-    + ` — Pinnacle ${pct(l.p_pinnacle)}${l.p_model != null ? `, nosso modelo do 1º tempo ${pct(l.p_model)}` : ''}${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}. `
-    + `O alvo ${n2(l.odd_min)} (a justa + 2%, nunca abaixo de 1,70) exige ${pct(1 / l.odd_min)}; ${need > 0 ? `a casa precisa pagar ${pc1(need / 100)} acima da Pinnacle (${n2(l.pinnacle_odd)})` : `a própria Pinnacle já paga ${n2(l.pinnacle_odd)}`}.`;
+  const summary = `${fav} vence o jogo em ${pct(l.p_fav_ft)} pela Pinnacle — favoritismo alto, a vitória no jogo paga pouco. No 1º tempo: ${pct(l.p_pinnacle)} pela Pinnacle`
+    + `${l.p_model != null ? ` (o nosso modelo do 1º tempo, ${pct(l.p_model)}, comprime o favorito: o preço segue a Pinnacle)` : ''}${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}. `
+    + `O alvo ${n2(l.odd_min)} (a justa dela + 2%, nunca abaixo de 1,70) exige ${pct(1 / l.odd_min)}; ${need > 0 ? `a casa precisa pagar ${pc1(need / 100)} acima da Pinnacle (${n2(l.pinnacle_odd)})` : `a própria Pinnacle já paga ${n2(l.pinnacle_odd)}`}.`;
   const e = g.context?.expected?.goals;
   return { summary,
-    bars: [['Pinnacle', l.p_pinnacle, false, 'a chance da Pinnacle no resultado do 1º tempo, sem a margem dela'], ['Modelo 1º tempo', l.p_model, false, 'o placar do intervalo pelos gols esperados de cada time no 1º tempo'],
-      ['Últimos 10 jogos', hit, false, 'quanto a aposta teria acertado nos últimos 10 jogos dos dois times'], ['Chance', l.p_blend, true, 'a Pinnacle com 10% do modelo']],
+    bars: [['Modelo 1º tempo', l.p_model, false, 'o placar do intervalo pelos gols esperados de cada time no 1º tempo'],
+      ['Últimos 10 jogos', hit, false, 'quanto a aposta teria acertado nos últimos 10 jogos dos dois times'], ['Pinnacle', l.p_pinnacle, true, 'a chance da Pinnacle no resultado do 1º tempo, sem a margem dela — o preço']],
     mark: [1 / l.odd_min, `o alvo ${n2(l.odd_min)} exige`],
     reasons: [...(e?.total != null ? [R(0, `Esperado no jogo: ${n1(e.total)} gols (${g.fx.home.name} ${n1(e.home)} x ${n1(e.away)} ${g.fx.away.name}).`)] : []),
       ...reading(g), ...facts(g, 'Total de gols')],
     chartLine: l };
+}
+// 🏆 a vitória do favorito: a chance da Pinnacle é o preço (o nosso modelo comprime o favorito); o modelo, a nossa leitura
+// e o histórico vão ao lado
+export function favWhy(g, x) {
+  const l = x.line, sc = (g.scenario || []).find(s => s.id === l.id) || null, hit = l.hit_rate_last10 ?? null, need = l.odd_min_vs_pinnacle_pct;
+  const summary = `Favorito pela Pinnacle: ${pct(l.p_pinnacle)} de vencer${l.p_model != null ? ` — o modelo ${pct(l.p_model)}` : ''}${sc ? `, a nossa leitura ${pct(sc.p_nossa)}` : ''}`
+    + `${hit != null ? `, últimos 10 dos dois times ${pct(hit)}` : ''}. O preço segue a Pinnacle (o modelo vê o favorito mais perto da zebra do que ele é). `
+    + `O alvo ${n2(l.odd_min)} (a justa dela + 2%, nunca abaixo de 1,50) exige ${pct(1 / l.odd_min)}; ${need > 0 ? `a casa precisa pagar ${pc1(need / 100)} acima da Pinnacle (${n2(l.pinnacle_odd)})` : `a própria Pinnacle já paga ${n2(l.pinnacle_odd)}`}.`;
+  return { summary,
+    bars: [['Modelo', l.p_model ?? null, false, 'o nosso modelo de forças'], ...(sc ? [['Nossa leitura', sc.p_nossa, false, 'o modelo corrigido mais o cenário dos dois times']] : []),
+      ['Últimos 10 jogos', hit, false, 'quanto a vitória teria acertado nos últimos 10 jogos dos dois times'], ['Pinnacle', l.p_pinnacle, true, 'a chance da Pinnacle, sem a margem dela — o preço']],
+    mark: [1 / l.odd_min, `o alvo ${n2(l.odd_min)} exige`],
+    reasons: [...checks(l), ...reading(g), ...(sc ? scenarioFacts(g, sc) : []), ...facts(g, '1X2')],
+    chartLine: l };
+}
+export function favBody(g, x) {
+  const w = favWhy(g, x);
+  return `<p class="whysum">${esc(w.summary)}</p><div class="whygrid">${chanceChart(w.bars, w.mark)}${reasonsHtml(w.reasons)}</div>
+    ${g.teams?.length ? `<div class="teams">${teamCharts(w.chartLine, g.teams)}</div>` : ''}`;
 }
 export function halfBody(g, x) {
   const w = halfWhy(g, x);
