@@ -45,3 +45,18 @@ test('varredura enxuta: um item por jogo, na ordem da tela, com contexto e plano
   assert.ok(bs.games.length && bs.games.every(g => shots(g.top_line.market)));
   assert.ok(bs.games.some(g => Object.keys(g.best_by_market).some(shots)), 'no filtro Chutes, o outro mercado de chutes aparece');
 });
+
+test('plano do dia para o especialista: os quatro blocos do foco, com a entrada de cada aposta e os jogos com o contexto', async () => {
+  const { briefPlan } = await import('../src/brief.js');
+  const { buildPlan, planEntries } = await import('../src/plan.js');
+  const sc = await scanDay({ ...demo, stats: () => ({ api: 0, cache: 0 }) }, { date: '2026-10-01', top: 60, half: false, markets: ['plano'] });
+  const plan = buildPlan(sc, { now: 0 }), b = briefPlan(sc, plan), xs = planEntries(plan);
+  assert.match(b.filter, /^plano do dia \(foco de 16\/10/);
+  assert.deepEqual(Object.keys(b.plan), ['blocos', 'ligas', 'mesmo_jogo', 'total_de_gols', 'vitoria_do_favorito', 'favorito_1_tempo']);
+  assert.equal(b.plan.mesmo_jogo.length + b.plan.total_de_gols.length + b.plan.vitoria_do_favorito.length + b.plan.favorito_1_tempo.length, xs.length);
+  assert.ok(xs.length > 0);
+  assert.equal(b.games.length, new Set(xs.map(x => x.g.fx.id)).size, 'os jogos do plano vão com o contexto');
+  assert.ok(Object.values(b.plan).filter(Array.isArray).flat().every(x => x.entrada_eur === 20 || x.entrada_eur === 10));
+  assert.ok(b.plan.vitoria_do_favorito.every(x => / vence$/.test(x.linha) && x.p_pinnacle >= 0.5));
+  assert.ok(toText(b).startsWith(`${MARK} `));
+});

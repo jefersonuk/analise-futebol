@@ -1,90 +1,286 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as demo from '../src/demo.js';
-import { PER_LEAGUE, SAME_GAME, SINGLES, buildPlan, planFromKeys, planKeys, planText, valueOf } from '../src/plan.js';
-import { alvoOf } from '../src/scenario.js';
+import { BLOCKS, COMBO_KEY, COMBO_ODDS, COMBO_P, FAV_KEY, FAV_ODDS, FAV_P, GOALS_KEY, GOALS_ODDS, HALF_KEY, HALF_MAX, LENS, PER_LEAGUE, PLAN_DEFAULT, PLAN_MAX, PLAN_OPTIONS,
+  agreeMin, buildPlan, favMin, halfMin, lineOfBet, needOf, planChance, planEntries, planFromKeys, planFunnel, planKeys, planText, simLine, valueOf } from '../src/plan.js';
 import { buildPlanSim } from '../src/sim.js';
-import { scanDay } from '../src/scanner.js';
+import { PLAN_SCAN, scanDay } from '../src/scanner.js';
 
-const NOW = Date.UTC(2026, 9, 8, 23), H = 3600e3;
+const NOW = Date.UTC(2026, 9, 16, 23), H = 3600e3;
 let id = 0;
-// jogo de amanhã: simples da nossa análise (aposta, entrar se…), combo e perna de múltipla
-const G = ({ h = 14, lg = 1, single = null, cond = false, combo = null, over = null, hard = null } = {}) => {
+const ctx = (verdict = 'neutro') => ({ verdict, signals: [] });
+// o mais de 1,5 consistente (🤝) e a vitória do mandante no 1X2 (🏆), com a odd da Pinnacle pela chance dela (margem de 2,5% e 3%)
+const over15 = (p, extra = {}) => ({ id: 'gO1.5', market: 'Total de gols', line: 'Mais de 1,5', tier: 'âncora', consistency_score: 0.8, p_model: p + 0.01, p_blend: p,
+  p_pinnacle: p, pinnacle_odd: +(1 / p / 1.025).toFixed(2), politica_e: 'cheia', context: ctx(), ...extra });
+const home1 = (p, extra = {}) => ({ id: '1', market: '1X2', line: 'Casa vence', tier: 'sólida', p_model: p - 0.06, p_blend: p - 0.01, p_pinnacle: p,
+  pinnacle_odd: +(1 / p / 1.03).toFixed(2), hit_rate_last10: 0.6, context: ctx(), ...extra });
+// um jogo de amanhã (o mandante C<id> é o favorito):
+//   ours: [p_nossa, p_pinnacle, odd da Pinnacle] da 🎯 no mais de 2,5 (cond: "entrar se…"); agree: a chance do mais de 1,5 (🤝);
+//   fav: a chance do mandante vencer pela Pinnacle (🏆); combo: a vitória do mandante + 1,5 (🔗; + 2,5 e + 3,5 com 18 pp a menos
+//   cada, mínima = justa × 1,05); half: a chance do mandante vencer o 1º tempo (⏱️)
+const G = ({ h = 14, lg = 1, ours = null, cond = false, agree = null, fav = null, combo = null, half = null, hard = null, conditions = [] } = {}) => {
   const f = ++id;
-  return { fx: { id: f, t: NOW + h * H, home: { id: f * 10, name: `C${f}` }, away: { id: f * 10 + 1, name: `F${f}` }, league: { id: lg, name: `Liga ${lg}` } }, hard,
-    scenario: single ? [{ id: 'ahA0.5', market: 'Handicap asiático', line: `F${f} +0,5`, bet: !cond, conditional: cond, contra: single[0] - single[1] >= 0.05, p_nossa: single[0], p_pinnacle: single[1],
-      pinnacle_odd: single[2], odd_min: 1.05 / single[0], entry_brl: 150, why: 'modelo +3 · cenário +2' }] : [],
-    // mesmo jogo: a vitória do favorito + 1,5 (chance combo), + 2,5 e + 3,5 (18 pp a menos a cada uma), mínima = justa × 1,05
+  return { fx: { id: f, t: NOW + h * H, home: { id: f * 10, name: `C${f}` }, away: { id: f * 10 + 1, name: `F${f}` }, league: { id: lg, name: `Liga ${lg}` } }, hard, conditions,
+    scenario: ours ? [{ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', bet: !cond, conditional: cond, contra: ours[0] - ours[1] >= 0.05, p_nossa: ours[0], p_pinnacle: ours[1],
+      pinnacle_odd: ours[2], odd_min: +(1.05 / ours[0]).toFixed(2), entry_brl: 150, why: 'modelo +3 · cenário +2' }] : [],
+    lines: [...(agree ? [over15(agree)] : []), ...(fav ? [home1(fav)] : [])],
     fav_combos: combo ? [1.5, 2.5, 3.5].map((L, k) => { const p = combo - k * 0.18; return { id: `cb:1+gO${L}`, market: 'Combo', combo: true, fav: true, line: `C${f} vence + Mais de ${L} gols`,
       legs: [{ id: '1', line: `C${f} vence`, p: 0.7, push: 0, fair_odd: 1.43 }, { id: `gO${L}`, line: `Mais de ${L} gols`, p: 0.8 - k * 0.25, fair_odd: 1.25 }],
       tier: 'especulativa', p_blend: p, p_pinnacle: p, push_pinnacle: 0, fair_odd_blend: +(1 / p).toFixed(2), odd_min: +(1.05 / p).toFixed(2), entry_brl: 100 }; }) : [],
-    lines: over ? [{ id: 'gO1.5', market: 'Total de gols', line: 'Mais de 1,5', p_blend: over, p_pinnacle: over, pinnacle_odd: +(1 / over / 1.025).toFixed(2), context: { verdict: 'neutro', signals: [] } }] : [] };
+    fav_half: half ? { id: '1T1', market: 'Resultado 1º tempo', line: `C${f} vence o 1º tempo`, fav: true, half: true, side: '1', p_fav_ft: 0.7, p_model: half, p_pinnacle: half,
+      p_blend: half, pinnacle_odd: +(1 / half / 1.04).toFixed(2), priced_by: 'pinnacle', tier: 'especulativa' } : null };
 };
+const scanOf = (games, extra = {}) => ({ generated_at: new Date(NOW).toISOString(), date: '2026-10-17', games, ...extra });
+const byId = xs => xs.map(x => [x.g.fx.id, x.lens ?? x.line?.id ?? x.combo?.id]).sort((a, b) => a[0] - b[0]);
 
-test('simples: as apostas da nossa análise pelo valor conservador; fora "entrar se…", jogo difícil e odd fora da faixa do mercado; até 5 por liga e 10 no total', () => {
-  id = 0;
-  const games = [
-    ...Array.from({ length: 7 }, (_, i) => G({ lg: 1, single: [0.56 + i * 0.01, 0.48, 2.05] })),   // liga 1: sete, só 5 entram
-    ...Array.from({ length: 9 }, (_, i) => G({ lg: 2 + i, single: [0.55, 0.49, 2.0] })),
-    G({ lg: 20, single: [0.7, 0.6, 2.1], cond: true }), G({ lg: 21, single: [0.7, 0.6, 2.1], hard: { reasons: ['base'] } }), G({ lg: 22, single: [0.8, 0.7, 1.5] }),
-  ];
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
-  assert.equal(plan.singles.length, SINGLES[1]);
-  assert.equal(PER_LEAGUE, 5);
-  assert.equal(plan.singles.filter(x => x.g.fx.league.id === 1).length, PER_LEAGUE);
-  assert.ok(plan.singles.every(x => x.line.bet && !x.line.conditional && x.line.pinnacle_odd >= alvoOf(x.line.market)[0] && x.line.pinnacle_odd <= alvoOf(x.line.market)[1] && !x.g.hard));
-  assert.ok(plan.singles.slice(1).every((x, i) => x.g.fx.t >= plan.singles[i].g.fx.t), 'em ordem de horário');
+test('o foco (16/10): quatro blocos, até 20 entradas, 5 por liga e até 5 no 1º tempo', () => {
+  assert.deepEqual(BLOCKS, [COMBO_KEY, GOALS_KEY, FAV_KEY, HALF_KEY]);
+  assert.deepEqual(PLAN_OPTIONS.map(([k]) => k), BLOCKS); assert.deepEqual(PLAN_DEFAULT, BLOCKS);
+  assert.deepEqual([PLAN_MAX, PER_LEAGUE, HALF_MAX], [20, 5, 5]);
+  assert.deepEqual([COMBO_P, COMBO_ODDS, GOALS_ODDS, FAV_P, FAV_ODDS], [0.45, [1.65, 2.7], [1.3, 2.7], 0.5, [1.5, 2.7]]);
   assert.equal(valueOf({ p_nossa: 0.6, p_pinnacle: 0.5, pinnacle_odd: 2 }), 0.1);
 });
 
-test('um jogo uma vez só; mesmo jogo e múltiplas nos jogos que sobraram; jogo com entrada fica fora', () => {
+test('⚽ total de gols: a 🎯 nossa leitura (pelo valor) primeiro; sem ela, o over consistente em 🤝 acordo com a Pinnacle; só over, odd da Pinnacle de 1,30 a 2,70', () => {
   id = 0;
   const games = [
-    G({ single: [0.6, 0.5, 2.0], combo: 0.6, over: 0.8 }),            // vira simples: o combo e a perna dele não entram
-    ...Array.from({ length: 12 }, (_, i) => G({ lg: 3, combo: 0.47 + i * 0.012, over: 0.78 })),
-    ...Array.from({ length: 12 }, (_, i) => G({ lg: 4 + i, over: 0.75 + (i % 3) * 0.03 })),
-    G({ lg: 30, single: [0.62, 0.5, 2.1] }),                            // já tem entrada
+    G({ lg: 1, ours: [0.62, 0.55, 1.95] }),                    // 🎯: valor 14,1%, contra a Pinnacle (7 pp acima dela)
+    G({ lg: 2, ours: [0.6, 0.56, 1.85], agree: 0.72 }),        // 🎯 e 🤝 no mesmo jogo: a 🎯 (valor 7,3%)
+    G({ lg: 3, agree: 0.72 }),                                  // 🤝
+    G({ lg: 4, ours: [0.6, 0.5, 1.62] }),                      // 🎯 sem valor (55% × 1,62 < 1) e sem 🤝: fora
+    G({ lg: 5, ours: [0.85, 0.8, 1.22] }),                     // a Pinnacle a 1,22: abaixo de 1,30
+    G({ lg: 6, ours: [0.62, 0.55, 1.95], cond: true }),        // "entrar se…": fora
+    G({ lg: 7, agree: 0.72, conditions: ['copa: risco de rodízio — confirmar a escalação'] }),   // escalação: fora
+    G({ lg: 8, agree: 0.72, conditions: ['dúvida: Fulano (F8) — confirmar se joga'] }),          // dúvida de desfalque: o 🤝 entra (a Pinnacle já embute)
+    G({ lg: 9, agree: 0.72, hard: { reasons: ['base'] } }),    // jogo difícil: fora
+    G({ lg: 10 }),                                              // under: nunca
   ];
-  const exposed = { has: f => f === 26 };
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, exposed, target: 4 });
-  const ids = [...plan.singles.map(x => x.g.fx.id), ...plan.sameGame.map(x => x.g.fx.id), ...plan.multis.flatMap(t => t.legs.map(l => l.fixtureId))];
-  assert.equal(new Set(ids).size, ids.length, 'nenhum jogo repetido');
-  assert.deepEqual(plan.singles.map(x => x.g.fx.id), [1]);
-  assert.equal(plan.sameGame.length, SAME_GAME);
-  assert.ok(plan.sameGame.every(x => x.g.fx.id !== 1));
-  assert.equal(SAME_GAME, 10);
-  assert.ok(plan.sameGame.map(x => x.combo.p_blend).every(p => p >= 0.493), 'os 10 combos de maior chance');
-  assert.ok(plan.sameGame.every(x => x.combo.id === 'cb:1+gO1.5'), 'a vitória do favorito + 1,5 (paga 1,65+)');
-  assert.equal(plan.multis.length, 2);
-  assert.ok(plan.multis.every(t => t.n >= 2 && t.fair >= 3.9 || t.n === 6));
-  assert.ok(!ids.includes(26), 'jogo que já tem entrada fica fora');
-  assert.equal(plan.stats.exposed, 1);
-  // guardado pelas chaves e refeito igual
-  const again = planFromKeys({ games }, planKeys(plan));
-  assert.deepEqual(again.singles.map(x => x.line.id), plan.singles.map(x => x.line.id));
-  assert.deepEqual(again.multis.map(t => t.legs.map(l => l.key)), plan.multis.map(t => t.legs.map(l => l.key)));
-  assert.deepEqual(again.sameGame.map(x => x.combo.id), plan.sameGame.map(x => x.combo.id));
-  // texto para copiar e a simulação do plano
-  const txt = planText(plan, { dateLabel: 'sexta, 09/10' });
-  // a entrada de cada aposta: a simples é contra a Pinnacle (a nossa 60% contra 50% dela): metade
-  assert.match(txt, /^PLANO sexta, 09\/10 · entrada 20 € a favor da Pinnacle, 10 € contra\n\nSIMPLES \(1\)\n1\. .* — F1 \+0,5 · odd ≥ [\d,]+ \(Pinnacle 2,00\) · 🎯 nossa leitura · contra a Pinnacle · 10 €\n/);
-  assert.match(txt, /MÚLTIPLA 1 \(\d pernas\) · odd total ≥ [\d,]+ · acerta tudo \d+% · 20 €/);
-  assert.match(txt, /MESMO JOGO \(10\)\n1\. .* · odd ≥ [\d,]+ · 20 €\n/);
-  assert.match(txt, /\n\nTOTAL: 13 entradas · 250 €$/, '10 € + 2 × 20 € + 10 × 20 €');
+  games[9].scenario = [{ id: 'gU2.5', market: 'Total de gols', line: 'Menos de 2,5', bet: true, p_nossa: 0.62, p_pinnacle: 0.55, pinnacle_odd: 1.95 }];
+  const plan = buildPlan(scanOf(games), { now: NOW });
+  assert.deepEqual(byId(plan.goals), [[1, 'ours'], [2, 'ours'], [3, 'agree'], [8, 'agree']]);
+  assert.deepEqual([plan.sameGame.length, plan.fav.length, plan.halves.length], [0, 0, 0]);
+  const g1 = plan.goals.find(x => x.g.fx.id === 1), g3 = plan.goals.find(x => x.g.fx.id === 3);
+  assert.equal(g1.value, valueOf(g1.line)); assert.equal(g1.value, 0.141);
+  assert.equal(g3.value, needOf(g3.line)); assert.equal(g3.line.odd_min, agreeMin(over15(0.72)));
+  // texto: a frente e a entrada (a 🎯 contra a Pinnacle: metade)
+  const txt = planText(plan, { dateLabel: 'sábado, 17/10' });
+  assert.match(txt, /^PLANO sábado, 17\/10 · entrada 20 € a favor da Pinnacle, 10 € contra\n\nTOTAL DE GOLS \(4\)\n/);
+  assert.match(txt, new RegExp(`C1 x F1 — Mais de 2,5 · odd ≥ [\\d,]+ \\(Pinnacle 1,95\\) · ${LENS.ours} · contra a Pinnacle · 10 €`));
+  assert.match(txt, new RegExp(`C3 x F3 — Mais de 1,5 · odd ≥ 1,42 \\(Pinnacle 1,36\\) · ${LENS.agree} · 20 €`));
+  assert.match(txt, /\n\nTOTAL: 4 entradas · 70 €$/, '10 € + 3 × 20 €');
+  // simulação: o total de gols separado pela frente, na odd da Pinnacle
   const sim = buildPlanSim(plan);
-  assert.equal(sim.id, 'plano-2026-10-09');
-  assert.deepEqual([...new Set(sim.bets.map(b => b.cat))], ['Plano: simples (nossa leitura)', 'Plano: múltipla', 'Plano: mesmo jogo']);
-  assert.equal(sim.bets.length, 1 + 2 + 10);
-  assert.deepEqual(sim.bets.map(b => b.stake_brl).reduce((t, x) => t + x, 0), 250);
+  assert.deepEqual([...new Set(sim.bets.map(b => b.cat))].sort(), ['Plano: total de gols (acordo com a Pinnacle)', 'Plano: total de gols (nossa leitura)']);
+  assert.ok(sim.bets.every(b => b.odd_src === 'pinnacle'));
+  assert.equal(sim.bets.reduce((t, b) => t + b.stake_brl, 0), 70);
 });
 
-test('varredura do dia da demo: o plano sai com as três partes possíveis e sem jogo repetido', async () => {
-  const sc = await scanDay({ ...demo, stats: () => ({ api: 0, cache: 0 }) }, { date: '2026-10-01', top: 30, half: false });
+test('🤝 gols: alvo = a justa + 2% (piso 1,30) até 8% acima da Pinnacle; fora o contexto contra, a especulativa, o modelo 5 pp abaixo e a linha que ela não cota', () => {
+  id = 0;
+  const mk = extra => { const g = G({ lg: 20 + id }); g.lines = [over15(0.64, extra)]; return g; };
+  const games = [
+    mk({ odd_min: 1.64 }),                                                  // 64% a 1,52: alvo 1,59 (4,6% acima) — entra
+    mk({ p_blend: 0.6, p_pinnacle: 0.6, pinnacle_odd: 1.5 }),              // alvo 1,70: 13% acima da Pinnacle — fora
+    mk({ context: ctx('contra') }),                                          // contexto contra: fora
+    mk({ tier: 'especulativa' }),                                            // sem consistência: fora
+    mk({ p_model: 0.58 }),                                                   // o modelo 6 pp abaixo da Pinnacle: fora
+    mk({ derived: true }),                                                   // a Pinnacle não cota a linha (derivada): fora
+    mk({ p_blend: 0.8, p_pinnacle: 0.8, p_model: 0.81, pinnacle_odd: 1.22 }),   // a Pinnacle a 1,22: abaixo de 1,30
+  ];
+  const plan = buildPlan(scanOf(games), { now: NOW });
+  assert.deepEqual(byId(plan.goals), [[1, 'agree']]);
+  const a = plan.goals[0];
+  assert.equal(a.line.odd_min, 1.59); assert.equal(agreeMin(over15(0.64)), Math.round(100 * 1.02 / 0.64) / 100);
+  assert.equal(a.value, Math.round((1.59 / 1.52 - 1) * 1000) / 1000);
+  assert.ok(a.line.entry_brl > 0, 'a entrada sai do alvo (¼ Kelly)');
+  assert.equal(games[0].lines[0].odd_min, 1.64, 'a linha da varredura fica como está');
+  assert.equal(agreeMin({ p_blend: 0.8 }), 1.3, 'nunca abaixo de 1,30');
+  assert.match(planText(plan), /odd ≥ 1,59 \(Pinnacle 1,52\)/);
+  const sim = buildPlanSim(plan).bets[0];
+  assert.deepEqual([sim.odd, sim.odd_src, sim.cat, sim.stake_brl], [1.52, 'pinnacle', 'Plano: total de gols (acordo com a Pinnacle)', 20]);
+});
+
+test('🏆 vitória do favorito: o lado com 50%+ pela Pinnacle, cotado de 1,50 a 2,70; alvo = a justa dela + 2% (piso 1,50) até 8% acima; o modelo não filtra', () => {
+  id = 0;
+  const games = [
+    G({ lg: 1, fav: 0.6 }),                          // 60% a 1,62: entra (alvo 1,70)
+    G({ lg: 2, fav: 0.5 }),                          // 50% a 1,94: entra (alvo 2,04)
+    G({ lg: 3, fav: 0.47 }),                         // jogo equilibrado (47%): fora — acertou 1 de 14 nas simulações
+    G({ lg: 4, fav: 0.7 }),                          // 70% a 1,39: abaixo de 1,50 — fora (é jogo para o mesmo jogo ou o 1º tempo)
+    G({ lg: 5, fav: 0.55, conditions: ['copa: risco de rodízio — confirmar a escalação'] }),   // escalação: fora
+    G({ lg: 6, fav: 0.55, conditions: ['dúvida: Fulano (C6) — confirmar se joga'] }),          // dúvida: entra (o preço é o da Pinnacle)
+    G({ lg: 7, fav: 0.56, hard: { reasons: ['base'] } }),                                       // jogo difícil: fora
+  ];
+  const away = G({ lg: 8 }); away.lines = [{ ...home1(0.58), id: '2', line: 'Fora vence' }, { ...home1(0.24), id: 'X', line: 'Empate' }];
+  const far = G({ lg: 9 }); far.lines = [home1(0.6, { pinnacle_odd: 1.55 })];   // alvo 1,70: 9,7% acima da Pinnacle — fora
+  const model = G({ lg: 10 }); model.lines = [home1(0.58, { p_model: 0.45 })];  // o modelo comprime o favorito: entra mesmo assim
+  games.push(away, far, model);
+  const plan = buildPlan(scanOf(games), { now: NOW });
+  assert.deepEqual(byId(plan.fav), [[1, '1'], [2, '1'], [6, '1'], [8, '2'], [10, '1']]);
+  const f1 = plan.fav.find(x => x.g.fx.id === 1);
+  assert.deepEqual([f1.line.odd_min, f1.line.fav, f1.value], [1.7, true, null]);
+  assert.equal(favMin(home1(0.5)), 2.04); assert.equal(favMin({ p_pinnacle: 0.7 }), 1.5, 'nunca abaixo de 1,50');
+  assert.equal(games[0].lines[0].odd_min, undefined, 'a linha da varredura fica como está');
+  // texto com o nome do favorito; simulação na odd da Pinnacle, entrada cheia
+  const txt = planText(plan);
+  assert.match(txt, /VITÓRIA DO FAVORITO \(5\)\n1\. .* — C1 vence · odd ≥ 1,70 \(Pinnacle 1,62\) · 20 €\n/);
+  assert.match(txt, / — F8 vence · odd ≥ 1,76 \(Pinnacle 1,67\) · 20 €/);
+  const sim = buildPlanSim(plan).bets;
+  assert.ok(sim.length === 5 && sim.every(b => b.cat === 'Plano: vitória do favorito' && b.odd_src === 'pinnacle' && b.stake_brl === 20));
+  assert.equal(sim.find(b => b.fixtureId === 1).odd, 1.62);
+  assert.equal(planFunnel(scanOf(games), plan).fav, 5);
+});
+
+test('🔗 mesmo jogo: vitória do favorito + 1,5; se ela paga menos de 1,65, a de 2,5 (e a de 3,5); abaixo de 45% ou com escalação a conferir, fora', () => {
+  id = 0;
+  const games = [
+    G({ lg: 1, combo: 0.58 }),                       // 1,5 a 1,81: entra a de 1,5
+    G({ lg: 2, combo: 0.72 }),                       // 1,5 a 1,46 (pouco): entra a de 2,5 (54% a 1,94)
+    G({ lg: 3, combo: 0.645 }),                      // 1,5 a 1,63 (abaixo de 1,65): a de 2,5 (46,5% a 2,26)
+    G({ lg: 4, combo: 0.47 }),                       // 1,5 a 47% (2,23): entra
+    G({ lg: 5, combo: 0.44 }),                       // 1,5 a 44%: fora (2,5 a 26% também)
+    G({ lg: 6, combo: 0.9 }),                        // favorito muito forte: 1,5 a 1,17 e 2,5 a 1,46 pagam pouco; entra a de 3,5 (54% a 1,94)
+    G({ lg: 7, combo: 0.6, conditions: ['copa: risco de rodízio — confirmar a escalação'] }),   // copa: fora
+    G({ lg: 8, combo: 0.6, conditions: ['dúvida: Beltrano (C8) — confirmar se joga'] }),        // dúvida: entra
+  ];
+  const plan = buildPlan(scanOf(games), { now: NOW });
+  assert.deepEqual(byId(plan.sameGame), [[1, 'cb:1+gO1.5'], [2, 'cb:1+gO2.5'], [3, 'cb:1+gO2.5'], [4, 'cb:1+gO1.5'], [6, 'cb:1+gO3.5'], [8, 'cb:1+gO1.5']]);
+  assert.ok(plan.sameGame.every(x => x.combo.p_blend >= COMBO_P && x.combo.odd_min >= COMBO_ODDS[0] && x.combo.odd_min <= COMBO_ODDS[1]));
+  // trocou a linha de gols na tela: as chaves guardam a escolhida
+  const i = plan.sameGame.findIndex(x => x.g.fx.id === 1);
+  plan.sameGame[i] = { g: plan.sameGame[i].g, combo: plan.sameGame[i].g.fav_combos[1] };
+  assert.equal(planFromKeys(scanOf(games), planKeys(plan)).sameGame[i].combo.id, 'cb:1+gO2.5');
+  // na simulação, na odd que a Pinnacle pagaria (a justa pelas chances dela com a margem dela)
+  const sim = buildPlanSim(plan).bets.filter(x => x.cat === 'Plano: mesmo jogo');
+  assert.equal(sim.length, 6); assert.ok(sim.every(b => b.stake_brl === 20), 'preço da Pinnacle: entrada cheia');
+  for (const b of sim) {
+    const c = plan.sameGame.find(x => x.g.fx.id === b.fixtureId).combo;
+    assert.equal(b.odd_src, 'pinnacle est.');
+    assert.ok(b.odd < c.odd_min && b.odd < c.fair_odd_blend, `${b.odd} abaixo da justa ${c.fair_odd_blend} e da mínima ${c.odd_min}: o pior cenário`);
+  }
+  assert.match(planText(plan), /^PLANO .*\n\nMESMO JOGO \(6\)\n1\. .* · odd ≥ [\d,]+ · 20 €\n/);
+});
+
+test('⏱️ favorito no 1º tempo no plano: até 5, os mais prováveis', () => {
+  id = 0;
+  const games = Array.from({ length: 7 }, (_, i) => G({ lg: 400 + i, half: 0.46 + i * 0.005 }));
+  const plan = buildPlan(scanOf(games), { now: NOW });
+  assert.equal(plan.halves.length, HALF_MAX);
+  assert.deepEqual(plan.halves.map(x => x.g.fx.id).sort((a, b) => a - b), [3, 4, 5, 6, 7]);
+  assert.ok(plan.halves.every(x => x.line.odd_min === halfMin(x.line)));
+  assert.equal(planFunnel(scanOf(games), plan).full, 2, 'os outros dois: o bloco cheio');
+});
+
+test('rodízio: até 20 entradas, o bloco com menos entradas pega o próximo jogo (no empate, mesmo jogo, gols, favorito, 1º tempo); um jogo uma vez só', () => {
+  id = 0;
+  const games = [
+    ...Array.from({ length: 6 }, (_, i) => G({ lg: 100 + i, combo: 0.5 + i * 0.01 })),
+    ...Array.from({ length: 6 }, (_, i) => G({ lg: 200 + i, agree: 0.72 })),
+    ...Array.from({ length: 6 }, (_, i) => G({ lg: 300 + i, fav: 0.5 + i * 0.01 })),
+    ...Array.from({ length: 7 }, (_, i) => G({ lg: 400 + i, half: 0.46 + i * 0.005 })),
+    G({ lg: 500, combo: 0.6, agree: 0.72, fav: 0.55, half: 0.5 }),   // candidato nos quatro: entra uma vez, no primeiro que o pega (o mesmo jogo)
+  ];
+  const scan = scanOf(games), plan = buildPlan(scan, { now: NOW });
+  const xs = planEntries(plan), ids = xs.map(x => x.g.fx.id);
+  assert.equal(xs.length, PLAN_MAX);
+  assert.equal(new Set(ids).size, ids.length, 'nenhum jogo repetido');
+  assert.deepEqual([plan.sameGame.length, plan.goals.length, plan.fav.length, plan.halves.length], [5, 5, 5, 5]);
+  assert.ok(plan.sameGame.some(x => x.g.fx.id === 26) && ids.filter(f => f === 26).length === 1);
+  assert.deepEqual(plan.sameGame.map(x => x.combo.p_blend).sort(), [0.52, 0.53, 0.54, 0.55, 0.6], 'os de maior chance');
+  // o funil: os que sobraram com candidato ficam no "plano cheio"; as contas fecham
+  const f = planFunnel(scan, plan);
+  assert.deepEqual([f.same, f.goals, f.fav, f.half, f.full], [5, 5, 5, 5, 6]);
+  // as chaves refazem o mesmo plano
+  const back = planFromKeys(scan, planKeys(plan));
+  assert.deepEqual(planEntries(back).map(x => `${x.block}:${x.g.fx.id}:${x.line.id}`), xs.map(x => `${x.block}:${x.g.fx.id}:${x.line.id}`));
+  // texto e simulação com os quatro blocos
+  const txt = planText(plan);
+  assert.deepEqual(txt.match(/^[A-ZÁÉÍÓÚÃÕÇº 0-9]+ \(\d+\)$/gm), ['MESMO JOGO (5)', 'TOTAL DE GOLS (5)', 'VITÓRIA DO FAVORITO (5)', 'FAVORITO NO 1º TEMPO (5)']);
+  assert.match(txt, /\n\nTOTAL: 20 entradas · 400 €$/);
+  const sim = buildPlanSim(plan);
+  assert.equal(sim.bets.length, 20);
+  assert.deepEqual([...new Set(sim.bets.map(b => b.cat))], ['Plano: mesmo jogo', 'Plano: total de gols (acordo com a Pinnacle)', 'Plano: vitória do favorito', 'Plano: favorito 1º tempo']);
+});
+
+test('no máximo 5 por liga; jogo com entrada e jogo que já começou ficam fora', () => {
+  id = 0;
+  const games = [...Array.from({ length: 7 }, () => G({ lg: 1, agree: 0.72 })), G({ lg: 2, fav: 0.55 }), G({ lg: 3, fav: 0.55, h: -1 })];
+  const exposed = { has: f => f === 8 };
+  const scan = scanOf(games), plan = buildPlan(scan, { now: NOW, exposed });
+  assert.equal(plan.goals.length, PER_LEAGUE);
+  assert.equal(plan.fav.length, 0);
+  assert.equal(plan.stats.exposed, 1);
+  const f = planFunnel(scan, plan, { exposed });
+  assert.deepEqual([f.goals, f.cap, f.exposed, f.started], [5, 2, 1, 1]);
+});
+
+test('funil do plano: cada jogo analisado cai numa etapa só e as contas fecham', () => {
+  id = 0;
+  const games = [
+    ...Array.from({ length: 7 }, (_, i) => G({ lg: 1, ours: [0.56 + i * 0.01, 0.5, 2.0] })),   // 5 em gols, 2 no teto da liga
+    G({ lg: 2, ours: [0.6, 0.5, 2.0], cond: true }),                                               // entrar se…: escalação
+    G({ lg: 3, ours: [0.6, 0.5, 2.0], hard: { reasons: ['base'] } }),                              // jogo difícil
+    G({ lg: 4, ours: [0.6, 0.5, 2.0], h: -1 }),                                                    // já começou
+    G({ lg: 5, ours: [0.46, 0.5, 2.0] }),                                                          // sem valor: nenhuma linha passou
+    G({ lg: 6, ours: [0.62, 0.5, 2.1] }),                                                          // já tem entrada
+  ];
+  const scan = scanOf(games, { fixtures: 40, with_odds: 14, outside: 9, analyzed: 13, skipped: [{ why: 'liga fora do orçamento de requisições' }] });
+  const exposed = { has: f => f === 12 };
+  const plan = buildPlan(scan, { now: NOW, exposed });
+  const f = planFunnel(scan, plan, { exposed });
+  assert.deepEqual({ goals: f.goals, cap: f.cap, lineup: f.lineup, hard: f.hard, started: f.started, none: f.none, exposed: f.exposed },
+    { goals: 5, cap: 2, lineup: 1, hard: 1, started: 1, none: 1, exposed: 1 });
+  assert.equal(f.quoted, 23); assert.equal(f.unkept, 1); assert.deepEqual(f.skipped, { 'limite de requisições': 1 });
+  const placed = ['same', 'goals', 'fav', 'half', 'started', 'small', 'exposed', 'cap', 'full', 'hard', 'lineup', 'none'].reduce((s, k) => s + f[k], 0);
+  assert.equal(placed + f.unkept, f.analyzed, 'analisados = não guardados + destinos');
+  // guardado pelas chaves: o mesmo funil (a hora do plano vai junto)
+  assert.deepEqual(planFunnel(scan, planFromKeys(scan, planKeys(plan)), { exposed }), f);
+});
+
+test('blocos e ligas marcados: só os blocos escolhidos; com "só as grandes", as ligas menores ficam fora', () => {
+  id = 0;
+  const games = [G({ lg: 39, combo: 0.55 }), G({ lg: 9002, agree: 0.72 }), G({ lg: 9003, fav: 0.55 }), G({ lg: 9004, half: 0.48 })];   // 39: Premier League
+  const scan = scanOf(games);
+  const only = buildPlan(scan, { now: NOW, markets: [GOALS_KEY, FAV_KEY] });
+  assert.deepEqual(planEntries(only).map(x => x.block), [GOALS_KEY, FAV_KEY]);
+  assert.deepEqual(planFromKeys(scan, planKeys(only)).markets, [GOALS_KEY, FAV_KEY]);
+  const big = buildPlan(scan, { now: NOW, big: true });
+  assert.deepEqual(planEntries(big).map(x => x.g.fx.id), [1]);
+  assert.equal(big.stats.small, 3);
+  assert.equal(planFromKeys(scan, planKeys(big)).big, true);
+  assert.deepEqual(planEntries(buildPlan(scan, { now: NOW })).map(x => x.block), BLOCKS, 'todos marcados: um de cada');
+});
+
+test('chaves do plano: a guarda de antes do foco (v 2) e a varredura que mudou montam de novo', () => {
+  id = 0;
+  const games = [G({ lg: 1, agree: 0.72 }), G({ lg: 2, fav: 0.55 })];
+  const scan = scanOf(games), plan = buildPlan(scan, { now: NOW });
+  assert.equal(planKeys(plan).v, 3);
+  assert.equal(planFromKeys(scan, { scan_at: plan.scan_at, singles: [], sameGame: [], multis: [] }), null, 'guarda de antes do foco');
+  assert.equal(planFromKeys(scanOf([games[0]]), planKeys(plan)), null, 'o jogo do favorito saiu da varredura');
+});
+
+test('planChance: a maior chance entre os candidatos do jogo (a varredura do plano guarda por ela); sem candidato, 0', () => {
+  id = 0;
+  assert.equal(planChance(G({ combo: 0.55 })), 0.55);
+  assert.equal(planChance(G({ fav: 0.55 })), 0.55);
+  assert.equal(planChance(G({ ours: [0.62, 0.55, 1.95] })), 0.62);
+  assert.equal(planChance(G({ ours: [0.62, 0.55, 1.95], cond: true })), 0.62, 'antes do contexto, o "entrar se…" conta');
+  assert.equal(planChance(G({ fav: 0.45 })), 0);
+  assert.equal(planChance(G({})), 0);
+  assert.equal(planChance(G({ combo: 0.55, fav: 0.6 })), 0.6);
+  assert.equal(planChance(G({ combo: 0.55, fav: 0.6 }), { markets: [COMBO_KEY] }), 0.55);
+});
+
+test('varredura do plano na demo: guarda só jogos com candidato; o plano sai nos blocos e sem jogo repetido', async () => {
+  const sc = await scanDay({ ...demo, stats: () => ({ api: 0, cache: 0 }) }, { date: '2026-10-01', top: 3 * PLAN_MAX, half: false, markets: [PLAN_SCAN] });
+  assert.deepEqual(sc.markets, [PLAN_SCAN]);
+  assert.ok(sc.games.length && sc.games.every(g => planChance(g) > 0), 'só jogos com candidato');
   const plan = buildPlan(sc, { now: 0 });
-  const ids = [...plan.singles.map(x => x.g.fx.id), ...plan.sameGame.map(x => x.g.fx.id), ...plan.multis.flatMap(t => t.legs.map(l => l.fixtureId))];
+  const xs = planEntries(plan), ids = xs.map(x => x.g.fx.id);
   assert.equal(new Set(ids).size, ids.length);
-  assert.ok(plan.singles.length <= SINGLES[1] && plan.sameGame.length <= SAME_GAME && plan.multis.length <= 2);
-  assert.ok(ids.length > 0, 'a demo rende alguma entrada');
+  assert.ok(xs.length > 0 && xs.length <= PLAN_MAX, 'a demo rende alguma entrada');
+  assert.ok(xs.every(x => BLOCKS.includes(x.block)));
 });
 
 test('janela de horas a partir de agora: exata no plano (expand: false), crescente na varredura (padrão)', async () => {
@@ -102,294 +298,24 @@ test('janela de horas a partir de agora: exata no plano (expand: false), crescen
 });
 
 test('simulação do plano: uma por montagem, com o nome da janela', () => {
-  const plan = { date: '2026-10-08', scan_at: new Date(NOW).toISOString(), singles: [], sameGame: [], multis: [] };
+  const plan = { date: '2026-10-08', scan_at: new Date(NOW).toISOString(), sameGame: [], goals: [], fav: [], halves: [] };
   const sim = buildPlanSim(plan, { id: 'plano-123', win: 'h4', label: '08/10, 13:12–17:12 (próximas 4 h)' });
   assert.equal(sim.id, 'plano-123'); assert.equal(sim.win, 'h4'); assert.match(sim.label, /próximas 4 h/);
   assert.equal(buildPlanSim(plan).id, 'plano-2026-10-08', 'sem id: um por data');
 });
 
-test('simples em duas frentes: 🎯 nossa leitura e 🤝 acordo com a Pinnacle, alternando; um jogo uma vez só', async () => {
-  const { LENS, needOf } = await import('../src/plan.js');
-  id = 0;
-  // linha consistente (aba de mercado): âncora/sólida, contexto, odd da Pinnacle na própria linha
-  const agree = (extra = {}) => ({ id: 'cornersO8.5', market: 'Total de escanteios', line: 'Mais de 8,5', tier: 'âncora', consistency_score: 0.8, p_model: 0.7, p_blend: 0.69,
-    p_pinnacle: 0.68, pinnacle_odd: 1.43, odd_min: 1.5, odd_min_vs_pinnacle_pct: 4.9, politica_e: 'cheia', fragile: false, entry_brl: 200,
-    context: { verdict: 'a favor', signals: [] }, ...extra });
-  const withAgree = (opts, extra) => { const g = G(opts); g.lines = [agree(extra)]; return g; };
-  const games = [
-    G({ lg: 1, single: [0.58, 0.48, 2.05] }), G({ lg: 2, single: [0.57, 0.48, 2.05] }),
-    withAgree({ lg: 3 }), withAgree({ lg: 4 }, { context: { verdict: 'neutro', signals: [] }, tier: 'sólida' }),
-    withAgree({ lg: 5 }, { p_model: 0.6 }),                          // o modelo 8 pp abaixo da Pinnacle: não é acordo
-    withAgree({ lg: 6 }, { derived: true, pinnacle_odd: null }),     // a Pinnacle não cota a linha: fora
-    withAgree({ lg: 7, single: [0.6, 0.48, 2.1] }),                  // as duas frentes no mesmo jogo: entra uma vez
-  ];
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
-  const ids = plan.singles.map(x => x.g.fx.id);
-  assert.equal(new Set(ids).size, ids.length, 'um jogo uma vez só');
-  assert.deepEqual(plan.singles.filter(x => x.lens === 'agree').map(x => x.g.fx.id).sort(), [3, 4]);
-  assert.deepEqual(plan.singles.filter(x => x.lens === 'ours').map(x => x.g.fx.id).sort(), [1, 2, 7]);
-  assert.ok(!ids.includes(5) && !ids.includes(6));
-  const a = plan.singles.find(x => x.g.fx.id === 3);
-  assert.equal(a.value, needOf(a.line)); assert.equal(a.value, Math.round((1.5 / 1.43 - 1) * 1000) / 1000);
-  // chaves com a frente, texto com a frente e a simulação separada por frente
-  const again = planFromKeys({ games }, planKeys(plan));
-  assert.deepEqual(again.singles.map(x => `${x.g.fx.id}:${x.lens}`), plan.singles.map(x => `${x.g.fx.id}:${x.lens}`));
-  assert.match(planText(plan), new RegExp(LENS.agree));
-  const cats = new Set(buildPlanSim(plan).bets.map(b => b.cat));
-  assert.ok(cats.has('Plano: simples (nossa leitura)') && cats.has('Plano: simples (acordo com a Pinnacle)'));
-});
-
-test('múltipla editável no plano: perna asiática no bilhete (sem a odd da Pinnacle) e de volta pelas chaves', async () => {
-  const { multiOf } = await import('../src/plan.js');
-  const { multiGames } = await import('../src/multiple.js');
-  id = 0;
-  const o25 = p => ({ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', p_blend: p, p_pinnacle: p, pinnacle_odd: +(1 / p / 1.025).toFixed(2), context: { verdict: 'neutro', signals: [] } });
-  const games = [0, 1, 2].map(i => { const g = G({ lg: 10 + i, over: 0.8 }); g.lines.push(o25(0.55)); return g; });
-  const ms = multiGames(games, { now: NOW });
-  const legs = ms.map(m => m.best);
-  const asian = ms[0].options.find(o => o.lineId === 'gO2');
-  const t = multiOf([asian, ...legs.slice(1)], 44000);
-  assert.equal(t.odd, null, 'a Pinnacle não cota a perna asiática aqui: sem odd total dela');
-  assert.ok(t.asian && t.min > 0 && t.p_all <= 0.8 ** 3 + 1e-9);
-  const plan = { scan_at: 'x', date: '2026-10-09', target: 6, singles: [], sameGame: [], multis: [t] };
-  const back = planFromKeys({ games }, planKeys(plan));
-  assert.equal(back.multis[0].legs[0].lineId, 'gO2');
-  assert.equal(back.multis[0].min, t.min);
-  const sim = buildPlanSim(plan);
-  // perna asiática: a odd que a Pinnacle pagaria (a justa pelas chances dela, com a margem dela no jogo), nunca a mínima do app
-  assert.equal(sim.bets[0].odd_src, 'pinnacle est.');
-  assert.ok(Math.abs(sim.bets[0].odd - t.legs[0].pin_est * t.legs[1].pinnacle_odd * t.legs[2].pinnacle_odd) < 0.01);
-  assert.ok(t.legs[0].pin_est < t.legs[0].min, 'abaixo da mínima do app: o pior cenário');
-});
-
-test('🤝 acordo com a Pinnacle: o jogo que depende da escalação fica fora, como na 🎯', () => {
-  id = 0;
-  const agree = { id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', tier: 'âncora', consistency_score: 0.8, p_model: 0.72, p_blend: 0.71, p_pinnacle: 0.7,
-    pinnacle_odd: 1.46, odd_min: 1.52, odd_min_vs_pinnacle_pct: 4.1, politica_e: 'cheia', context: { verdict: 'a favor', signals: [] } };
-  const games = [G({ lg: 1 }), G({ lg: 2 })];
-  games.forEach(g => { g.lines = [agree]; });
-  games[1].conditions = ['copa: risco de rodízio — confirmar a escalação'];
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
-  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]), [[1, 'agree']]);
-  // dúvida de desfalque não barra o 🤝: a odd da Pinnacle já embute a notícia
-  games[1].conditions = ['dúvida: Fulano (F2) — confirmar se joga'];
-  const doubt = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
-  assert.deepEqual(doubt.singles.map(x => [x.g.fx.id, x.lens]), [[1, 'agree'], [2, 'agree']]);
-  // ...nem o mesmo jogo; copa junto com a dúvida continua barrando
-  const cb = G({ lg: 3, combo: 0.6 });
-  cb.conditions = ['dúvida: Beltrano (C3) — confirmar se joga'];
-  assert.equal(buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games: [cb] }, { now: NOW }).sameGame.length, 1);
-  cb.conditions.push('copa: risco de rodízio — confirmar a escalação');
-  assert.equal(buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games: [cb] }, { now: NOW }).sameGame.length, 0);
-});
-
-test('funil do plano: cada jogo analisado cai numa etapa só e as contas fecham', async () => {
-  const { planFunnel } = await import('../src/plan.js');
-  id = 0;
-  const games = [
-    ...Array.from({ length: 7 }, (_, i) => G({ lg: 1, single: [0.56 + i * 0.01, 0.48, 2.05] })),   // 5 simples, 2 no teto da liga
-    G({ lg: 2, single: [0.6, 0.5, 2.0], cond: true }),                                               // entrar se…: escalação
-    G({ lg: 3, single: [0.6, 0.5, 2.0], hard: { reasons: ['base'] } }),                              // jogo difícil
-    G({ lg: 4, single: [0.6, 0.5, 2.0], h: -1 }),                                                    // já começou
-    G({ lg: 5, single: [0.46, 0.5, 2.0] }),                                                          // sem valor: nenhuma linha passou
-    G({ lg: 6, single: [0.62, 0.5, 2.1] }),                                                          // já tem entrada
-  ];
-  const scan = { generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games, fixtures: 40, with_odds: 14, outside: 9, analyzed: 13,
-    skipped: [{ why: 'liga fora do orçamento de requisições' }] };
-  const exposed = { has: f => f === 12 };
-  const plan = buildPlan(scan, { now: NOW, exposed });
-  const f = planFunnel(scan, plan, { exposed });
-  assert.deepEqual({ singles: f.singles, cap: f.cap, lineup: f.lineup, hard: f.hard, started: f.started, none: f.none, exposed: f.exposed },
-    { singles: 5, cap: 2, lineup: 1, hard: 1, started: 1, none: 1, exposed: 1 });
-  assert.equal(f.quoted, 23); assert.equal(f.unkept, 1); assert.deepEqual(f.skipped, { 'limite de requisições': 1 });
-  const placed = ['singles', 'same', 'multi', 'started', 'small', 'exposed', 'cap', 'full', 'hard', 'lineup', 'none'].reduce((s, k) => s + f[k], 0);
-  assert.equal(placed + f.unkept, f.analyzed, 'analisados = não guardados + destinos');
-  // guardado pelas chaves: o mesmo funil (a hora do plano vai junto)
-  assert.deepEqual(planFunnel(scan, planFromKeys(scan, planKeys(plan)), { exposed }), f);
-});
-
-test('mesmo jogo: vitória do favorito + 1,5; se ela paga menos de 1,65, a de 2,5 (e a de 3,5); abaixo de 45% ou com escalação a conferir, fora', async () => {
-  const { COMBO_ODDS, COMBO_P } = await import('../src/plan.js');
-  assert.equal(COMBO_P, 0.45); assert.deepEqual(COMBO_ODDS, [1.65, 2.7]);
-  id = 0;
-  const games = [
-    G({ lg: 1, combo: 0.58 }),                       // 1,5 a 1,81: entra a de 1,5
-    G({ lg: 2, combo: 0.72 }),                       // 1,5 a 1,46 (pouco): entra a de 2,5 (54% a 1,94)
-    G({ lg: 3, combo: 0.645 }),                      // 1,5 a 1,63 (abaixo de 1,65; antes entrava): a de 2,5 (46,5% a 2,26; antes, abaixo de 50%)
-    G({ lg: 4, combo: 0.47 }),                       // 1,5 a 47% (2,23): entra (antes, abaixo de 50%)
-    G({ lg: 5, combo: 0.44 }),                       // 1,5 a 44%: fora (2,5 a 26% também)
-    G({ lg: 6, combo: 0.9 }),                        // favorito muito forte: 1,5 a 1,17 e 2,5 a 1,46 pagam pouco; entra a de 3,5 (54% a 1,94)
-    G({ lg: 7, combo: 0.6 }),                        // com condição (copa): fora
-  ];
-  games[6].conditions = ['copa: risco de rodízio — confirmar a escalação'];
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
-  assert.deepEqual(plan.sameGame.map(x => [x.g.fx.id, x.combo.id]).sort(), [[1, 'cb:1+gO1.5'], [2, 'cb:1+gO2.5'], [3, 'cb:1+gO2.5'], [4, 'cb:1+gO1.5'], [6, 'cb:1+gO3.5']]);
-  assert.ok(plan.sameGame.every(x => x.combo.p_blend >= COMBO_P && x.combo.odd_min >= COMBO_ODDS[0] && x.combo.odd_min <= COMBO_ODDS[1]));
-  // trocou a linha de gols na tela: as chaves guardam a escolhida
-  const i = plan.sameGame.findIndex(x => x.g.fx.id === 1);
-  plan.sameGame[i] = { g: plan.sameGame[i].g, combo: plan.sameGame[i].g.fav_combos[1] };
-  assert.equal(planFromKeys({ games }, planKeys(plan)).sameGame[i].combo.id, 'cb:1+gO2.5');
-  // na simulação, na odd que a Pinnacle pagaria (a justa pelas chances dela com a margem dela)
-  const sim = buildPlanSim(plan).bets.filter(x => x.cat === 'Plano: mesmo jogo');
-  assert.equal(sim.length, 5); assert.ok(sim.every(b => b.stake_brl === 20), 'preço da Pinnacle: entrada cheia');
-  for (const b of sim) {
-    const c = plan.sameGame.find(x => x.g.fx.id === b.fixtureId).combo;
-    assert.equal(b.odd_src, 'pinnacle est.');
-    assert.ok(b.odd < c.odd_min && b.odd < c.fair_odd_blend, `${b.odd} abaixo da justa ${c.fair_odd_blend} e da mínima ${c.odd_min}: o pior cenário`);
-  }
-});
-
-
-test('mercados e ligas marcados: só handicap, escanteios e chutes; chutes como 3ª frente só em liga grande; ligas menores fora', async () => {
-  const { PLAN_DEFAULT, LENS } = await import('../src/plan.js');
-  id = 0;
-  const big = { id: 39, name: 'Premier League' };
-  const ctx = { verdict: 'a favor', signals: [] };
-  const line = (lid, market, extra = {}) => ({ id: lid, market, line: lid, tier: 'âncora', consistency_score: 0.8, p_model: 0.72, p_blend: 0.71, p_pinnacle: 0.7,
-    pinnacle_odd: 1.46, odd_min: 1.52, odd_min_vs_pinnacle_pct: 4.1, politica_e: 'cheia', context: ctx, entry_brl: 150, ...extra });
-  const shots = (extra = {}) => line('shotsO24.5', 'Total de chutes', { model_only: true, pinnacle_odd: null, p_pinnacle: null, odd_min_vs_pinnacle_pct: null,
-    p_model_range: [0.64, 0.78], hit_rate_last10: 0.75, history: { home: { wins: 7, n: 10 }, away: { wins: 6.4, n: 9.6 } }, ...extra });
-  const mk = (lg, lines, extra = {}) => { const g = G({ lg }); g.fx.league = lg === 39 ? big : { id: lg, name: `Liga ${lg}` }; g.lines = lines; return Object.assign(g, extra); };
-  const games = [
-    mk(39, [line('gO2.5', 'Total de gols')]),                    // gols: marcado no padrão desde 13/10 (🤝)
-    mk(39, [line('cornersO9.5', 'Total de escanteios')]),         // escanteios: entra (🤝)
-    mk(39, [shots()]),                                            // chutes em liga grande: entra (📊)
-    mk(7, [shots()]),                                             // chutes em liga menor: fora
-    mk(8, [line('cornersO9.5', 'Total de escanteios')]),          // liga menor: fora com "só as grandes"
-  ];
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: PLAN_DEFAULT, big: true });
-  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]).sort(), [[1, 'agree'], [2, 'agree'], [3, 'shots']]);
-  assert.equal(plan.stats.small, 2, 'dois jogos de ligas menores');
-  // sem gols marcado, o jogo 1 fica fora
-  const noGoals = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: PLAN_DEFAULT.filter(k => k !== 'Total de gols'), big: true });
-  assert.ok(!noGoals.singles.some(x => x.g.fx.id === 1));
-  assert.match(LENS.shots, /chutes/);
-  // sem "só as grandes": a liga menor entra nos escanteios, mas chutes continuam só em liga grande
-  const all = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: PLAN_DEFAULT, big: false });
-  assert.ok(all.singles.some(x => x.g.fx.id === 5) && !all.singles.some(x => x.g.fx.id === 4));
-  // só escanteios: sem chutes, sem mesmo jogo, sem múltiplas
-  const only = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW, markets: ['Total de escanteios'], big: false });
-  assert.ok(only.singles.every(x => x.line.market === 'Total de escanteios') && !only.sameGame.length && !only.multis.length);
-  // guardado e refeito com a frente 📊; na simulação, chutes na justa do modelo com 5% (sem a Pinnacle)
-  const back = planFromKeys({ games }, planKeys(plan));
-  assert.deepEqual(back.singles.map(x => x.lens).sort(), ['agree', 'agree', 'shots']);
-  assert.deepEqual(back.markets, PLAN_DEFAULT); assert.equal(back.big, true);
-  const b = buildPlanSim(plan).bets.find(x => x.cat === 'Plano: simples (chutes)');
-  assert.equal(b.odd_src, 'modelo est.'); assert.equal(b.odd, Math.round(100 / (0.71 * 1.05)) / 100);
-});
-
-test('múltiplas do plano: odd justa 6+, as de 1,5 mais prováveis e a de 2,5 onde precisa; sem chegar a 6, nada', async () => {
-  const { ticketTo } = await import('../src/plan.js');
-  const { multiGames } = await import('../src/multiple.js');
-  id = 0;
-  const o25 = p => ({ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', p_blend: p, p_pinnacle: p, pinnacle_odd: +(1 / p / 1.025).toFixed(2), context: { verdict: 'neutro', signals: [] } });
-  const games = Array.from({ length: 8 }, (_, i) => { const g = G({ lg: 40 + i, over: 0.8 }); g.lines.push(o25(0.6 + (i % 4) * 0.02)); return g; });
-  const ms = multiGames(games, { now: NOW });
-  const t = ticketTo(ms, { target: 6 });
-  const fair = t.reduce((a, l) => a * l.fair, 1);
-  assert.ok(fair >= 6 && t.length <= 6, `odd ${fair} em ${t.length} pernas`);
-  assert.ok(t.some(l => l.lineId === 'gO2.5') && t.some(l => l.lineId === 'gO1.5'), 'mais de 1,5 e, onde precisou, mais de 2,5');
-  // só 3 jogos de 1,5: não chega a 6
-  assert.equal(ticketTo(multiGames([G({ lg: 50, over: 0.8 }), G({ lg: 51, over: 0.8 }), G({ lg: 52, over: 0.8 })], { now: NOW }), { target: 6 }), null);
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-09', games }, { now: NOW });
-  assert.ok(plan.multis.length >= 1 && plan.multis.every(x => x.fair >= 6), plan.multis.map(x => x.fair).join());
-});
-
-test('📊 chutes (revisão de 13/10): sólida ou âncora com os dois times batendo a linha em 60%+; a dúvida de desfalque não barra', () => {
-  id = 0;
-  const big = { id: 39, name: 'Premier League' };
-  const hist = (h, a) => ({ home: { wins: h * 10, n: 10 }, away: { wins: a * 10, n: 10 } });
-  // sólida a 66% (mínima do modelo 1,08 ÷ 0,66 = 1,64): antes ficava fora por não ser âncora
-  const shot = (extra = {}) => ({ id: 'shotsO23.5', market: 'Total de chutes', line: 'Mais de 23,5', model_only: true, tier: 'sólida', consistency_score: 0.66,
-    p_model: 0.66, p_blend: 0.66, pinnacle_odd: null, p_pinnacle: null, odd_min: 1.64, politica_e: 'cheia', entry_brl: 120,
-    context: { verdict: 'neutro', signals: [] }, history: hist(0.7, 0.6), ...extra });
-  const mk = (line, conditions = []) => { const g = G({ lg: 39 }); g.fx.league = big; g.lines = [line]; g.conditions = conditions; return g; };
-  const games = [
-    mk(shot()),                                                                  // entra
-    mk(shot({ history: hist(0.8, 0.5) })),                                       // um time abaixo de 60%: fora
-    mk(shot({ tier: 'especulativa' })),                                          // especulativa: fora
-    mk(shot({ odd_min: 1.38, p_blend: 0.78, tier: 'âncora', history: hist(0.9, 0.8) })),   // mínima abaixo de 1,50: fora (piso do núcleo)
-    mk(shot(), ['dúvida: Fulano (F5) — confirmar se joga']),                     // dúvida: entra (chute é volume do time)
-    mk(shot(), ['copa: risco de rodízio — confirmar a escalação']),             // copa: fora
-  ];
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games }, { now: NOW, markets: ['Chutes'], big: true });
-  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]).sort(), [[1, 'shots'], [5, 'shots']]);
-});
-
-test('🤝 acordo (revisão de 13/10): alvo = justa + 2% (piso 1,50) até 8% acima da Pinnacle, no lugar da mínima do app; as de mais acerto primeiro no rodízio', async () => {
-  const { AGREE_EDGE, REACH, agreeMin, needOf } = await import('../src/plan.js');
-  id = 0;
-  // handicap +1 a 64% (Pinnacle 1,52, a dela 63%): a mínima do app com a odd da Pinnacle "velha" (justa × 1,05 = 1,64) ficava 7,9%
-  // acima da Pinnacle e a linha não entrava; o alvo do 🤝 é a justa + 2% = 1,59 (4,6% acima)
-  const ah = (extra = {}) => ({ id: 'ahA1', market: 'Handicap asiático', line: 'F +1', tier: 'sólida', consistency_score: 0.66, p_model: 0.66, p_blend: 0.64,
-    p_pinnacle: 0.63, pinnacle_odd: 1.52, odd_min: 1.64, odd_min_vs_pinnacle_pct: 7.9, fragile: true, politica_e: 'cheia', entry_brl: 0,
-    context: { verdict: 'neutro', signals: [] }, ...extra });
-  const mk = (line, single = null) => { const g = G({ lg: 60 + id, single }); g.lines = [line]; return g; };
-  const games = [
-    mk(ah()),
-    mk(ah({ p_blend: 0.6, p_pinnacle: 0.6, pinnacle_odd: 1.5 })),                // alvo 1,70: 13% acima da Pinnacle — fora
-    mk(ah({ context: { verdict: 'contra', signals: [] } })),                       // contexto contra: fora
-    mk(ah({ tier: 'especulativa' })),                                              // sem consistência: fora
-    mk(ah({ p_model: 0.58 })),                                                     // o modelo 5 pp abaixo da Pinnacle: fora
-    mk(ah({ id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5' }), [0.56, 0.48, 2.05]),   // 🤝 e 🎯 no mesmo jogo: entra uma vez (na vez da 🎯)
-  ];
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games }, { now: NOW });
-  assert.deepEqual(plan.singles.map(x => [x.g.fx.id, x.lens]).sort(), [[1, 'agree'], [6, 'ours']]);
-  const a = plan.singles.find(x => x.g.fx.id === 1);
-  assert.equal(a.line.odd_min, agreeMin(ah()));
-  assert.equal(agreeMin(ah()), Math.round(100 * AGREE_EDGE / 0.64) / 100);
-  assert.ok(needOf(a.line) <= REACH && Math.abs(a.value - needOf(a.line)) < 1e-9);
-  assert.ok(a.line.entry_brl > 0, 'a entrada sai do alvo (¼ Kelly)');
-  assert.equal(games[0].lines[0].odd_min, 1.64, 'a linha da varredura fica como está');
-  // piso do núcleo: linha de 70% tem alvo 1,50, não a justa + 2% (1,46)
-  assert.equal(agreeMin(ah({ p_blend: 0.7 })), 1.5);
-  // guardado e refeito com o alvo; no texto e na simulação, o alvo e a odd da Pinnacle
-  const back = planFromKeys({ games }, planKeys(plan));
-  assert.deepEqual(back.singles.map(x => x.line.odd_min), plan.singles.map(x => x.line.odd_min));
-  assert.match(planText(plan), /odd ≥ 1,59 \(Pinnacle 1,52\)/);
-  const sim = buildPlanSim(plan).bets.find(b => b.fixtureId === 1);
-  assert.equal(sim.odd, 1.52); assert.equal(sim.odd_src, 'pinnacle');
-  // rodízio com as três frentes cheias (4 candidatas cada, 10 vagas): o desempate é 🤝, 📊, 🎯 — a 🎯 fica com 3, não 4
-  id = 0;
-  const shot = () => ({ id: 'shotsO23.5', market: 'Total de chutes', line: 'Mais de 23,5', model_only: true, tier: 'sólida', consistency_score: 0.66,
-    p_model: 0.66, p_blend: 0.66, pinnacle_odd: null, p_pinnacle: null, odd_min: 1.64, politica_e: 'cheia', context: { verdict: 'neutro', signals: [] },
-    history: { home: { wins: 7, n: 10 }, away: { wins: 6, n: 10 } } });
-  const bigGame = () => { const g = G({ lg: 39 }); g.fx.league = { id: 39, name: 'Premier League' }; g.lines = [shot()]; return g; };
-  const mix = [...Array.from({ length: 4 }, () => mk(ah())), ...Array.from({ length: 4 }, bigGame),
-    ...Array.from({ length: 4 }, (_, i) => G({ lg: 90 + i, single: [0.6, 0.5, 2.0] }))];
-  const p2 = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games: mix }, { now: NOW });
-  const count = k => p2.singles.filter(x => x.lens === k).length;
-  assert.deepEqual([p2.singles.length, count('agree'), count('shots'), count('ours')], [10, 4, 3, 3]);
-});
-
-test('faixa da 🎯 por mercado (13/10): 1X2 e handicap a partir de 1,70, total de gols a partir de 1,30, teto 2,70', () => {
-  id = 0;
-  assert.deepEqual([alvoOf('1X2'), alvoOf('Handicap asiático'), alvoOf('Total de gols')], [[1.7, 2.7], [1.7, 2.7], [1.3, 2.7]]);
-  const one = (market, lid, odd, p = 0.66) => { const g = G({ lg: 70 + id }); g.scenario = [{ id: lid, market, line: lid, bet: true, conditional: false,
-    p_nossa: p, p_pinnacle: 1 / odd / 1.03, pinnacle_odd: odd, odd_min: 1.05 / p, entry_brl: 100 }]; return g; };
-  const games = [
-    one('Handicap asiático', 'ahA0.5', 1.74),          // 1,74: entra (antes só de 1,80)
-    one('1X2', '1', 1.72),                               // 1X2 a 1,72: entra
-    one('Handicap asiático', 'ahA1', 1.66),             // abaixo de 1,70: fora
-    one('Total de gols', 'gO1.5', 1.36, 0.8),           // gols a 1,36: entra (piso 1,30)
-    one('Total de gols', 'gO1.5', 1.25, 0.86),          // abaixo de 1,30: fora
-  ];
-  const plan = buildPlan({ generated_at: new Date(NOW).toISOString(), date: '2026-10-14', games }, { now: NOW });
-  assert.deepEqual(plan.singles.map(x => x.g.fx.id).sort(), [1, 2, 4]);
-});
-
-test('simulação → linha do ➕: a do plano (🤝 com o alvo, 1º tempo com a mínima dele, combo e nossa leitura como estão); sem a análise, a da simulação', async () => {
-  const { agreeMin, halfMin, lineOfBet, simLine } = await import('../src/plan.js');
-  const ag = { id: 'ahH0.5', market: 'Handicap asiático', line: 'C +0,5', tier: 'âncora', p_model: 0.66, p_blend: 0.65, p_pinnacle: 0.65, pinnacle_odd: 1.5, odd_min: 1.58 };
-  const sc = { id: '1', market: '1X2', line: 'C vence', scenario: true, p_nossa: 0.55, p_pinnacle: 0.48, pinnacle_odd: 2.05, odd_min: 1.91, contra: true };
+test('simulação → linha do ➕: a do plano (🤝 e favorito com o alvo, 1º tempo com a mínima dele, combo e nossa leitura como estão); sem a análise, a da simulação', () => {
+  const ag = over15(0.64), fv = home1(0.6);
+  const sc = { id: 'gO2.5', market: 'Total de gols', line: 'Mais de 2,5', scenario: true, p_nossa: 0.62, p_pinnacle: 0.55, pinnacle_odd: 1.95, odd_min: 1.69, contra: true };
   const cb = { id: 'cb:1+gO1.5', market: 'Combo', line: 'C vence + Mais de 1,5', combo: true, fav: true, p_blend: 0.55, odd_min: 1.91 };
   const half = { id: '1T1', market: 'Resultado 1º tempo', line: 'C vence o 1º tempo', fav: true, p_blend: 0.47, p_pinnacle: 0.46, pinnacle_odd: 2.1, odd_min: 2.19 };
-  const g = { fx: { id: 7 }, lines: [ag], scenario: [sc], fav_combos: [cb], fav_half: half };
+  const g = { fx: { id: 7 }, lines: [ag, fv], scenario: [sc], fav_combos: [cb], fav_half: half };
   const b = (cat, lineId) => ({ cat, lineId });
-  const a = lineOfBet(g, b('Plano: simples (acordo com a Pinnacle)', 'ahH0.5'));
-  assert.equal(a.odd_min, agreeMin(ag), 'o alvo do 🤝, não a mínima do app');
+  assert.equal(lineOfBet(g, b('Plano: total de gols (acordo com a Pinnacle)', 'gO1.5')).odd_min, agreeMin(ag), 'o alvo do 🤝, não a mínima do app');
+  const f = lineOfBet(g, b('Plano: vitória do favorito', '1'));
+  assert.deepEqual([f.odd_min, f.fav], [favMin(fv), true]);
   assert.equal(lineOfBet(g, b('Plano: favorito 1º tempo', '1T1')).odd_min, halfMin(half));
-  assert.equal(lineOfBet(g, b('Plano: simples (nossa leitura)', '1')), sc);
+  assert.equal(lineOfBet(g, b('Plano: total de gols (nossa leitura)', 'gO2.5')), sc);
   assert.equal(lineOfBet(g, b('Plano: mesmo jogo', 'cb:1+gO1.5')), cb);
   assert.equal(lineOfBet(g, b('Gols', 'gO9.5')), null, 'a análise não tem a linha');
   const s = simLine({ lineId: 'cb:1+gO2.5', market: 'Combo', line: 'C vence + Mais de 2,5 gols', p: 0.5, p_pinnacle: 0.49, odd: 2.1, odd_src: 'pinnacle est.' });

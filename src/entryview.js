@@ -35,7 +35,7 @@ const belowFloor = line => !line.scenario && !line.multi && !line.fav && !line.f
 const offRule = (line, odd) => [line.blocked && 'jogo difícil de analisar (só over de gols com a odd da Pinnacle)',
   line.scenario && line.conditional && `entrar se… (${line.conditions.join('; ')}) — confirmou?`,
   line.scenario && line.status === 'sem aposta' && `sem aposta pela nossa análise (${line.why_not?.[0] || 'não passa na regra'})`,
-  line.tier === 'especulativa' && 'linha especulativa (pior cenário ou histórico dos times abaixo do piso)',
+  line.tier === 'especulativa' && !line.fav && 'linha especulativa (pior cenário ou histórico dos times abaixo do piso)',
   odd < line.odd_min && `odd abaixo da mínima ${num(line.odd_min)}`].filter(Boolean);
 
 // Uma linha digitada (sem a lista de pernas): vira id e mercado do app quando ele a reconhece; senão vai como texto.
@@ -131,6 +131,7 @@ export function initEntry({ getLine, getFixture, dayAll = null }) {
       + `${line.contra ? ' · <b>contra a Pinnacle</b>' : ''}${line.conditional ? ` — <span class="neg">entrar se: ${esc(line.conditions.join('; '))}</span>`
         : line.status === 'sem aposta' ? ` — <span class="neg">sem aposta: ${esc(line.why_not.join('; '))}</span>` : ''}.</span>`);
     else if (line.from_sim) out.push('<span class="muted"><b>Da simulação</b>: a análise deste jogo não está mais guardada neste aparelho — a chance é a da hora do plano; o app de apostas confere o resultado.</span>');
+    else if (line.fav) out.push(`<span class="muted"><b>Do plano</b>: ${line.combo ? 'a vitória do favorito + gols' : line.half ? 'o favorito no 1º tempo' : 'a vitória do favorito'} segue a regra do plano (o preço da Pinnacle), não o piso de 60%: entre se a casa pagar a odd mínima ${num(line.odd_min)}.</span>`);
     else if (line.tier === 'especulativa') out.push('<span class="neg">Linha especulativa: o pior cenário ou o histórico dos times fica abaixo do piso de 60%.</span>');
     else if (line.p_blend < HIT_IDEAL) out.push('<span class="muted">Acerto acima do piso (60%) e abaixo do ideal (70%).</span>');
     if (odd > 1 && line.p_blend != null) {

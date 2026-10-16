@@ -11,7 +11,6 @@
   <h1>📊 Análise de Jogos</h1>
   <nav class="tabs" id="tabs" aria-label="Seções">
     <button data-tab="plan" class="on">📋 Plano do dia</button>
-    <button data-tab="scan">🔎 Varredura</button>
     <button data-tab="game">⚽ Jogo</button>
   </nav>
   <span id="quota" class="muted"></span>
@@ -39,13 +38,15 @@
   <section class="card" id="planSec">
     <div class="sechead">
       <h2>📋 Plano do dia</h2>
-      <p class="muted">Poucas entradas da janela escolhida — simples, favorito no 1º tempo, mesmo jogo e múltiplas —, para apostar de uma vez.</p>
+      <p class="muted">Até 20 entradas da janela escolhida — mesmo jogo, total de gols, vitória do favorito e favorito no 1º tempo —, para apostar de uma vez.</p>
     </div>
     <div class="toolbar">
       <select id="planDate"></select>
       <button id="planRun" class="primary">Montar o plano</button>
       <button id="planCopy" class="ghost" hidden title="Copia a lista para apostar nas casas">📋 Copiar</button>
       <button id="planSpec" class="ghost" hidden title="Copia o plano com o contexto dos jogos e abre o especialista no claude.ai">🧠 Especialista</button>
+      <label for="planBudget" class="muted small">Limite de requisições</label>
+      <input id="planBudget" type="number" min="50" step="50" inputmode="numeric" title="O máximo de requisições à API que a análise da janela pode usar">
     </div>
     <div class="row markets" id="planMarkets"></div>
     <p id="planMsg" class="msg" hidden></p>
@@ -83,7 +84,7 @@
 <section class="card">
   <div class="sechead">
     <h2>⚽ Analisar um jogo</h2>
-    <p class="muted">Todas as linhas de um jogo, a sua linha e o contexto. Da varredura e do plano, "🔬 Análise completa" abre o jogo aqui.</p>
+    <p class="muted">Todas as linhas de um jogo, a sua linha e o contexto. Do plano e das simulações, "🔬 Análise completa" abre o jogo aqui.</p>
   </div>
   <label for="teamInput">Time</label>
   <div class="row">

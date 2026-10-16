@@ -4,6 +4,7 @@
 
 import { BEST, CENARIO, COMBOS, LIVE_1H, SHOTS, SHOTS_FILTER, bestLine, lineMarkets } from './scanner.js';
 import { isContra, stakeOf } from './stake.js';
+import { planEntries } from './plan.js';
 
 export const SPECIALIST_URL = 'https://claude.ai/artifact/T2QWDJ4U4zzFJSnQumKSBr';
 export const MARK = '#ESPECIALISTA-FUTEBOL v1';
@@ -143,30 +144,22 @@ export function briefMulti(scan, tickets = []) {
 
 // Plano do dia (plan.js): as entradas escolhidas e os jogos delas com o contexto, como na varredura.
 export function briefPlan(scan, plan) {
-  const ids = new Set([...plan.singles.map(x => x.g.fx.id), ...plan.sameGame.map(x => x.g.fx.id), ...(plan.halves || []).map(x => x.g.fx.id), ...plan.multis.flatMap(t => t.legs.map(l => l.fixtureId))]);
+  const ids = new Set(planEntries(plan).map(x => x.g.fx.id));
   const base = briefScan(scan, scan.games.filter(g => ids.has(g.fx.id)).sort((a, b) => a.fx.t - b.fx.t).map(g => ({ g, line: null })), { market: 'plano do dia' });
-  const jogo = g => `${g.fx.home.name} x ${g.fx.away.name}`, iso = t => new Date(t).toISOString();
-  return { ...base, filter: 'plano do dia (5 a 10 simples, até 3 favoritos no 1º tempo, até 10 no mesmo jogo, 2 múltiplas; entrada de 20 € a favor da Pinnacle e 10 € contra; para apostar na noite anterior)',
+  const iso = t => new Date(t).toISOString(), at = g => ({ jogo: `${g.fx.home.name} x ${g.fx.away.name}`, kickoff: iso(g.fx.t), competicao: g.fx.league.name });
+  return { ...base, filter: 'plano do dia (foco de 16/10: até 20 entradas, cada jogo uma vez — mesmo jogo, total de gols, vitória do favorito e favorito no 1º tempo; entrada de 20 € a favor da Pinnacle e 10 € contra)',
     plan: {
-      mercados: plan.markets || 'todos', ligas: plan.big ? 'só as grandes' : 'todas',
-      simples: plan.singles.map(({ g, line, value, lens }) => ({ jogo: jogo(g), kickoff: iso(g.fx.t), competicao: g.fx.league.name, linha: line.line, mercado: line.market,
-        frente: lens === 'agree' ? 'acordo com a Pinnacle (linha consistente; valor se a casa pagar o alvo: a justa + 2%, piso 1,50, até 8% acima da Pinnacle)'
-          : lens === 'shots' ? 'chutes (só o modelo: a Pinnacle não cota; sólida ou âncora com os dois times batendo a linha em 60%+; liga grande)' : 'nossa leitura (a nossa chance acima da Pinnacle)',
+      blocos: plan.markets || 'todos', ligas: plan.big ? 'só as grandes' : 'todas',
+      mesmo_jogo: plan.sameGame.map(({ g, combo }) => ({ ...at(g), combo: combo.line, p: combo.p_blend, p_pinnacle: combo.p_pinnacle, odd_minima: combo.odd_min, entrada_eur: stakeOf(combo) })),
+      total_de_gols: plan.goals.map(({ g, line, value, lens }) => ({ ...at(g), linha: line.line,
+        frente: lens === 'agree' ? 'acordo com a Pinnacle (linha consistente; valor se a casa pagar o alvo: a justa + 2%, piso 1,30, até 8% acima da Pinnacle)' : 'nossa leitura (a nossa chance acima da Pinnacle)',
         p_nossa: line.p_nossa ?? null, p_modelo: line.p_model ?? null, p_final: line.p_blend ?? null, p_pinnacle: line.p_pinnacle, odd_pinnacle: line.pinnacle_odd,
-        odd_minima: line.odd_min, entrada_eur: stakeOf(line), ...(isContra(line) ? { contra_pinnacle: true } : {}), ...(lens === 'agree' ? { casa_acima_da_pinnacle: value, nivel: line.tier, contexto: line.context?.verdict }
-          : lens === 'shots' ? { nivel: line.tier, acerto_ultimos_10: line.hit_rate_last10 ?? null, contexto: line.context?.verdict,
-            acerto_mandante_na_linha: line.history?.home?.n ? Math.round(100 * line.history.home.wins / line.history.home.n) / 100 : null,
-            acerto_visitante_na_linha: line.history?.away?.n ? Math.round(100 * line.history.away.wins / line.history.away.n) / 100 : null }
-          : { valor_conservador: value, de_onde_vem: line.why }),
-      })),
-      multiplas: plan.multis.map((t, i) => ({ bilhete: i + 1, pernas: t.n, p_acertar_todas: t.p_all, p_pinnacle_todas: t.p_pinnacle_all, odd_justa: t.fair,
-        odd_minima: t.min, odd_pinnacle: t.odd, entrada_eur: stakeOf(t), legs: t.legs.map(l => ({ jogo: `${l.home} x ${l.away}`, kickoff: iso(l.kickoff), linha: l.line, p: l.p,
-          ...(l.asian ? { asiatica: true, p_cheia: l.p_win } : {}), minima: l.min })) })),
-      mesmo_jogo: plan.sameGame.map(({ g, combo }) => ({ jogo: jogo(g), kickoff: iso(g.fx.t), competicao: g.fx.league.name, combo: combo.line, p: combo.p_blend,
-        p_pinnacle: combo.p_pinnacle, odd_minima: combo.odd_min, entrada_eur: stakeOf(combo) })),
-      favorito_1_tempo: (plan.halves || []).map(({ g, line }) => ({ jogo: jogo(g), kickoff: iso(g.fx.t), competicao: g.fx.league.name, linha: line.line,
-        p_favorito_vencer_o_jogo: line.p_fav_ft, p: line.p_blend, p_pinnacle: line.p_pinnacle, p_modelo_1t: line.p_model, odd_pinnacle: line.pinnacle_odd,
-        odd_minima: line.odd_min, acerto_ultimos_10: line.hit_rate_last10, entrada_eur: stakeOf(line) })),
+        odd_minima: line.odd_min, entrada_eur: stakeOf(line), ...(isContra(line) ? { contra_pinnacle: true } : {}),
+        ...(lens === 'agree' ? { casa_acima_da_pinnacle: value, nivel: line.tier, contexto: line.context?.verdict } : { valor_conservador: value, de_onde_vem: line.why }) })),
+      vitoria_do_favorito: plan.fav.map(({ g, line }) => ({ ...at(g), linha: `${line.id === '2' ? g.fx.away.name : g.fx.home.name} vence`, p_pinnacle: line.p_pinnacle,
+        p_modelo: line.p_model ?? null, odd_pinnacle: line.pinnacle_odd, odd_minima: line.odd_min, acerto_ultimos_10: line.hit_rate_last10 ?? null, entrada_eur: stakeOf(line) })),
+      favorito_1_tempo: plan.halves.map(({ g, line }) => ({ ...at(g), linha: line.line, p_favorito_vencer_o_jogo: line.p_fav_ft, p: line.p_blend, p_pinnacle: line.p_pinnacle,
+        p_modelo_1t: line.p_model, odd_pinnacle: line.pinnacle_odd, odd_minima: line.odd_min, acerto_ultimos_10: line.hit_rate_last10, entrada_eur: stakeOf(line) })),
     } };
 }
 

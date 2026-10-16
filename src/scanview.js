@@ -303,7 +303,7 @@ export function initScan({ api, openEntry, analyzeFixture, banca }) {
   }
 
   // ---- simulação (sim.js): tudo o que a varredura propôs, com a odd da Pinnacle, liquidado pelos resultados; guardada à
-  // parte (af:sim:<id>, índice af:simidx) — nunca vai para o app de apostas. O painel (simview.js) mostra as das
+  // parte (af:sim:v2:<id>, índice af:simidx2) — nunca vai para o app de apostas. O painel (simview.js) mostra as das
   // varreduras; as dos planos ficam no Plano do dia ----
   simUI = simPanel({ api, el: $('#simOut'), mine: id => !String(id).startsWith('plano-'), title: '🧪 Simulações das varreduras', onChange: () => render(),
     tools: { openEntry, analyzeFixture, banca },
